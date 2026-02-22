@@ -82,9 +82,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   conversions, redundant `.keys()`/`.items()` calls, nested `if` simplification,
   unused variables, overly broad exception catches, and more.
 
-## [1.1.0] - upstream
-
-Last release from [jampe/kp2bw](https://github.com/jampe/kp2bw).
+## `1.1` https://github.com/jampe/kp2bw/compare/f41b4e6...c9ef571 - upstream
 
 ### Added
 
@@ -98,7 +96,7 @@ Last release from [jampe/kp2bw](https://github.com/jampe/kp2bw).
 - Misspelled method name in `_add_bw_entry_to_entries_dict`.
 - Lowercase reference string resolution.
 
-## [1.0.0] - upstream
+## `1.0` https://github.com/jampe/kp2bw/commit/f41b4e6 - upstream
 
 ### Added
 
@@ -115,6 +113,4 @@ Last release from [jampe/kp2bw](https://github.com/jampe/kp2bw).
 - Cross-platform support (Windows, macOS, Linux).
 - Full UTF-8 support.
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/jampe/kp2bw/releases/tag/v1.1
-[1.0.0]: https://github.com/jampe/kp2bw/commits/master
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/c9ef571...HEAD
