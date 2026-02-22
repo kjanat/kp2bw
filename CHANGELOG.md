@@ -82,35 +82,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   conversions, redundant `.keys()`/`.items()` calls, nested `if` simplification,
   unused variables, overly broad exception catches, and more.
 
-## `1.1` https://github.com/jampe/kp2bw/compare/f41b4e6...c9ef571 - upstream
+## [Upstream]
 
-### Added
+jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47
 
-- Tag-based import filtering (`-import_tags`).
-- Organization and collection support (`-bworg`, `-bwcoll`).
-- Path-to-name prefixing (`-path2name`, `-path2nameskip`).
-- Case-insensitive reference string handling.
-
-### Fixed
-
-- Misspelled method name in `_add_bw_entry_to_entries_dict`.
-- Lowercase reference string resolution.
-
-## `1.0` https://github.com/jampe/kp2bw/commit/f41b4e6 - upstream
-
-### Added
-
-- Initial KeePass 2.x to Bitwarden migration via `bw` CLI.
-- Username/password REF field resolution.
-- Custom property import (as text/hidden fields, >10k as attachments).
-- Attachment import from KeePass.
-- Long notes uploaded as `notes.txt` attachment.
-- Idempotent import (skips existing entries).
-- Nested folder recreation.
-- TOTP/OTP field import.
-- KeePass key file support.
-- Verbose logging (`-v`).
-- Cross-platform support (Windows, macOS, Linux).
-- Full UTF-8 support.
-
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/c9ef571...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/jampe:kp2bw:c9ef571eabd345db94751f7dec845e49756e9d47...HEAD
+[Upstream]: https://github.com/kjanat/kp2bw/compare/jampe:kp2bw:f41b4e6a10a2c9fc55d144d048b4923c94eb43d6...kjanat:kp2bw:c9ef571eabd345db94751f7dec845e49756e9d47

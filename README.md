@@ -1,7 +1,6 @@
 # KP2BW - KeePass 2.x to Bitwarden Converter
 
-> Fork of [jampe/kp2bw](https://github.com/jampe/kp2bw), modernized with a
-> `src/` layout, `uv` packaging, and Python 3.14+ support.
+> Fork of [jampe/kp2bw], modernized.
 
 Migrates KeePass databases to Bitwarden via the `bw` CLI, with advantages over
 the built-in Bitwarden importer:
@@ -43,8 +42,7 @@ uvx --from git+https://github.com/kjanat/kp2bw kp2bw passwords.kdbx
 
 ## Prerequisites
 
-Install the [Bitwarden CLI](https://bitwarden.com/help/cli/) and log in once
-before using kp2bw:
+Install the [Bitwarden CLI] and log in once before using `kp2bw`:
 
 ```bash
 # optional: point to a self-hosted instance
@@ -86,5 +84,8 @@ kp2bw [-h] [-kppw KP_PW] [-kpkf KP_KEYFILE] [-bwpw BW_PW]
 ### "Invalid master password" on `bw unlock`
 
 If your password contains special shell characters (`?`, `>`, `&`, etc.), wrap
-it in double quotes when prompted. See
-[upstream issue discussion](https://github.com/jampe/kp2bw/issues) for details.
+it in double quotes when prompted. See jampe/kp2bw#10 and
+libkeepass/pykeepass#254 for details.
+
+[jampe/kp2bw]: https://github.com/jampe/kp2bw
+[Bitwarden CLI]: https://bitwarden.com/help/cli/
