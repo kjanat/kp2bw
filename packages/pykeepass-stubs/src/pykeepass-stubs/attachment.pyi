@@ -1,7 +1,6 @@
 from lxml.etree import Element
-
-from .entry import Entry
-from .pykeepass import PyKeePass
+from pykeepass.entry import Entry
+from pykeepass.pykeepass import PyKeePass
 
 class Attachment:
     _element: Element

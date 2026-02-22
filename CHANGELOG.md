@@ -26,12 +26,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Type annotations on all source modules (`bitwardenclient.py`, `cli.py`,
   `convert.py`). Type aliases for Bitwarden structures (`BwItem`, `EntryValue`,
   `AttachmentItem`, `Fido2Credentials`).
-- **pykeepass type stubs** -- external `.pyi` stubs in `typings/pykeepass/`
-  covering `PyKeePass`, `Entry`, `Group`, `Attachment`, `BaseElement`, and
-  exception classes. Uses proper `lxml.etree.Element` / `ElementTree` types
-  with `Literal`-based overloads on `_xpath()` for precise return-type
-  narrowing. Enables full static type checking without upstream `py.typed`
-  support.
+- **pykeepass type stubs** -- PEP 561 stub package (`packages/pykeepass-stubs/`)
+  as a `uv` workspace member, covering `PyKeePass`, `Entry`, `Group`,
+  `Attachment`, `BaseElement`, and exception classes. Uses proper
+  `lxml.etree.Element` / `ElementTree` types with `Literal`-based overloads on
+  `_xpath()` for precise return-type narrowing. Enables full static type
+  checking without upstream `py.typed` support.
 
 ### Changed
 

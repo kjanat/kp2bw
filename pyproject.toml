@@ -1,13 +1,15 @@
 [project]
-name = "kp2bw"
-version = "1.1.0"
-description = "Imports and existing KeePass db with REF fields into Bitwarden"
-readme = "README.md"
+name            = "kp2bw"
+version         = "1.1.0"
+description     = "Imports and existing KeePass db with REF fields into Bitwarden"
+readme          = "README.md"
 requires-python = ">=3.14"
-authors = [{ name = "Kaj Kowalski", email = "info@kajkowalski.nl" }]
-dependencies = [
-  "pykeepass>=4.1.1.post1",
-]
+classifiers     = ["Private :: Do Not Upload"]
+dependencies    = ["pykeepass>=4.1.1.post1"]
+
+[[project.authors]]
+name  = "Kaj Kowalski"
+email = "info@kajkowalski.nl"
 
 [project.urls]
 Repository = "https://github.com/kjanat/kp2bw"
@@ -16,25 +18,35 @@ Repository = "https://github.com/kjanat/kp2bw"
 kp2bw = "kp2bw.cli:main"
 
 [dependency-groups]
-dev = [
+dev   = [
+  { include-group = "lint" },
+  { include-group = "stubs" },
+]
+lint  = [
   "basedpyright>=1.38.1",
-  "lxml>=6.0.2",
   "ruff>=0.15.2",
   "tombi>=0.7.32",
   "ty>=0.0.18",
-  "types-lxml>=2026.2.16",
 ]
+stubs = ["pykeepass-stubs"]     # "lxml>=6.0.2"
 
 [build-system]
-requires = ["uv_build>=0.10.2,<0.11.0"]
+requires      = ["uv_build>=0.10.2,<0.11.0"]
 build-backend = "uv_build"
 
 [tool.pyright]
-venvPath = "."
-venv = ".venv"
+venvPath         = "."
+venv             = ".venv"
 typeCheckingMode = "strict"
-pythonVersion = "3.14"
+pythonVersion    = "3.14"
 
 [tool.ruff]
-preview = true
+preview        = true
 target-version = "py314"
+
+[tool.uv.sources]
+pykeepass-stubs = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/*"]
+exclude = []

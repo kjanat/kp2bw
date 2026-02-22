@@ -1,11 +1,10 @@
 from datetime import datetime
 
 from lxml.etree import Element
-
-from .attachment import Attachment
-from .baseelement import BaseElement
-from .group import Group
-from .pykeepass import PyKeePass
+from pykeepass.attachment import Attachment
+from pykeepass.baseelement import BaseElement
+from pykeepass.group import Group
+from pykeepass.pykeepass import PyKeePass
 
 class Entry(BaseElement):
     def __init__(

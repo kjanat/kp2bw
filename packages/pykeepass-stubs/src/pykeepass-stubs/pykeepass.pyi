@@ -5,10 +5,9 @@ from pathlib import Path
 from typing import Any, Self, overload
 
 from lxml.etree import Element, ElementTree
-
-from .attachment import Attachment
-from .entry import Entry
-from .group import Group
+from pykeepass.attachment import Attachment
+from pykeepass.entry import Entry
+from pykeepass.group import Group
 
 class PyKeePass:
     filename: str | Path

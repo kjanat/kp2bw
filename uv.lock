@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.14"
 
+[manifest]
+members = [
+    "kp2bw",
+    "pykeepass-stubs",
+]
+
 [[package]]
 name = "argon2-cffi"
 version = "25.1.0"
@@ -133,10 +139,10 @@ dependencies = [
 dev = [
     { name = "basedpyright" },
     { name = "lxml" },
+    { name = "pykeepass-stubs" },
     { name = "ruff" },
     { name = "tombi" },
     { name = "ty" },
-    { name = "types-lxml" },
 ]
 
 [package.metadata]
@@ -146,10 +152,10 @@ requires-dist = [{ name = "pykeepass", specifier = ">=4.1.1.post1" }]
 dev = [
     { name = "basedpyright", specifier = ">=1.38.1" },
     { name = "lxml", specifier = ">=6.0.2" },
+    { name = "pykeepass-stubs", editable = "packages/pykeepass-stubs" },
     { name = "ruff", specifier = ">=0.15.2" },
     { name = "tombi", specifier = ">=0.7.32" },
     { name = "ty", specifier = ">=0.0.18" },
-    { name = "types-lxml", specifier = ">=2026.2.16" },
 ]
 
 [[package]]
@@ -255,6 +261,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/29/1d/0e909a73eb95cc21b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ac/04/6cf0687780c68e7fb0525e7210ec5477987c0481904f600c2e5d81bbb7dd/pykeepass-4.1.1.post1-py3-none-any.whl", hash = "sha256:4cfd54f376cb1f58dd8f11fbe7923282bc7dd97ffdf1bb622004a6e718bfe379", size = 55584, upload-time = "2025-03-06T00:41:57.201Z" },
 ]
+
+[[package]]
+name = "pykeepass-stubs"
+version = "0.1.0"
+source = { editable = "packages/pykeepass-stubs" }
+dependencies = [
+    { name = "types-lxml" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "types-lxml", specifier = ">=2026.2.16" }]
 
 [[package]]
 name = "pyotp"

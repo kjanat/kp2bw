@@ -8,16 +8,32 @@ attachments, custom properties, TOTP, passkeys, and metadata via the `bw` CLI.
 
 ## Project Structure
 
-```
+```tree
 src/kp2bw/
-├── __init__.py           # Empty
+├── __init__.py           # Package version via importlib.metadata
+├── __main__.py           # python -m kp2bw support
+├── py.typed              # PEP 561 marker
 ├── bitwardenclient.py    # Wraps `bw` CLI (subprocess)
 ├── cli.py                # Argument parsing, entry point
 ├── convert.py            # Core migration logic
 └── exceptions.py         # BitwardenClientError, ConversionError
+
+packages/pykeepass-stubs/ # uv workspace member — PEP 561 type stubs
+├── pyproject.toml
+└── src/pykeepass-stubs/
+    ├── py.typed
+    ├── __init__.pyi
+    ├── attachment.pyi
+    ├── baseelement.pyi
+    ├── entry.pyi
+    ├── exceptions.pyi
+    ├── group.pyi
+    └── pykeepass.pyi
 ```
 
 - **src layout** — all source under `src/kp2bw/`
+- **Workspace** — root `pyproject.toml` declares `packages/pykeepass-stubs` as a
+  workspace member; stubs are installed as an editable dev dependency
 - Entry point: `kp2bw.cli:main`
 - No tests exist yet
 
@@ -142,9 +158,8 @@ except (ConversionError, KeyError):
 
 ### Type Hints
 
-The codebase does not yet use type annotations. Both `ty` and `basedpyright` are
-configured as dev dependencies. If adding new code, type hints are welcome but
-not required for consistency with existing code.
+All source modules have type annotations. Both `ty` and `basedpyright` are
+configured as dev dependencies. New code should include type hints.
 
 ### Keyword-Only Arguments
 
@@ -160,7 +175,7 @@ From `pyproject.toml`:
 
 ```toml
 [tool.ruff]
-preview = true
+preview        = true
 target-version = "py314"
 ```
 
@@ -180,12 +195,12 @@ selected or ignored, so the **default rule set** applies.
 
 ## Dependencies
 
-| Package        | Purpose                       |
-| -------------- | ----------------------------- |
-| `pykeepass`    | Read KeePass .kdbx files      |
-| `ruff`         | Linter + formatter (dev)      |
-| `ty`           | Type checker (dev)            |
-| `basedpyright` | Type checker (dev)            |
-| `lxml`         | XML processing (dev)          |
-| `types-lxml`   | lxml type stubs (dev)         |
-| `tombi`        | TOML formatter (dev)          |
+| Package        | Purpose                  |
+| -------------- | ------------------------ |
+| `pykeepass`    | Read KeePass .kdbx files |
+| `ruff`         | Linter + formatter (dev) |
+| `ty`           | Type checker (dev)       |
+| `basedpyright` | Type checker (dev)       |
+| `lxml`         | XML processing (dev)     |
+| `types-lxml`   | lxml type stubs (dev)    |
+| `tombi`        | TOML formatter (dev)     |
