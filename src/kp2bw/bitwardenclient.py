@@ -176,7 +176,7 @@ class BitwardenClient:
             data = attachment[1].encode("UTF-8")
         else:
             # real kp attachment
-            filename = attachment.filename
+            filename = attachment.filename or "attachment"
             data = attachment.data
 
         # make sure temporary attachment folder exists
