@@ -5,7 +5,7 @@ import logging
 from itertools import islice
 from typing import Any
 
-from pykeepass import PyKeePass
+from pykeepass import Attachment, Entry, Group, PyKeePass
 
 from .bitwardenclient import BitwardenClient
 from .exceptions import ConversionError
@@ -16,15 +16,16 @@ KP_REF_IDENTIFIER: str = "{REF:"
 MAX_BW_ITEM_LENGTH: int = 10 * 1000
 KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
 
-# pykeepass has no type stubs; use Any for its entry/group types
-type KpEntry = Any
-type KpGroup = Any
-
 # Bitwarden item dict type
 type BwItem = dict[str, Any]
 
+# Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
+type AttachmentItem = Attachment | tuple[str, str]
+
 # Entry storage: 2-tuple (folder, bw_item) or 3-tuple (folder, bw_item, attachments)
-type EntryValue = tuple[str | None, BwItem] | tuple[str | None, BwItem, list[Any]]
+type EntryValue = (
+    tuple[str | None, BwItem] | tuple[str | None, BwItem, list[AttachmentItem]]
+)
 
 # Fido2 credential list type
 type Fido2Credentials = list[dict[str, str | None]]
@@ -43,7 +44,7 @@ class Converter:
     _skip_expired: bool
     _include_recyclebin: bool
     _migrate_metadata: bool
-    _kp_ref_entries: list[KpEntry]
+    _kp_ref_entries: list[Entry]
     _entries: dict[str, EntryValue]
     _member_reference_resolving_dict: dict[str, str]
 
@@ -89,9 +90,9 @@ class Converter:
         raw_bytes = base64.b64decode(b64_data)
         return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode()
 
-    def _build_fido2_credentials(self, entry: KpEntry) -> Fido2Credentials | None:
+    def _build_fido2_credentials(self, entry: Entry) -> Fido2Credentials | None:
         """Extract KeePassXC passkey attributes and convert to Bitwarden fido2Credentials format."""
-        props: dict[str, str] = entry.custom_properties
+        props: dict[str, str | None] = entry.custom_properties
 
         credential_id: str | None = props.get("KPEX_PASSKEY_CREDENTIAL_ID")
         private_key_pem: str | None = props.get("KPEX_PASSKEY_PRIVATE_KEY_PEM")
@@ -172,41 +173,40 @@ class Converter:
             "identity": None,
         }
 
-    def _generate_folder_name(self, entry: KpEntry) -> str | None:
-        if not entry.group.path or entry.group.path == "/":
+    def _generate_folder_name(self, entry: Entry) -> str | None:
+        group = entry.group
+        if group is None or not group.path:
             return None
-        else:
-            return "/".join(entry.group.path)
+        return "/".join(p for p in group.path if p is not None)
 
-    def _generate_prefix(self, entry: KpEntry, skip: int) -> str:
-        if not entry.group.path or entry.group.path == "/":
+    def _generate_prefix(self, entry: Entry, skip: int) -> str:
+        group = entry.group
+        if group is None or not group.path:
             return ""
-        else:
-            out = ""
-            for item in islice(entry.group.path, skip, None):
+        out = ""
+        for item in islice(group.path, skip, None):
+            if item is not None:
                 out += item + " / "
-            return out
+        return out
 
-    def _get_folder_firstlevel(self, entry: KpEntry) -> str | None:
-        if not entry.group.path or entry.group.path == "/":
+    def _get_folder_firstlevel(self, entry: Entry) -> str | None:
+        group = entry.group
+        if group is None or not group.path:
             return None
-        else:
-            return entry.group.path[0]
+        return group.path[0]
 
-    def _is_in_recyclebin(
-        self, entry: KpEntry, recyclebin_group: KpGroup | None
-    ) -> bool:
+    def _is_in_recyclebin(self, entry: Entry, recyclebin_group: Group | None) -> bool:
         """Check if an entry is inside the recycle bin group."""
         if recyclebin_group is None:
             return False
-        group: KpGroup | None = entry.group
+        group: Group | None = entry.group
         while group is not None:
             if group == recyclebin_group:
                 return True
             group = group.parentgroup
         return False
 
-    def _build_metadata_fields(self, entry: KpEntry) -> dict[str, list[Any]]:
+    def _build_metadata_fields(self, entry: Entry) -> dict[str, list[Any]]:
         """Build extra custom fields for KeePass metadata (tags, expiry, timestamps)."""
         fields: dict[str, list[Any]] = {}
 
@@ -227,7 +227,7 @@ class Converter:
         return fields
 
     def _add_bw_entry_to_entries_dict(
-        self, entry: KpEntry, custom_protected: list[str] | None
+        self, entry: Entry, custom_protected: list[str] | None
     ) -> None:
         folder = self._generate_folder_name(entry)
         prefix = ""
@@ -279,7 +279,7 @@ class Converter:
         )
 
         # get attachments to store later on
-        attachments: list[Any] = [
+        attachments: list[AttachmentItem] = [
             (key, value)
             for key, value in entry.custom_properties.items()
             if value is not None and len(value) > MAX_BW_ITEM_LENGTH
@@ -350,9 +350,9 @@ class Converter:
         custom_protected: list[str] = []
 
         # Identify recycle bin group for filtering
-        recyclebin_group: KpGroup | None = kp.recyclebin_group
+        recyclebin_group: Group | None = kp.recyclebin_group
 
-        entries: list[KpEntry] = kp.entries or []
+        entries: list[Entry] = kp.entries or []
         total_entries: int = len(entries)
         skipped_recyclebin = 0
         skipped_expired = 0
@@ -384,21 +384,18 @@ class Converter:
             custom_protected.extend(
                 field
                 for field in entry.custom_properties
-                if entry._xpath(
+                if entry._xpath(  # lxml Element
                     f'String[Key[text()="{field}"]]/Value', first=True
-                ).attrib.get("Protected", "False")
+                ).attrib.get("Protected", "False")  # pyright: ignore[reportAttributeAccessIssue]
                 == "True"
             )
 
             # Normal entry
             if self._import_tags:
-                if isinstance(self._import_tags, list):
-                    for tag in self._import_tags:
-                        if entry.tags is not None and tag in entry.tags:
-                            self._add_bw_entry_to_entries_dict(entry, custom_protected)
-                else:
-                    logger.error("The import_tags parameter must be a list of strings.")
-                    raise SystemExit
+                for tag in self._import_tags:
+                    if tag in entry.tags:
+                        self._add_bw_entry_to_entries_dict(entry, custom_protected)
+                        break
             else:
                 self._add_bw_entry_to_entries_dict(entry, custom_protected)
 
@@ -456,8 +453,10 @@ class Converter:
                     self._add_bw_entry_to_entries_dict(kp_entry, None)
 
             except ConversionError, KeyError, AttributeError:
+                group = kp_entry.group
+                group_path = group.path if group is not None else []
                 logger.warning(
-                    f"!! Could not resolve entry for {kp_entry.group.path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
+                    f"!! Could not resolve entry for {group_path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
                 )
 
         logger.debug(f"Resolved {ref_entries_length} REF entries")
@@ -473,7 +472,7 @@ class Converter:
         for entry_value in self._entries.values():
             if len(entry_value) == 2:
                 folder, bw_item_object = entry_value[0], entry_value[1]
-                attachments: list[Any] | None = None
+                attachments: list[AttachmentItem] | None = None
             else:
                 folder = entry_value[0]
                 bw_item_object = entry_value[1]

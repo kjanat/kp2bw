@@ -63,10 +63,10 @@ Both must pass with zero errors.
 Standard isort ordering enforced by ruff (`I001`):
 
 ```python
-import base64                          # 1. stdlib (alphabetical)
+import base64  # 1. stdlib (alphabetical)
 import logging
 
-from pykeepass import PyKeePass        # 2. third-party
+from pykeepass import PyKeePass  # 2. third-party
 
 from .bitwardenclient import BitwardenClient  # 3. relative imports
 from .exceptions import ConversionError
@@ -76,12 +76,12 @@ Use **relative imports** for intra-package references (`from .module import X`).
 
 ### Naming Conventions
 
-| Kind              | Style              | Example                         |
-| ----------------- | ------------------ | ------------------------------- |
-| Classes           | PascalCase         | `BitwardenClient`, `Converter`  |
-| Functions/methods | snake_case         | `create_entry`, `_load_data`    |
-| Private members   | leading underscore | `self._entries`, `_exec`        |
-| Constants         | UPPER_SNAKE_CASE   | `MAX_BW_ITEM_LENGTH`            |
+| Kind              | Style              | Example                        |
+| ----------------- | ------------------ | ------------------------------ |
+| Classes           | PascalCase         | `BitwardenClient`, `Converter` |
+| Functions/methods | snake_case         | `create_entry`, `_load_data`   |
+| Private members   | leading underscore | `self._entries`, `_exec`       |
+| Constants         | UPPER_SNAKE_CASE   | `MAX_BW_ITEM_LENGTH`           |
 
 ### String Formatting
 
@@ -108,10 +108,10 @@ Each module creates its own logger. Never use the root `logging.xxx()` calls.
 logger = logging.getLogger(__name__)
 
 # Usage:
-logger.debug(...)    # command execution details
-logger.info(...)     # progress reporting
+logger.debug(...)  # command execution details
+logger.info(...)  # progress reporting
 logger.warning(...)  # non-fatal issues
-logger.error(...)    # operation failures
+logger.error(...)  # operation failures
 ```
 
 ### Error Handling
@@ -120,7 +120,7 @@ Use the project's custom exceptions, never bare `Exception`:
 
 ```python
 from .exceptions import BitwardenClientError  # for bw CLI failures
-from .exceptions import ConversionError       # for migration logic errors
+from .exceptions import ConversionError  # for migration logic errors
 ```
 
 Catch specific exceptions with **tuple syntax** (not comma-separated):
@@ -142,9 +142,9 @@ except (ConversionError, KeyError):
 
 ### Type Hints
 
-The codebase does not yet use type annotations. Both `ty` and `basedpyright`
-are configured as dev dependencies. If adding new code, type hints are welcome
-but not required for consistency with existing code.
+The codebase does not yet use type annotations. Both `ty` and `basedpyright` are
+configured as dev dependencies. If adding new code, type hints are welcome but
+not required for consistency with existing code.
 
 ### Keyword-Only Arguments
 
@@ -164,8 +164,8 @@ preview = true
 target-version = "py314"
 ```
 
-Preview mode is enabled — all preview rules are active. No rules are
-explicitly selected or ignored, so the **default rule set** applies.
+Preview mode is enabled — all preview rules are active. No rules are explicitly
+selected or ignored, so the **default rule set** applies.
 
 ## Architecture Notes
 
@@ -175,16 +175,15 @@ explicitly selected or ignored, so the **default rule set** applies.
   `(folder, bw_item_object, attachments)`
 - KeePassXC passkey attributes (`KPEX_PASSKEY_*`) are converted to Bitwarden
   `fido2Credentials` and excluded from regular custom fields
-- The `convert()` method is the main orchestrator:
-  `_load_keepass_data()` → `_resolve_entries_with_references()` →
-  `_create_bitwarden_items_for_entries()`
+- The `convert()` method is the main orchestrator: `_load_keepass_data()` →
+  `_resolve_entries_with_references()` → `_create_bitwarden_items_for_entries()`
 
 ## Dependencies
 
-| Package    | Purpose                     |
-| ---------- | --------------------------- |
-| `pykeepass`  | Read KeePass .kdbx files    |
-| `ruff`       | Linter + formatter (dev)    |
-| `ty`         | Type checker (dev)          |
-| `basedpyright` | Type checker (dev)        |
-| `tombi`      | TOML formatter (dev)        |
+| Package        | Purpose                  |
+| -------------- | ------------------------ |
+| `pykeepass`    | Read KeePass .kdbx files |
+| `ruff`         | Linter + formatter (dev) |
+| `ty`           | Type checker (dev)       |
+| `basedpyright` | Type checker (dev)       |
+| `tombi`        | TOML formatter (dev)     |

@@ -56,7 +56,7 @@ bw login <user>
 
 ## Usage
 
-```
+```console
 kp2bw [-h] [-kppw KP_PW] [-kpkf KP_KEYFILE] [-bwpw BW_PW]
        [-bworg BW_ORG] [-bwcoll BW_COLL] [-import_tags TAG ...]
        [-path2name] [-path2nameskip N]

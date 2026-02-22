@@ -8,6 +8,8 @@ from itertools import groupby
 from subprocess import STDOUT, CalledProcessError, check_output
 from typing import Any
 
+from pykeepass import Attachment
+
 from .exceptions import BitwardenClientError
 
 logger = logging.getLogger(__name__)
@@ -162,13 +164,16 @@ class BitwardenClient:
             f"{self._get_platform_dependent_echo_str(json_b64)} | bw create item"
         )
 
-    def create_attachment(self, item_id: str, attachment: tuple[str, str] | Any) -> str:
+    def create_attachment(
+        self, item_id: str, attachment: tuple[str, str] | Attachment
+    ) -> str:
         # store attachment on disk
-        if isinstance(attachment, tuple):
-            # long custom property
-            key, value = attachment
-            filename: str = key + ".txt"
-            data: bytes = value.encode("UTF-8")
+        filename: str
+        data: bytes
+        if not isinstance(attachment, Attachment):
+            # long custom property — tuple[str, str]
+            filename = attachment[0] + ".txt"
+            data = attachment[1].encode("UTF-8")
         else:
             # real kp attachment
             filename = attachment.filename

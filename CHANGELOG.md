@@ -24,8 +24,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Module-level loggers replacing root logger calls.
 - New CLI flags: `-skip-expired`, `-include-recyclebin`, `-no-metadata`.
 - Type annotations on all source modules (`bitwardenclient.py`, `cli.py`,
-  `convert.py`). Type aliases for pykeepass types (`KpEntry`, `KpGroup`) and
-  Bitwarden structures (`BwItem`, `EntryValue`, `Fido2Credentials`).
+  `convert.py`). Type aliases for Bitwarden structures (`BwItem`, `EntryValue`,
+  `AttachmentItem`, `Fido2Credentials`).
+- **pykeepass type stubs** -- external `.pyi` stubs in `typings/pykeepass/`
+  covering `PyKeePass`, `Entry`, `Group`, `Attachment`, `BaseElement`, and
+  exception classes. Enables full static type checking without upstream
+  `py.typed` support. Uses `object` for internal lxml element parameters to
+  avoid lxml stub dependency.
 
 ### Changed
 
@@ -33,12 +38,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Requires Python 3.14+.
 - Rewrote README: mentions fork origin, tightened copy, added usage table.
 - Removed legacy `setup.py`, `setup.cfg`, and `kp2bw.egg-info/`.
+- Replaced `KpEntry`/`KpGroup` type aliases (were `Any`) with real pykeepass
+  types (`Entry`, `Group`) from stubs, eliminating ~130 basedpyright warnings.
 
 ### Fixed
 
 - Type errors: `self._colls` could be `None` when accessed without guard.
 - `except` clause used Python 2 syntax (`except A, B, C:` instead of
   `except (A, B, C):`).
+- Tag-based import could add the same entry multiple times when it matched
+  multiple tags (now breaks after first match).
+- `entry.group` could be `None` — added guards for safe attribute access.
+- Dead code: `group.path == "/"` comparisons (path is a list, never a string).
+- Unnecessary `isinstance(self._import_tags, list)` check and dead else branch.
 - Multiple ruff lint violations (35 total): import sorting, f-string
   conversions, redundant `.keys()`/`.items()` calls, nested `if` simplification,
   unused variables, overly broad exception catches, and more.
