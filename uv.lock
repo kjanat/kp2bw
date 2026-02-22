@@ -138,11 +138,19 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "basedpyright" },
-    { name = "lxml" },
     { name = "pykeepass-stubs" },
     { name = "ruff" },
     { name = "tombi" },
     { name = "ty" },
+]
+lint = [
+    { name = "basedpyright" },
+    { name = "ruff" },
+    { name = "tombi" },
+    { name = "ty" },
+]
+stubs = [
+    { name = "pykeepass-stubs" },
 ]
 
 [package.metadata]
@@ -151,12 +159,18 @@ requires-dist = [{ name = "pykeepass", specifier = ">=4.1.1.post1" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "basedpyright", specifier = ">=1.38.1" },
-    { name = "lxml", specifier = ">=6.0.2" },
     { name = "pykeepass-stubs", editable = "packages/pykeepass-stubs" },
     { name = "ruff", specifier = ">=0.15.2" },
     { name = "tombi", specifier = ">=0.7.32" },
     { name = "ty", specifier = ">=0.0.18" },
 ]
+lint = [
+    { name = "basedpyright", specifier = ">=1.38.1" },
+    { name = "ruff", specifier = ">=0.15.2" },
+    { name = "tombi", specifier = ">=0.7.32" },
+    { name = "ty", specifier = ">=0.0.18" },
+]
+stubs = [{ name = "pykeepass-stubs", editable = "packages/pykeepass-stubs" }]
 
 [[package]]
 name = "lxml"

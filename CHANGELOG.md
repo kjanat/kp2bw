@@ -32,6 +32,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `lxml.etree.Element` / `ElementTree` types with `Literal`-based overloads on
   `_xpath()` for precise return-type narrowing. Enables full static type
   checking without upstream `py.typed` support.
+- `py.typed` marker (PEP 561) for both `kp2bw` and stub packages.
+- `__main__.py` module — enables `python -m kp2bw`.
+- `__version__` exposed via `importlib.metadata` in `__init__.py`.
 
 ### Changed
 
