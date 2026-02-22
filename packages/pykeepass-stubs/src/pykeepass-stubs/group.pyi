@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from lxml.etree import Element
+from lxml.objectify import ObjectifiedElement
 from pykeepass.baseelement import BaseElement
 from pykeepass.entry import Entry
 from pykeepass.pykeepass import PyKeePass
@@ -9,7 +10,7 @@ class Group(BaseElement):
     def __init__(
         self,
         name: str | None = None,
-        element: Element | None = None,
+        element: Element | ObjectifiedElement | None = None,
         icon: str | None = None,
         notes: str | None = None,
         kp: PyKeePass | None = None,
@@ -36,4 +37,5 @@ class Group(BaseElement):
     def group(self) -> Group | None: ...
     @property
     def parentgroup(self) -> Group | None: ...
-    def append(self, entries: Entry | list[Entry]) -> None: ...
+    def append(self, entries: Entry | Group | list[Entry] | list[Group]) -> None: ...
+    def __str__(self) -> str: ...

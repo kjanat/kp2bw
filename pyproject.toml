@@ -44,6 +44,9 @@ pythonVersion    = "3.14"
 preview        = true
 target-version = "py314"
 
+[tool.ruff.lint]
+ignore = ["PYI029"]
+
 [tool.uv.sources]
 pykeepass-stubs = { workspace = true }
 

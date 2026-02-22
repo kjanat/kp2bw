@@ -4,7 +4,7 @@ from pykeepass.pykeepass import PyKeePass
 
 class Attachment:
     _element: Element
-    _kp: PyKeePass
+    _kp: PyKeePass | None
 
     def __init__(
         self,
@@ -18,7 +18,7 @@ class Attachment:
     @id.setter
     def id(self, id: int) -> None: ...
     @property
-    def filename(self) -> str: ...
+    def filename(self) -> str | None: ...
     @filename.setter
     def filename(self, filename: str) -> None: ...
     @property
@@ -29,3 +29,4 @@ class Attachment:
     data: bytes
 
     def delete(self) -> None: ...
+    def __repr__(self) -> str: ...

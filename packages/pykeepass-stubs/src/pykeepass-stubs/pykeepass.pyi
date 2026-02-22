@@ -167,7 +167,7 @@ class PyKeePass:
         url: str | None = None,
         notes: str | None = None,
         expiry_time: datetime | None = None,
-        tags: list[str] | None = None,
+        tags: list[str] | str | None = None,
         otp: str | None = None,
         icon: str | None = None,
         force_creation: bool = False,
@@ -203,6 +203,8 @@ class PyKeePass:
     # --- Misc ---
 
     def deref(self, value: str | None) -> str | _uuid.UUID | None: ...
+    def _encode_time(self, value: datetime) -> str: ...
+    def _decode_time(self, text: str) -> datetime: ...
 
     # --- Credentials ---
 

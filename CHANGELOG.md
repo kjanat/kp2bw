@@ -28,13 +28,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `AttachmentItem`, `Fido2Credentials`).
 - **pykeepass type stubs** -- PEP 561 stub package (`packages/pykeepass-stubs/`)
   as a `uv` workspace member, covering `PyKeePass`, `Entry`, `Group`,
-  `Attachment`, `BaseElement`, and exception classes. Uses proper
+  `Attachment`, `BaseElement`, `icons`, and exception classes. Uses proper
   `lxml.etree.Element` / `ElementTree` types with `Literal`-based overloads on
   `_xpath()` for precise return-type narrowing. Enables full static type
   checking without upstream `py.typed` support.
 - `py.typed` marker (PEP 561) for both `kp2bw` and stub packages.
 - `__main__.py` module — enables `python -m kp2bw`.
 - `__version__` exposed via `importlib.metadata` in `__init__.py`.
+
+### Changed (stubs)
+
+- **baseelement.pyi** -- Replaced `_KeePassLike` protocol with direct
+  `PyKeePass` import (circular imports are fine in `.pyi`). `_kp` attribute and
+  `kp` parameter now typed `PyKeePass | None`. `icon` parameter drops `int`
+  (only `str | None`). `icon` setter accepts `str | None`. `group` and
+  `parentgroup` typed as `Group | None` (were `Any`). `parentgroup` declared as
+  `@property` matching the actual `parentgroup = group` alias in source.
+- **attachment.pyi** -- `_kp` now `PyKeePass | None`. `filename` getter returns
+  `str | None` (lxml `.text` semantics). Added `__repr__`.
+- **entry.pyi** -- `element` parameter accepts `ObjectifiedElement`. All
+  string-field setters (`title`, `username`, `password`, `url`, `notes`, `otp`,
+  `autotype_sequence`, `autotype_window`) accept `str | None`. Added `__str__`.
+  `HistoryEntry` gains `__str__` and `__hash__`.
+- **group.pyi** -- `element` parameter accepts `ObjectifiedElement`. `append`
+  accepts `Entry | Group | list[Entry] | list[Group]`. Added `__str__`.
+- **pykeepass.pyi** -- `add_entry` `tags` parameter accepts
+  `list[str] | str | None`. Added `_encode_time` and `_decode_time`.
+- **icons.pyi** -- New stub declaring `icons: SimpleNamespace`.
+- **__init__.pyi** -- Added `icons` re-export and `__all__` entry.
+- Ignored `PYI029` in stubs `ruff.lint` config (`__repr__` without `__eq__` is
+  intentional — `__eq__` is on `BaseElement`).
 
 ### Changed
 
