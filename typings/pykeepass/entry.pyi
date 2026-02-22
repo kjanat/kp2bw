@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from lxml.etree import Element
+
 from .attachment import Attachment
 from .baseelement import BaseElement
 from .group import Group
@@ -21,7 +23,7 @@ class Entry(BaseElement):
         autotype_sequence: str | None = None,
         autotype_enabled: bool = True,
         autotype_window: str | None = None,
-        element: object = None,
+        element: Element | None = None,
         kp: PyKeePass | None = None,
     ) -> None: ...
     @property

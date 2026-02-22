@@ -28,9 +28,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `AttachmentItem`, `Fido2Credentials`).
 - **pykeepass type stubs** -- external `.pyi` stubs in `typings/pykeepass/`
   covering `PyKeePass`, `Entry`, `Group`, `Attachment`, `BaseElement`, and
-  exception classes. Enables full static type checking without upstream
-  `py.typed` support. Uses `object` for internal lxml element parameters to
-  avoid lxml stub dependency.
+  exception classes. Uses proper `lxml.etree.Element` / `ElementTree` types
+  with `Literal`-based overloads on `_xpath()` for precise return-type
+  narrowing. Enables full static type checking without upstream `py.typed`
+  support.
 
 ### Changed
 

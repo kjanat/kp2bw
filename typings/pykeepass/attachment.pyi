@@ -1,13 +1,18 @@
+from lxml.etree import Element
+
 from .entry import Entry
 from .pykeepass import PyKeePass
 
 class Attachment:
+    _element: Element
+    _kp: PyKeePass
+
     def __init__(
         self,
-        element: object = None,
-        kp: PyKeePass | None = None,
-        id: int | None = None,
-        filename: str | None = None,
+        element: Element | None = ...,
+        kp: PyKeePass | None = ...,
+        id: int | None = ...,
+        filename: str | None = ...,
     ) -> None: ...
     @property
     def id(self) -> int: ...
@@ -21,6 +26,7 @@ class Attachment:
     def entry(self) -> Entry: ...
     @property
     def binary(self) -> bytes: ...
-    @property
-    def data(self) -> bytes: ...
+
+    data: bytes
+
     def delete(self) -> None: ...

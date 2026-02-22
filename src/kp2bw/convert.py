@@ -384,10 +384,13 @@ class Converter:
             custom_protected.extend(
                 field
                 for field in entry.custom_properties
-                if entry._xpath(  # lxml Element
-                    f'String[Key[text()="{field}"]]/Value', first=True
-                ).attrib.get("Protected", "False")  # pyright: ignore[reportAttributeAccessIssue]
-                == "True"
+                if (
+                    elem := entry._xpath(
+                        f'String[Key[text()="{field}"]]/Value', first=True
+                    )
+                )
+                is not None
+                and elem.attrib.get("Protected", "False") == "True"
             )
 
             # Normal entry

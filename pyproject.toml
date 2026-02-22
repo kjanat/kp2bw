@@ -22,11 +22,18 @@ dev = [
   "ruff>=0.15.2",
   "tombi>=0.7.32",
   "ty>=0.0.18",
+  "types-lxml>=2026.2.16",
 ]
 
 [build-system]
 requires = ["uv_build>=0.10.2,<0.11.0"]
 build-backend = "uv_build"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
 
 [tool.ruff]
 preview = true

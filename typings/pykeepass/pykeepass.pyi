@@ -2,7 +2,9 @@ import uuid as _uuid
 from datetime import datetime
 from io import IOBase
 from pathlib import Path
-from typing import Self
+from typing import Any, Self, overload
+
+from lxml.etree import Element, ElementTree
 
 from .attachment import Attachment
 from .entry import Entry
@@ -52,7 +54,7 @@ class PyKeePass:
     @property
     def database_salt(self) -> bytes: ...
     @property
-    def tree(self) -> object: ...
+    def tree(self) -> ElementTree: ...
     @property
     def root_group(self) -> Group: ...
     @property
@@ -75,14 +77,33 @@ class PyKeePass:
     def default_username(self, name: str) -> None: ...
     def xml(self) -> bytes: ...
     def dump_xml(self, filename: str) -> None: ...
+    @overload
     def xpath(
         self,
         xpath_str: str,
-        tree: object = None,
+        tree: Element | ElementTree | None = None,
+        *,
         first: bool = False,
         cast: bool = False,
-        **kwargs: object,
-    ) -> object: ...
+        **kwargs: Any,
+    ) -> list[Element]: ...
+    @overload
+    def xpath(
+        self,
+        xpath_str: str,
+        tree: Element | ElementTree | None = None,
+        first: bool = False,
+        cast: bool = False,
+        **kwargs: Any,
+    ) -> list[Element] | Element | None: ...
+    def xpath(
+        self,
+        xpath_str: str,
+        tree: Element | ElementTree | None = None,
+        first: bool = False,
+        cast: bool = False,
+        **kwargs: Any,
+    ) -> list[Element] | Element | None: ...
 
     _xpath = xpath
 
