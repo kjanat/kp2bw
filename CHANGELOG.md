@@ -8,6 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Passkey migration** -- KeePassXC FIDO2/passkey credentials (`KPEX_PASSKEY_*`
+  attributes) are detected and converted to Bitwarden `fido2Credentials` format
+  (PEM private key → base64url, credential ID, relying party, user handle).
+  Passkey attributes are excluded from regular custom fields to avoid
+  duplication.
 - **Recycle Bin filtering** -- deleted KeePass entries are now excluded by
   default; use `-include-recyclebin` to override.
 - **Metadata migration** -- KeePass tags, expiry dates, and created/modified

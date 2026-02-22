@@ -11,6 +11,8 @@ the built-in Bitwarden importer:
 - **KeePass REF resolution** -- username/password references are resolved:
   matching credentials merge URLs into one entry; differing ones create new
   entries
+- **Passkey migration** -- KeePassXC FIDO2/passkey credentials
+  (`KPEX_PASSKEY_*`) are converted to Bitwarden `fido2Credentials`
 - **Custom properties & attachments** -- imported as Bitwarden custom fields or
   attachments (values > 10k chars auto-upload as files)
 - **Long notes handling** -- notes exceeding 10k chars are uploaded as

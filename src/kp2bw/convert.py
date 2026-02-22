@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from itertools import islice
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 KP_REF_IDENTIFIER = "{REF:"
 MAX_BW_ITEM_LENGTH = 10 * 1000
+KPEX_PASSKEY_PREFIX = "KPEX_PASSKEY_"
 
 
 class Converter:
@@ -47,6 +49,55 @@ class Converter:
 
         self._member_reference_resolving_dict = {"username": "U", "password": "P"}
 
+    @staticmethod
+    def _convert_pem_to_base64url(pem_key):
+        """Convert a PEM-encoded private key to base64url (no padding)."""
+        lines = pem_key.strip().splitlines()
+        # Strip PEM header/footer lines
+        b64_data = "".join(line for line in lines if not line.startswith("-----"))
+        raw_bytes = base64.b64decode(b64_data)
+        return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode()
+
+    def _build_fido2_credentials(self, entry):
+        """Extract KeePassXC passkey attributes and convert to Bitwarden fido2Credentials format."""
+        props = entry.custom_properties
+
+        credential_id = props.get("KPEX_PASSKEY_CREDENTIAL_ID")
+        private_key_pem = props.get("KPEX_PASSKEY_PRIVATE_KEY_PEM")
+
+        if not credential_id or not private_key_pem:
+            return None
+
+        try:
+            key_value = self._convert_pem_to_base64url(private_key_pem)
+        except ValueError, base64.binascii.Error:
+            logger.warning(
+                f"Could not convert passkey private key for entry: {entry.title}"
+            )
+            return None
+
+        creation_date = entry.ctime.isoformat() if entry.ctime else None
+
+        return [
+            {
+                "credentialId": credential_id,
+                "keyType": "public-key",
+                "keyAlgorithm": "ECDSA",
+                "keyCurve": "P-256",
+                "keyValue": key_value,
+                "rpId": props.get("KPEX_PASSKEY_RELYING_PARTY", ""),
+                "rpName": props.get("KPEX_PASSKEY_RELYING_PARTY", ""),
+                "userHandle": props.get("KPEX_PASSKEY_USER_HANDLE", ""),
+                "userName": props.get("KPEX_PASSKEY_USERNAME", entry.username or ""),
+                "userDisplayName": props.get(
+                    "KPEX_PASSKEY_USERNAME", entry.username or ""
+                ),
+                "counter": "0",
+                "discoverable": "true",
+                "creationDate": creation_date,
+            }
+        ]
+
     def _create_bw_python_object(
         self,
         title,
@@ -58,7 +109,18 @@ class Converter:
         custom_properties,
         collectionId,
         firstlevel,
+        fido2_credentials=None,
     ):
+        login = {
+            "uris": [{"match": None, "uri": url}] if url else [],
+            "username": username,
+            "password": password,
+            "totp": totp,
+            "passwordRevisionDate": None,
+        }
+        if fido2_credentials:
+            login["fido2Credentials"] = fido2_credentials
+
         return {
             "organizationId": self._bitwarden_organization_id,
             "collectionIds": collectionId,
@@ -73,13 +135,7 @@ class Converter:
                 for key, value in custom_properties.items()
                 if value[0] is not None and len(value[0]) <= MAX_BW_ITEM_LENGTH
             ],
-            "login": {
-                "uris": [{"match": None, "uri": url}] if url else [],
-                "username": username,
-                "password": password,
-                "totp": totp,
-                "passwordRevisionDate": None,
-            },
+            "login": login,
             "secureNote": None,
             "card": None,
             "identity": None,
@@ -145,6 +201,9 @@ class Converter:
 
         custom_properties = {}
         for key, value in entry.custom_properties.items():
+            # Skip KeePassXC passkey attributes -- handled separately
+            if key.startswith(KPEX_PASSKEY_PREFIX):
+                continue
             if key in custom_protected:
                 custom_properties[key] = [value, 1]
             else:
@@ -153,6 +212,11 @@ class Converter:
         # Add metadata fields (tags, expiry, timestamps) if enabled
         if self._migrate_metadata:
             custom_properties.update(self._build_metadata_fields(entry))
+
+        # Build FIDO2/passkey credentials from KeePassXC attributes
+        fido2_credentials = self._build_fido2_credentials(entry)
+        if fido2_credentials:
+            logger.info(f"  Migrating passkey for entry: {entry.title}")
 
         # Build notes, prepending [EXPIRED] marker if applicable
         notes = ""
@@ -172,6 +236,7 @@ class Converter:
             custom_properties=custom_properties,
             collectionId=self._bitwarden_coll_id,
             firstlevel=self._get_folder_firstlevel(entry),
+            fido2_credentials=fido2_credentials,
         )
 
         # get attachments to store later on
