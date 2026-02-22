@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 import logging
 from itertools import islice
@@ -70,7 +71,7 @@ class Converter:
 
         try:
             key_value = self._convert_pem_to_base64url(private_key_pem)
-        except ValueError, base64.binascii.Error:
+        except ValueError, binascii.Error:
             logger.warning(
                 f"Could not convert passkey private key for entry: {entry.title}"
             )
@@ -149,7 +150,7 @@ class Converter:
 
     def _generate_prefix(self, entry, skip):
         if not entry.group.path or entry.group.path == "/":
-            return None
+            return ""
         else:
             out = ""
             for item in islice(entry.group.path, skip, None):
