@@ -6,6 +6,7 @@ import platform
 import shutil
 from itertools import groupby
 from subprocess import STDOUT, CalledProcessError, check_output
+from typing import Any
 
 from .exceptions import BitwardenClientError
 
@@ -13,9 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 class BitwardenClient:
-    TEMPORARY_ATTACHMENT_FOLDER = "attachment-temp"
+    TEMPORARY_ATTACHMENT_FOLDER: str = "attachment-temp"
 
-    def __init__(self, password, orgId):
+    _orgId: str | None
+    _key: str
+    _folders: dict[str, str]
+    _folder_entries: dict[str | None, list[str]]
+    _colls: dict[str, str] | None
+
+    def __init__(self, password: str, org_id: str | None) -> None:
         # check for bw cli installation
         if "bitwarden" not in self._exec("bw"):
             raise BitwardenClientError(
@@ -23,7 +30,7 @@ class BitwardenClient:
             )
 
         # save org
-        self._orgId = orgId
+        self._orgId = org_id
 
         # login
         self._key = self._exec(f'bw unlock "{password}" --raw')
@@ -48,31 +55,31 @@ class BitwardenClient:
         self._folder_entries = self._get_existing_folder_entries()
 
         # get existing collections
-        if orgId:
+        if org_id:
             self._colls = {
                 coll["name"]: coll["id"]
                 for coll in json.loads(
                     self._exec_with_session(
-                        f"bw list org-collections --organizationid {orgId}"
+                        f"bw list org-collections --organizationid {org_id}"
                     )
                 )
             }
         else:
             self._colls = None
 
-    def __del__(self):
+    def __del__(self) -> None:
         # cleanup temp directory
         self._remove_temporary_attachment_folder()
 
-    def _create_temporary_attachment_folder(self):
+    def _create_temporary_attachment_folder(self) -> None:
         if not os.path.isdir(self.TEMPORARY_ATTACHMENT_FOLDER):
             os.mkdir(self.TEMPORARY_ATTACHMENT_FOLDER)
 
-    def _remove_temporary_attachment_folder(self):
+    def _remove_temporary_attachment_folder(self) -> None:
         if os.path.isdir(self.TEMPORARY_ATTACHMENT_FOLDER):
             shutil.rmtree(self.TEMPORARY_ATTACHMENT_FOLDER)
 
-    def _exec(self, command):
+    def _exec(self, command: str) -> str:
         try:
             logger.debug(f"-- Executing command: {command}")
             output = check_output(command, stderr=STDOUT, shell=True)
@@ -82,11 +89,13 @@ class BitwardenClient:
         logger.debug(f"  |- Output: {output}")
         return str(output.decode("utf-8", "ignore"))
 
-    def _get_existing_folder_entries(self):
-        folder_id_lookup_helper = {
+    def _get_existing_folder_entries(self) -> dict[str | None, list[str]]:
+        folder_id_lookup_helper: dict[str, str] = {
             folder_id: folder_name for folder_name, folder_id in self._folders.items()
         }
-        items = json.loads(self._exec_with_session("bw list items"))
+        items: list[dict[str, Any]] = json.loads(
+            self._exec_with_session("bw list items")
+        )
 
         # fix None folderIds for entries without folders
         for item in items:
@@ -99,34 +108,34 @@ class BitwardenClient:
             for folder_id, entries in groupby(items, key=lambda item: item["folderId"])
         }
 
-    def _exec_with_session(self, command):
+    def _exec_with_session(self, command: str) -> str:
         return self._exec(f"{command} --session '{self._key}'")
 
-    def has_folder(self, folder):
+    def has_folder(self, folder: str | None) -> bool:
         return folder in self._folders
 
-    def _get_platform_dependent_echo_str(self, string):
+    def _get_platform_dependent_echo_str(self, string: str) -> str:
         if platform.system() == "Windows":
             return f"echo {string}"
         else:
             return f"echo '{string}'"
 
-    def create_folder(self, folder):
+    def create_folder(self, folder: str | None) -> None:
         if not folder or self.has_folder(folder):
             return
 
-        data = {"name": folder}
+        data: dict[str, str] = {"name": folder}
         data_b64 = base64.b64encode(json.dumps(data).encode("UTF-8")).decode("UTF-8")
 
         output = self._exec_with_session(
             f"{self._get_platform_dependent_echo_str(data_b64)} | bw create folder"
         )
 
-        output_obj = json.loads(output)
+        output_obj: dict[str, str] = json.loads(output)
 
         self._folders[output_obj["name"]] = output_obj["id"]
 
-    def create_entry(self, folder, entry):
+    def create_entry(self, folder: str | None, entry: dict[str, Any]) -> str:
         # check if already exists
         if (
             folder in self._folder_entries
@@ -153,15 +162,13 @@ class BitwardenClient:
             f"{self._get_platform_dependent_echo_str(json_b64)} | bw create item"
         )
 
-    def create_attachment(self, item_id, attachment):
+    def create_attachment(self, item_id: str, attachment: tuple[str, str] | Any) -> str:
         # store attachment on disk
-        filename = ""
-        data = None
         if isinstance(attachment, tuple):
             # long custom property
             key, value = attachment
-            filename = key + ".txt"
-            data = value.encode("UTF-8")
+            filename: str = key + ".txt"
+            data: bytes = value.encode("UTF-8")
         else:
             # real kp attachment
             filename = attachment.filename
@@ -172,7 +179,7 @@ class BitwardenClient:
 
         path_to_file_on_disk = os.path.join(self.TEMPORARY_ATTACHMENT_FOLDER, filename)
         with open(path_to_file_on_disk, "wb") as f:
-            f.write(data)
+            _ = f.write(data)
 
         try:
             output = self._exec_with_session(
@@ -183,8 +190,7 @@ class BitwardenClient:
 
         return output
 
-    def create_org_get_collection(self, collectionname):
-
+    def create_org_get_collection(self, collectionname: str | None) -> str | None:
         if not collectionname:
             return None
 
@@ -196,7 +202,9 @@ class BitwardenClient:
             return self._colls.get(collectionname)
 
         # get template
-        entry = json.loads(self._exec_with_session("bw get template org-collection"))
+        entry: dict[str, Any] = json.loads(
+            self._exec_with_session("bw get template org-collection")
+        )
 
         # set org and Name
         entry["name"] = collectionname
@@ -212,12 +220,12 @@ class BitwardenClient:
         )
         if not output:
             return None
-        data = json.loads(output)
+        data: dict[str, Any] = json.loads(output)
         if not data["id"]:
             return None
-        newCollId = data["id"]
+        new_coll_id: str = data["id"]
 
         # store in cache
-        self._colls[collectionname] = newCollId
+        self._colls[collectionname] = new_coll_id
 
-        return newCollId
+        return new_coll_id

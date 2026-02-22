@@ -23,6 +23,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   bare `Exception` raises.
 - Module-level loggers replacing root logger calls.
 - New CLI flags: `-skip-expired`, `-include-recyclebin`, `-no-metadata`.
+- Type annotations on all source modules (`bitwardenclient.py`, `cli.py`,
+  `convert.py`). Type aliases for pykeepass types (`KpEntry`, `KpGroup`) and
+  Bitwarden structures (`BwItem`, `EntryValue`, `Fido2Credentials`).
 
 ### Changed
 

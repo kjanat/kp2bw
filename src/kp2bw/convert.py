@@ -3,6 +3,7 @@ import binascii
 import json
 import logging
 from itertools import islice
+from typing import Any
 
 from pykeepass import PyKeePass
 
@@ -11,28 +12,57 @@ from .exceptions import ConversionError
 
 logger = logging.getLogger(__name__)
 
-KP_REF_IDENTIFIER = "{REF:"
-MAX_BW_ITEM_LENGTH = 10 * 1000
-KPEX_PASSKEY_PREFIX = "KPEX_PASSKEY_"
+KP_REF_IDENTIFIER: str = "{REF:"
+MAX_BW_ITEM_LENGTH: int = 10 * 1000
+KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
+
+# pykeepass has no type stubs; use Any for its entry/group types
+type KpEntry = Any
+type KpGroup = Any
+
+# Bitwarden item dict type
+type BwItem = dict[str, Any]
+
+# Entry storage: 2-tuple (folder, bw_item) or 3-tuple (folder, bw_item, attachments)
+type EntryValue = tuple[str | None, BwItem] | tuple[str | None, BwItem, list[Any]]
+
+# Fido2 credential list type
+type Fido2Credentials = list[dict[str, str | None]]
 
 
 class Converter:
+    _keepass_file_path: str
+    _keepass_password: str | None
+    _keepass_keyfile_path: str | None
+    _bitwarden_password: str
+    _bitwarden_organization_id: str | None
+    _bitwarden_coll_id: str | None
+    _path2name: bool
+    _path2nameskip: int
+    _import_tags: list[str] | None
+    _skip_expired: bool
+    _include_recyclebin: bool
+    _migrate_metadata: bool
+    _kp_ref_entries: list[KpEntry]
+    _entries: dict[str, EntryValue]
+    _member_reference_resolving_dict: dict[str, str]
+
     def __init__(
         self,
-        keepass_file_path,
-        keepass_password,
-        keepass_keyfile_path,
-        bitwarden_password,
-        bitwarden_organization_id,
-        bitwarden_coll_id,
-        path2name,
-        path2nameskip,
-        import_tags,
+        keepass_file_path: str,
+        keepass_password: str | None,
+        keepass_keyfile_path: str | None,
+        bitwarden_password: str,
+        bitwarden_organization_id: str | None,
+        bitwarden_coll_id: str | None,
+        path2name: bool,
+        path2nameskip: int,
+        import_tags: list[str] | None,
         *,
-        skip_expired=False,
-        include_recyclebin=False,
-        migrate_metadata=True,
-    ):
+        skip_expired: bool = False,
+        include_recyclebin: bool = False,
+        migrate_metadata: bool = True,
+    ) -> None:
         self._keepass_file_path = keepass_file_path
         self._keepass_password = keepass_password
         self._keepass_keyfile_path = keepass_keyfile_path
@@ -51,7 +81,7 @@ class Converter:
         self._member_reference_resolving_dict = {"username": "U", "password": "P"}
 
     @staticmethod
-    def _convert_pem_to_base64url(pem_key):
+    def _convert_pem_to_base64url(pem_key: str) -> str:
         """Convert a PEM-encoded private key to base64url (no padding)."""
         lines = pem_key.strip().splitlines()
         # Strip PEM header/footer lines
@@ -59,12 +89,12 @@ class Converter:
         raw_bytes = base64.b64decode(b64_data)
         return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode()
 
-    def _build_fido2_credentials(self, entry):
+    def _build_fido2_credentials(self, entry: KpEntry) -> Fido2Credentials | None:
         """Extract KeePassXC passkey attributes and convert to Bitwarden fido2Credentials format."""
-        props = entry.custom_properties
+        props: dict[str, str] = entry.custom_properties
 
-        credential_id = props.get("KPEX_PASSKEY_CREDENTIAL_ID")
-        private_key_pem = props.get("KPEX_PASSKEY_PRIVATE_KEY_PEM")
+        credential_id: str | None = props.get("KPEX_PASSKEY_CREDENTIAL_ID")
+        private_key_pem: str | None = props.get("KPEX_PASSKEY_PRIVATE_KEY_PEM")
 
         if not credential_id or not private_key_pem:
             return None
@@ -77,7 +107,7 @@ class Converter:
             )
             return None
 
-        creation_date = entry.ctime.isoformat() if entry.ctime else None
+        creation_date: str | None = entry.ctime.isoformat() if entry.ctime else None
 
         return [
             {
@@ -101,18 +131,18 @@ class Converter:
 
     def _create_bw_python_object(
         self,
-        title,
-        notes,
-        url,
-        totp,
-        username,
-        password,
-        custom_properties,
-        collectionId,
-        firstlevel,
-        fido2_credentials=None,
-    ):
-        login = {
+        title: str,
+        notes: str,
+        url: str,
+        totp: str,
+        username: str,
+        password: str,
+        custom_properties: dict[str, list[Any]],
+        collection_id: str | None,
+        firstlevel: str | None,
+        fido2_credentials: Fido2Credentials | None = None,
+    ) -> BwItem:
+        login: dict[str, Any] = {
             "uris": [{"match": None, "uri": url}] if url else [],
             "username": username,
             "password": password,
@@ -124,7 +154,7 @@ class Converter:
 
         return {
             "organizationId": self._bitwarden_organization_id,
-            "collectionIds": collectionId,
+            "collectionIds": collection_id,
             "firstlevel": firstlevel,
             "folderId": None,
             "type": 1,
@@ -142,13 +172,13 @@ class Converter:
             "identity": None,
         }
 
-    def _generate_folder_name(self, entry):
+    def _generate_folder_name(self, entry: KpEntry) -> str | None:
         if not entry.group.path or entry.group.path == "/":
             return None
         else:
             return "/".join(entry.group.path)
 
-    def _generate_prefix(self, entry, skip):
+    def _generate_prefix(self, entry: KpEntry, skip: int) -> str:
         if not entry.group.path or entry.group.path == "/":
             return ""
         else:
@@ -157,26 +187,28 @@ class Converter:
                 out += item + " / "
             return out
 
-    def _get_folder_firstlevel(self, entry):
+    def _get_folder_firstlevel(self, entry: KpEntry) -> str | None:
         if not entry.group.path or entry.group.path == "/":
             return None
         else:
             return entry.group.path[0]
 
-    def _is_in_recyclebin(self, entry, recyclebin_group):
+    def _is_in_recyclebin(
+        self, entry: KpEntry, recyclebin_group: KpGroup | None
+    ) -> bool:
         """Check if an entry is inside the recycle bin group."""
         if recyclebin_group is None:
             return False
-        group = entry.group
+        group: KpGroup | None = entry.group
         while group is not None:
             if group == recyclebin_group:
                 return True
             group = group.parentgroup
         return False
 
-    def _build_metadata_fields(self, entry):
+    def _build_metadata_fields(self, entry: KpEntry) -> dict[str, list[Any]]:
         """Build extra custom fields for KeePass metadata (tags, expiry, timestamps)."""
-        fields = {}
+        fields: dict[str, list[Any]] = {}
 
         # Tags
         if entry.tags:
@@ -194,13 +226,18 @@ class Converter:
 
         return fields
 
-    def _add_bw_entry_to_entries_dict(self, entry, custom_protected):
+    def _add_bw_entry_to_entries_dict(
+        self, entry: KpEntry, custom_protected: list[str] | None
+    ) -> None:
         folder = self._generate_folder_name(entry)
         prefix = ""
         if folder and self._path2name:
             prefix = self._generate_prefix(entry, self._path2nameskip)
 
-        custom_properties = {}
+        if custom_protected is None:
+            custom_protected = []
+
+        custom_properties: dict[str, list[Any]] = {}
         for key, value in entry.custom_properties.items():
             # Skip KeePassXC passkey attributes -- handled separately
             if key.startswith(KPEX_PASSKEY_PREFIX):
@@ -227,21 +264,22 @@ class Converter:
             expired_prefix = "[EXPIRED] "
             notes = expired_prefix + notes
 
+        title: str = prefix + entry.title if entry.title else prefix + "_untitled"
         bw_item_object = self._create_bw_python_object(
-            title=prefix + entry.title if entry.title else prefix + "_untitled",
+            title=title,
             notes=notes,
             url=entry.url if entry.url else "",
             totp=entry.otp if entry.otp else "",
             username=entry.username if entry.username else "",
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
-            collectionId=self._bitwarden_coll_id,
+            collection_id=self._bitwarden_coll_id,
             firstlevel=self._get_folder_firstlevel(entry),
             fido2_credentials=fido2_credentials,
         )
 
         # get attachments to store later on
-        attachments = [
+        attachments: list[Any] = [
             (key, value)
             for key, value in entry.custom_properties.items()
             if value is not None and len(value) > MAX_BW_ITEM_LENGTH
@@ -250,21 +288,21 @@ class Converter:
         if entry.notes and len(entry.notes) > MAX_BW_ITEM_LENGTH:
             attachments.append(("notes", entry.notes))
 
+        entry_key: str = str(entry.uuid).replace("-", "").upper()
         if entry.attachments or attachments:
             attachments += entry.attachments
-            self._entries[str(entry.uuid).replace("-", "").upper()] = (
+            self._entries[entry_key] = (
                 folder,
                 bw_item_object,
                 attachments,
             )
-
         else:
-            self._entries[str(entry.uuid).replace("-", "").upper()] = (
+            self._entries[entry_key] = (
                 folder,
                 bw_item_object,
             )
 
-    def _parse_kp_ref_string(self, ref_string):
+    def _parse_kp_ref_string(self, ref_string: str) -> tuple[str, str, str]:
         # {REF:U@I:CFC0141068E83547BCEEAF0C1ADABAE0}
         tokens = ref_string.split(":")
 
@@ -276,7 +314,9 @@ class Converter:
 
         return (field_referenced, lookup_mode, ref_compare_string)
 
-    def _get_referenced_entry(self, lookup_mode, ref_compare_string):
+    def _get_referenced_entry(
+        self, lookup_mode: str, ref_compare_string: str
+    ) -> EntryValue:
         if lookup_mode == "I":
             # KP_ID lookup
             try:
@@ -287,14 +327,16 @@ class Converter:
         else:
             raise ConversionError("Unsupported REF lookup_mode")
 
-    def _find_referenced_value(self, ref_entry, field_referenced):
+    def _find_referenced_value(
+        self, ref_entry: BwItem, field_referenced: str
+    ) -> str | None:
         for member, reference_key in self._member_reference_resolving_dict.items():
             if field_referenced == reference_key:
                 return ref_entry["login"][member]
 
         raise ConversionError("Unsupported REF field_referenced")
 
-    def _load_keepass_data(self):
+    def _load_keepass_data(self) -> None:
         # aggregate entries
         kp = PyKeePass(
             filename=self._keepass_file_path,
@@ -305,17 +347,18 @@ class Converter:
         # reset data structures
         self._kp_ref_entries = []
         self._entries = {}
-        custom_protected = []
+        custom_protected: list[str] = []
 
         # Identify recycle bin group for filtering
-        recyclebin_group = kp.recyclebin_group
+        recyclebin_group: KpGroup | None = kp.recyclebin_group
 
-        total_entries = len(kp.entries)
+        entries: list[KpEntry] = kp.entries or []
+        total_entries: int = len(entries)
         skipped_recyclebin = 0
         skipped_expired = 0
 
         logger.info(f"Found {total_entries} entries in KeePass DB. Parsing now...")
-        for entry in kp.entries:
+        for entry in entries:
             # Skip recycle bin entries unless explicitly included
             if not self._include_recyclebin and self._is_in_recyclebin(
                 entry, recyclebin_group
@@ -330,8 +373,8 @@ class Converter:
                 continue
 
             # prevent not iterable errors at "in" checks
-            username = entry.username if entry.username else ""
-            password = entry.password if entry.password else ""
+            username: str = entry.username if entry.username else ""
+            password: str = entry.password if entry.password else ""
 
             # Skip REFs as ID might not be in dict yet
             if KP_REF_IDENTIFIER in username or KP_REF_IDENTIFIER in password:
@@ -365,7 +408,7 @@ class Converter:
             logger.info(f"Skipped {skipped_expired} expired entries")
         logger.info(f"Parsed {len(self._entries)} entries")
 
-    def _resolve_entries_with_references(self):
+    def _resolve_entries_with_references(self) -> None:
         ref_entries_length = len(self._kp_ref_entries)
 
         if ref_entries_length == 0:
@@ -375,15 +418,17 @@ class Converter:
         for kp_entry in self._kp_ref_entries:
             try:
                 # replace values
-                replaced_entries = []
+                replaced_entries: list[BwItem] = []
+                ref_entry: BwItem | None = None
                 for member in self._member_reference_resolving_dict:
                     if KP_REF_IDENTIFIER in getattr(kp_entry, member):
                         field_referenced, lookup_mode, ref_compare_string = (
                             self._parse_kp_ref_string(getattr(kp_entry, member))
                         )
-                        _, ref_entry = self._get_referenced_entry(
+                        ref_result = self._get_referenced_entry(
                             lookup_mode, ref_compare_string
                         )
+                        ref_entry = ref_result[1]
 
                         value = self._find_referenced_value(ref_entry, field_referenced)
                         setattr(kp_entry, member, value)
@@ -400,7 +445,7 @@ class Converter:
                         username_and_password_match = False
                         break
 
-                if username_and_password_match:
+                if username_and_password_match and ref_entry is not None:
                     # => add url to bw_item => username / pw identical
                     ref_entry["login"]["uris"].append({
                         "match": None,
@@ -417,7 +462,7 @@ class Converter:
 
         logger.debug(f"Resolved {ref_entries_length} REF entries")
 
-    def _create_bitwarden_items_for_entries(self):
+    def _create_bitwarden_items_for_entries(self) -> None:
         i = 1
         max_i = len(self._entries)
 
@@ -425,39 +470,39 @@ class Converter:
 
         bw = BitwardenClient(self._bitwarden_password, self._bitwarden_organization_id)
 
-        # if self._bitwarden_coll_id == 'auto':
-        # lookup collections
-
-        for value in self._entries.values():
-            if len(value) == 2:
-                (folder, bw_item_object) = value
-                attachments = None
+        for entry_value in self._entries.values():
+            if len(entry_value) == 2:
+                folder, bw_item_object = entry_value[0], entry_value[1]
+                attachments: list[Any] | None = None
             else:
-                (folder, bw_item_object, attachments) = value
+                folder = entry_value[0]
+                bw_item_object = entry_value[1]
+                # entry_value is a 3-tuple here; index 2 is valid
+                attachments = entry_value[2]  # type: ignore[index]
 
             # collection
-            collectionId = None
-            collInfo = ""
+            collection_id: str | None = None
+            coll_info = ""
             if bw_item_object["firstlevel"]:
                 if self._bitwarden_coll_id == "auto":
                     logger.info(f"Searching Collection {bw_item_object['firstlevel']}")
-                    collectionId = bw.create_org_get_collection(
+                    collection_id = bw.create_org_get_collection(
                         bw_item_object["firstlevel"]
                     )
-                    collInfo = (
+                    coll_info = (
                         " in specified Collection " + bw_item_object["firstlevel"]
                     )
 
                 elif self._bitwarden_coll_id:
-                    collectionId = self._bitwarden_coll_id
-                    collInfo = " in specified Collection "
+                    collection_id = self._bitwarden_coll_id
+                    coll_info = " in specified Collection "
 
             # update object
             del bw_item_object["firstlevel"]
-            bw_item_object["collectionIds"] = collectionId
+            bw_item_object["collectionIds"] = collection_id
 
             logger.info(
-                f"[{i} of {max_i}] Creating Bitwarden entry in {folder} for {bw_item_object['name']}{collInfo}..."
+                f"[{i} of {max_i}] Creating Bitwarden entry in {folder} for {bw_item_object['name']}{coll_info}..."
             )
 
             # create entry
@@ -472,7 +517,7 @@ class Converter:
 
             # upload attachments
             if attachments:
-                item_id = json.loads(output)["id"]
+                item_id: str = json.loads(output)["id"]
 
                 for attachment in attachments:
                     logger.info(
@@ -484,7 +529,7 @@ class Converter:
 
             i += 1
 
-    def convert(self):
+    def convert(self) -> None:
         # load keepass data from database
         self._load_keepass_data()
 

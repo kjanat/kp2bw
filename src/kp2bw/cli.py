@@ -1,19 +1,20 @@
 import getpass
 import logging
 import sys
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
+from typing import NoReturn
 
 from .convert import Converter
 
 
 class MyArgParser(ArgumentParser):
-    def error(self, message):
-        sys.stderr.write(f"{self.prog}: {message}\n\n")
+    def error(self, message: str) -> NoReturn:
+        _ = sys.stderr.write(f"{self.prog}: {message}\n\n")
         self.print_help()
         sys.exit(2)
 
 
-def _argparser():
+def _argparser() -> MyArgParser:
     parser = MyArgParser(description="KeePass 2.x to Bitwarden converter by @jampe")
 
     parser.add_argument("keepass_file", help="Path to your KeePass 2.x db.")
@@ -94,18 +95,18 @@ def _argparser():
     return parser
 
 
-def _read_password(arg, prompt):
+def _read_password(arg: str | None, prompt: str) -> str:
     if not arg:
         arg = getpass.getpass(prompt=prompt)
 
     return arg
 
 
-def main():
-    args = _argparser().parse_args()
+def main() -> None:
+    args: Namespace = _argparser().parse_args()
 
     if args.bw_coll and not args.bw_org:
-        sys.stderr.write("ERROR: -bwcoll requires --bworg\n\n")
+        _ = sys.stderr.write("ERROR: -bwcoll requires --bworg\n\n")
         _argparser().print_help()
         sys.exit(2)
 
@@ -117,7 +118,7 @@ def main():
 
     # bw confirmation
     if not args.skip_confirm:
-        confirm = None
+        confirm: str | None = None
         print("Do you have bw cli installed and is it set up?")
         print(
             "1) If you use an on premise installation, use bw config to set the url: bw config server <url>"
@@ -135,8 +136,10 @@ def main():
             sys.exit(2)
 
     # stdin password
-    kp_pw = _read_password(args.kp_pw, "Please enter your KeePass 2.x db password: ")
-    bw_pw = _read_password(args.bw_pw, "Please enter your Bitwarden password: ")
+    kp_pw: str = _read_password(
+        args.kp_pw, "Please enter your KeePass 2.x db password: "
+    )
+    bw_pw: str = _read_password(args.bw_pw, "Please enter your Bitwarden password: ")
 
     # call converter
     c = Converter(
