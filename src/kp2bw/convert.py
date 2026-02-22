@@ -25,6 +25,10 @@ class Converter:
         path2name,
         path2nameskip,
         import_tags,
+        *,
+        skip_expired=False,
+        include_recyclebin=False,
+        migrate_metadata=True,
     ):
         self._keepass_file_path = keepass_file_path
         self._keepass_password = keepass_password
@@ -35,6 +39,9 @@ class Converter:
         self._path2name = path2name
         self._path2nameskip = path2nameskip
         self._import_tags = import_tags
+        self._skip_expired = skip_expired
+        self._include_recyclebin = include_recyclebin
+        self._migrate_metadata = migrate_metadata
         self._kp_ref_entries = []
         self._entries = {}
 
@@ -99,6 +106,37 @@ class Converter:
         else:
             return entry.group.path[0]
 
+    def _is_in_recyclebin(self, entry, recyclebin_group):
+        """Check if an entry is inside the recycle bin group."""
+        if recyclebin_group is None:
+            return False
+        group = entry.group
+        while group is not None:
+            if group == recyclebin_group:
+                return True
+            group = group.parentgroup
+        return False
+
+    def _build_metadata_fields(self, entry):
+        """Build extra custom fields for KeePass metadata (tags, expiry, timestamps)."""
+        fields = {}
+
+        # Tags
+        if entry.tags:
+            fields["KeePass Tags"] = [", ".join(entry.tags), 0]
+
+        # Expiry
+        if entry.expires and entry.expiry_time:
+            fields["Expires"] = [entry.expiry_time.isoformat(), 0]
+
+        # Timestamps
+        if entry.ctime:
+            fields["Created"] = [entry.ctime.isoformat(), 0]
+        if entry.mtime:
+            fields["Modified"] = [entry.mtime.isoformat(), 0]
+
+        return fields
+
     def _add_bw_entry_to_entries_dict(self, entry, custom_protected):
         folder = self._generate_folder_name(entry)
         prefix = ""
@@ -112,11 +150,21 @@ class Converter:
             else:
                 custom_properties[key] = [value, 0]
 
+        # Add metadata fields (tags, expiry, timestamps) if enabled
+        if self._migrate_metadata:
+            custom_properties.update(self._build_metadata_fields(entry))
+
+        # Build notes, prepending [EXPIRED] marker if applicable
+        notes = ""
+        if entry.notes and len(entry.notes) <= MAX_BW_ITEM_LENGTH:
+            notes = entry.notes
+        if entry.expired:
+            expired_prefix = "[EXPIRED] "
+            notes = expired_prefix + notes
+
         bw_item_object = self._create_bw_python_object(
             title=prefix + entry.title if entry.title else prefix + "_untitled",
-            notes=entry.notes
-            if entry.notes and len(entry.notes) <= MAX_BW_ITEM_LENGTH
-            else "",
+            notes=notes,
             url=entry.url if entry.url else "",
             totp=entry.otp if entry.otp else "",
             username=entry.username if entry.username else "",
@@ -193,11 +241,27 @@ class Converter:
         self._entries = {}
         custom_protected = []
 
-        logger.info(f"Found {len(kp.entries)} entries in KeePass DB. Parsing now...")
+        # Identify recycle bin group for filtering
+        recyclebin_group = kp.recyclebin_group
+
+        total_entries = len(kp.entries)
+        skipped_recyclebin = 0
+        skipped_expired = 0
+
+        logger.info(f"Found {total_entries} entries in KeePass DB. Parsing now...")
         for entry in kp.entries:
-            # if not entry.password and not entry.username and not entry.notes:
-            #     logging.warn(f"Ignoring entry {entry.title} since it has neither (1) a password, (2) a username, or (3) notes")
-            #     continue
+            # Skip recycle bin entries unless explicitly included
+            if not self._include_recyclebin and self._is_in_recyclebin(
+                entry, recyclebin_group
+            ):
+                skipped_recyclebin += 1
+                continue
+
+            # Skip expired entries if requested
+            if self._skip_expired and entry.expired:
+                skipped_expired += 1
+                logger.debug(f"Skipping expired entry: {entry.title}")
+                continue
 
             # prevent not iterable errors at "in" checks
             username = entry.username if entry.username else ""
@@ -229,6 +293,10 @@ class Converter:
             else:
                 self._add_bw_entry_to_entries_dict(entry, custom_protected)
 
+        if skipped_recyclebin:
+            logger.info(f"Skipped {skipped_recyclebin} entries in the Recycle Bin")
+        if skipped_expired:
+            logger.info(f"Skipped {skipped_expired} expired entries")
         logger.info(f"Parsed {len(self._entries)} entries")
 
     def _resolve_entries_with_references(self):

@@ -38,24 +38,41 @@ def _argparser():
         help="Id of Org-Collection, or 'auto' to use name from toplevel-folders",
         default=None,
     )
-    (
-        parser.add_argument(
-            "-path2name",
-            dest="path2name",
-            help="Prepend folderpath of entries to each name",
-            action="store_const",
-            const=True,
-            default=True,
-        ),
+    parser.add_argument(
+        "-path2name",
+        dest="path2name",
+        help="Prepend folderpath of entries to each name",
+        action="store_const",
+        const=True,
+        default=True,
     )
-    (
-        parser.add_argument(
-            "-path2nameskip",
-            dest="path2nameskip",
-            help="Skip first X folders for path2name (default: 1)",
-            default=1,
-            type=int,
-        ),
+    parser.add_argument(
+        "-path2nameskip",
+        dest="path2nameskip",
+        help="Skip first X folders for path2name (default: 1)",
+        default=1,
+        type=int,
+    )
+    parser.add_argument(
+        "-skip-expired",
+        dest="skip_expired",
+        help="Skip entries that have expired in KeePass",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "-include-recyclebin",
+        dest="include_recyclebin",
+        help="Include entries from the KeePass Recycle Bin (excluded by default)",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "-no-metadata",
+        dest="migrate_metadata",
+        help="Do not migrate KeePass metadata (tags, expiry, timestamps) as custom fields",
+        action="store_false",
+        default=True,
     )
     parser.add_argument(
         "-y",
@@ -132,6 +149,9 @@ def main():
         path2name=args.path2name,
         path2nameskip=args.path2nameskip,
         import_tags=args.import_tags,
+        skip_expired=args.skip_expired,
+        include_recyclebin=args.include_recyclebin,
+        migrate_metadata=args.migrate_metadata,
     )
     c.convert()
 

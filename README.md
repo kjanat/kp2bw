@@ -17,6 +17,11 @@ the built-in Bitwarden importer:
   `notes.txt` attachments
 - **Idempotent** -- safe to run multiple times without duplicating entries
 - **Nested folders** -- KeePass folder hierarchy is recreated in Bitwarden
+- **Recycle Bin filtering** -- deleted entries are automatically excluded
+- **Expiry awareness** -- expired entries are marked `[EXPIRED]` in notes;
+  optionally skip them entirely with `-skip-expired`
+- **Metadata preservation** -- KeePass tags, expiry dates, and created/modified
+  timestamps are stored as Bitwarden custom fields
 - **Tag filtering** -- import only entries matching specific tags
 - **Organization & collection support** -- upload into a Bitwarden organization
   with automatic or manual collection assignment
@@ -52,23 +57,27 @@ bw login <user>
 ```
 kp2bw [-h] [-kppw KP_PW] [-kpkf KP_KEYFILE] [-bwpw BW_PW]
        [-bworg BW_ORG] [-bwcoll BW_COLL] [-import_tags TAG ...]
-       [-path2name] [-path2nameskip N] [-y] [-v]
-       keepass_file
+       [-path2name] [-path2nameskip N]
+       [-skip-expired] [-include-recyclebin] [-no-metadata]
+       [-y] [-v] keepass_file
 ```
 
-| Flag             | Description                                                    |
-| ---------------- | -------------------------------------------------------------- |
-| `keepass_file`   | Path to your KeePass 2.x database                              |
-| `-kppw`          | KeePass password (prompted if omitted)                         |
-| `-kpkf`          | KeePass key file                                               |
-| `-bwpw`          | Bitwarden password (prompted if omitted)                       |
-| `-bworg`         | Bitwarden Organization ID                                      |
-| `-bwcoll`        | Collection ID, or `auto` to derive from top-level folder names |
-| `-import_tags`   | Only import entries with these tags                            |
-| `-path2name`     | Prepend folder path to entry names                             |
-| `-path2nameskip` | Skip first N folders in path prefix (default: 1)               |
-| `-y`             | Skip the Bitwarden CLI setup confirmation prompt               |
-| `-v`             | Verbose output                                                 |
+| Flag                  | Description                                                    |
+| --------------------- | -------------------------------------------------------------- |
+| `keepass_file`        | Path to your KeePass 2.x database                              |
+| `-kppw`               | KeePass password (prompted if omitted)                         |
+| `-kpkf`               | KeePass key file                                               |
+| `-bwpw`               | Bitwarden password (prompted if omitted)                       |
+| `-bworg`              | Bitwarden Organization ID                                      |
+| `-bwcoll`             | Collection ID, or `auto` to derive from top-level folder names |
+| `-import_tags`        | Only import entries with these tags                            |
+| `-path2name`          | Prepend folder path to entry names                             |
+| `-path2nameskip`      | Skip first N folders in path prefix (default: 1)               |
+| `-skip-expired`       | Skip entries that have expired in KeePass                      |
+| `-include-recyclebin` | Include Recycle Bin entries (excluded by default)              |
+| `-no-metadata`        | Don't add tags/expiry/timestamps as custom fields              |
+| `-y`                  | Skip the Bitwarden CLI setup confirmation prompt               |
+| `-v`                  | Verbose output                                                 |
 
 ## Troubleshooting
 
