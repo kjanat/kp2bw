@@ -176,7 +176,11 @@ class BitwardenClient:
             data = attachment[1].encode("UTF-8")
         else:
             # real kp attachment
-            filename = attachment.filename or "attachment"
+            if attachment.filename is None:
+                logger.warning("Attachment has no filename, using fallback")
+                filename = "attachment"
+            else:
+                filename = attachment.filename
             data = attachment.data
 
         # make sure temporary attachment folder exists

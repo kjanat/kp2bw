@@ -55,7 +55,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **pykeepass.pyi** -- `add_entry` `tags` parameter accepts
   `list[str] | str | None`. Added `_encode_time` and `_decode_time`.
 - **icons.pyi** -- New stub declaring `icons: SimpleNamespace`.
-- **__init__.pyi** -- Added `icons` re-export and `__all__` entry.
+- **\_\_init\_\_.pyi** -- Added `icons` re-export and `__all__` entry.
 - Ignored `PYI029` in stubs `ruff.lint` config (`__repr__` without `__eq__` is
   intentional — `__eq__` is on `BaseElement`).
 
