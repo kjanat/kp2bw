@@ -4,10 +4,8 @@ version         = "0.1.0"
 description     = "Type stubs for pykeepass"
 readme          = "README.md"
 requires-python = ">=3.14"
-classifiers     = ["Private :: Do Not Upload"]
-dependencies    = [
-  "types-lxml>=2026.2.16",
-]
+classifiers     = []
+dependencies    = ["types-lxml>=2026.2.16"]   # "lxml>=6.0.2"
 
 [[project.authors]]
 name  = "Kaj Kowalski"

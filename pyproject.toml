@@ -4,7 +4,7 @@ version         = "1.1.0"
 description     = "Imports and existing KeePass db with REF fields into Bitwarden"
 readme          = "README.md"
 requires-python = ">=3.14"
-classifiers     = ["Private :: Do Not Upload"]
+classifiers     = []
 dependencies    = ["pykeepass>=4.1.1.post1"]
 
 [[project.authors]]
@@ -28,7 +28,7 @@ lint  = [
   "tombi>=0.7.32",
   "ty>=0.0.18",
 ]
-stubs = ["pykeepass-stubs"]     # "lxml>=6.0.2"
+stubs = ["pykeepass-stubs"]
 
 [build-system]
 requires      = ["uv_build>=0.10.2,<0.11.0"]
