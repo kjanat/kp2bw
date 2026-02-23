@@ -1,0 +1,27 @@
+# Progress Log
+
+PRD: performance-bw-serve-transport
+Started: 2026-02-23
+
+## Codebase Patterns
+
+- **Module logger**: each module uses `logger = logging.getLogger(__name__)`
+- **Custom exceptions only**: `BitwardenClientError` for bw failures, `ConversionError` for migration logic
+- **`signal.getsignal` type**: returns `Callable[[int, FrameType | None], Any] | int | None`, not `signal.Handlers`. Use `isinstance(prev, int) or prev is None` to narrow before calling.
+- **`from __future__ import annotations`**: use in new modules for PEP 604 union syntax in annotations
+- **httpx added as runtime dep**: `httpx>=0.28.0` in pyproject.toml
+
+---
+
+<!-- Task logs below - APPEND ONLY -->
+
+## Task - serve-lifecycle
+
+- Implemented `BitwardenServeClient` in `src/kp2bw/bw_serve.py` (240 lines)
+- Process lifecycle: `_start_serve()` → `_wait_for_ready()` (poll GET /status) → `_unlock()` → `_sync()`
+- Cleanup: `atexit.register`, SIGTERM/SIGINT handlers, context manager `__enter__`/`__exit__`
+- Random port via `_find_free_port()` (bind to 0, read assigned port)
+- Generic `_request()` helper: parses bw serve JSON envelope (`success`/`data`/`message`)
+- Added `httpx>=0.28.0` to runtime dependencies
+- Files changed: `src/kp2bw/bw_serve.py` (new), `pyproject.toml`, `uv.lock`
+- **Learnings:** `ty` is strict about `signal.getsignal` return type — can't use `callable()` to narrow since `int` is callable; use `isinstance(prev, int)` guard instead

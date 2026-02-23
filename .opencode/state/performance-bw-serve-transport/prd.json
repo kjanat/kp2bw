@@ -1,0 +1,72 @@
+{
+  "prdName": "performance-bw-serve-transport",
+  "description": "Replace subprocess-per-operation architecture with bw serve HTTP transport + bw import batch creation for ~21x speedup",
+  "specFile": "specs/performance-bw-serve-transport.md",
+  "issueUrl": "https://github.com/kjanat/kp2bw/issues/1",
+  "tasks": [
+    {
+      "id": "serve-lifecycle",
+      "title": "D1: BitwardenServeClient — serve lifecycle",
+      "description": "Start/stop bw serve process, health check polling, unlock, sync, random port selection, atexit + signal cleanup handlers. Context manager protocol.",
+      "files": ["src/kp2bw/bw_serve.py"],
+      "priority": "architecture",
+      "passes": true
+    },
+    {
+      "id": "serve-crud",
+      "title": "D3: Serve-based CRUD operations",
+      "description": "HTTP wrappers for create_folder, create_item, list_items, list_folders via bw serve. Folder name→id cache. Used as fallback for org items.",
+      "files": ["src/kp2bw/bw_serve.py"],
+      "priority": "architecture",
+      "passes": false
+    },
+    {
+      "id": "dedup-via-serve",
+      "title": "D5: Dedup via serve",
+      "description": "Query existing items/folders via serve, build dict[str, set[str]] index, filter entries before import. O(1) lookup.",
+      "files": ["src/kp2bw/bw_serve.py"],
+      "priority": "integration",
+      "passes": false
+    },
+    {
+      "id": "import-batch",
+      "title": "D2: bw import batch entry creation",
+      "description": "Build Bitwarden JSON import dict from parsed entries. Synthetic UUIDs for folder cross-refs. Write temp file, execute bw import bitwardenjson, delete temp file.",
+      "files": ["src/kp2bw/bw_import.py"],
+      "priority": "architecture",
+      "passes": false
+    },
+    {
+      "id": "async-attachments",
+      "title": "D4: Async parallel attachment uploads",
+      "description": "asyncio + httpx.AsyncClient with semaphore-bounded concurrency for multipart attachment uploads to POST /attachment?itemid=<id>.",
+      "files": ["src/kp2bw/bw_serve.py"],
+      "priority": "architecture",
+      "passes": false
+    },
+    {
+      "id": "collection-support",
+      "title": "D6: Collection support via serve",
+      "description": "POST /object/org-collection via serve. Template fetch. Cached collection creation.",
+      "files": ["src/kp2bw/bw_serve.py"],
+      "priority": "integration",
+      "passes": false
+    },
+    {
+      "id": "cli-integration",
+      "title": "D7: CLI + convert.py integration",
+      "description": "Wire new client into convert.py. Update cli.py flags. Add httpx dependency. Remove old bitwardenclient.py.",
+      "files": ["src/kp2bw/convert.py", "src/kp2bw/cli.py", "src/kp2bw/bitwardenclient.py", "pyproject.toml"],
+      "priority": "integration",
+      "passes": false
+    },
+    {
+      "id": "e2e-tests",
+      "title": "D8: E2E test updates",
+      "description": "Update Vaultwarden e2e test for new transport. Add attachment test fixtures if missing.",
+      "files": ["tests/e2e_vaultwarden_test.py"],
+      "priority": "polish",
+      "passes": false
+    }
+  ]
+}

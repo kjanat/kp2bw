@@ -15,7 +15,7 @@ classifiers     = [
   "Topic :: Utilities",
   "Typing :: Typed",
 ]
-dependencies    = ["pykeepass>=4.1.1.post1"]
+dependencies    = ["httpx>=0.28.0", "pykeepass>=4.1.1.post1"]
 
 [[project.authors]]
 name  = "Kaj Kowalski"
