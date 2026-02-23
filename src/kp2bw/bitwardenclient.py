@@ -82,14 +82,21 @@ class BitwardenClient:
             shutil.rmtree(self.TEMPORARY_ATTACHMENT_FOLDER)
 
     def _exec(self, command: str) -> str:
+        output: bytes
         try:
-            logger.debug(f"-- Executing command: {command}")
+            logger.debug("-- Executing Bitwarden CLI command")
             output = check_output(command, stderr=STDOUT, shell=True)
         except CalledProcessError as e:
-            output = e.output
+            logger.debug(
+                f"  |- Bitwarden CLI command failed with exit code {e.returncode}"
+            )
+            if isinstance(e.output, bytes):
+                output = e.output
+            else:
+                output = str(e.output).encode("utf-8", "ignore")
 
-        logger.debug(f"  |- Output: {output}")
-        return str(output.decode("utf-8", "ignore"))
+        logger.debug(f"  |- Received {len(output)} bytes from Bitwarden CLI")
+        return output.decode("utf-8", "ignore")
 
     def _get_existing_folder_entries(self) -> dict[str | None, list[str]]:
         folder_id_lookup_helper: dict[str, str] = {
