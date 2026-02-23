@@ -70,7 +70,7 @@ uv run tombi fmt pyproject.toml  # TOML formatting (run via dprint if configured
 
 # Type checking
 uv run ty check                # primary type checker (Astral)
-uv run basedpyright            # secondary type checker
+uv run basedpyright            # secondary type checker (also run this one!)
 
 # Type checking (scripts/ JavaScript)
 bun --cwd=scripts typecheck    # checks github-script modules via tsgo

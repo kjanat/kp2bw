@@ -55,6 +55,7 @@ class BitwardenServeClient:
     _folders: dict[str, str]  # name → id cache
     _existing_entries: dict[str | None, set[str]]  # folder_name → {item names}
     _collections: dict[str, str] | None  # name → id cache (None if no org)
+    _org_id: str | None
     _closed: bool
 
     # ------------------------------------------------------------------
@@ -542,6 +543,7 @@ class BitwardenServeClient:
             timeout=_HTTP_TIMEOUT_S,
         ) as client:
             tasks: list[asyncio.Task[None]] = []
+            labels: list[str] = []
             for item_id, attachments in items:
                 for filename, data in attachments:
                     tasks.append(
@@ -549,14 +551,20 @@ class BitwardenServeClient:
                             _upload_one(client, item_id, filename, data)
                         )
                     )
+                    labels.append(f"{filename} (item {item_id})")
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        failures = [r for r in results if isinstance(r, BaseException)]
-        if failures:
-            for err in failures:
-                logger.error(f"Attachment upload failed: {err}")
+        failed_labels: list[str] = []
+        for label, result in zip(labels, results, strict=True):
+            if isinstance(result, BaseException):
+                logger.error(f"Attachment upload failed for {label}: {result}")
+                failed_labels.append(label)
+        if failed_labels:
+            summary = ", ".join(failed_labels[:5])
+            if len(failed_labels) > 5:
+                summary += f", ... (+{len(failed_labels) - 5} more)"
             raise BitwardenClientError(
-                f"{len(failures)}/{total} attachment uploads failed"
+                f"{len(failed_labels)}/{total} attachment uploads failed: {summary}"
             )
 
         logger.info(f"Uploaded {total} attachments")
