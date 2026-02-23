@@ -21,6 +21,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   everything.
 - **Custom VERBOSE logging level** -- `kp2bw.VERBOSE` (15) sits between DEBUG
   and INFO, matching PowerShell's Write-Verbose/Write-Debug distinction.
+- **Pytest adapters for script tests** -- Added
+  `tests/test_script_adapters.py` so `pytest` can collect and run script-style
+  test modules while preserving `main()`-based direct execution.
+- **CLI-output sanitization tests** -- Added
+  `tests/bw_serve_sanitization_test.py` to verify secret redaction, whitespace
+  normalization, and truncation behavior.
 
 ### Changed
 
@@ -36,6 +42,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   smuggled inside the Bitwarden API payload dict.
 - **`collectionIds` corrected to array** -- Now emits `[id]` or `[]` per the
   Bitwarden API spec, instead of a bare string or `None`.
+- **`EntryValue` normalized to one tuple shape** -- Internal converter storage
+  now always carries attachments as a list (empty when none), removing
+  3-tuple/4-tuple branching and `type: ignore` indexing.
+- **Test workflow documentation expanded** -- Added adapter-driven pytest
+  commands and opt-in env flags for packaging/e2e script tests in `AGENTS.md`.
 
 ### Fixed
 
@@ -54,6 +65,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   silently ignored since Vaultwarden 1.29.
 - **Dockerfile.test missing `pipefail`** -- Added `SHELL` directive so `curl`
   failures in pipe are not masked.
+- **Root-level explicit collection assignment** -- Entries without a first-level
+  KeePass group now still receive an explicitly configured Bitwarden
+  collection ID.
+- **Org collection create with missing org ID** -- `create_org_collection()` now
+  short-circuits when no org ID is configured instead of attempting a POST with
+  `organizationId: None`.
+- **Attachment upload JSON parse failures** -- Non-JSON `/attachment` responses
+  now raise `BitwardenClientError` with HTTP context instead of leaking decode
+  exceptions.
+- **`bw serve` response parse hardening** -- Core `_request()` now maps
+  non-JSON responses to `BitwardenClientError`; dedup index also skips malformed
+  item names safely.
+- **Signal-ignore semantics** -- `_signal_handler()` now respects inherited
+  `SIG_IGN` handlers instead of forcing process exit.
+- **Sensitive stderr exposure in diagnostics** -- `bw unlock` and early
+  `bw serve` stderr output is now sanitized (secret redaction + truncation)
+  before logs/error messages are emitted.
+- **E2E command output redaction** -- Integration helper now redacts
+  `--session`/`--passwordenv` values and `--raw` command output in failure
+  messages.
 
 ### Removed
 
