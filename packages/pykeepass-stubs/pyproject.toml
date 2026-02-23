@@ -13,7 +13,10 @@ classifiers     = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Stubs Only",
 ]
-dependencies    = ["types-lxml>=2026.2.16"]
+dependencies    = [
+  "pykeepass>=4.1.1.post1,<4.2",
+  "types-lxml>=2026.2.16",
+]
 
 [[project.authors]]
 name  = "Kaj Kowalski"
@@ -24,8 +27,18 @@ Issues     = "https://github.com/kjanat/kp2bw/issues"
 Repository = "https://github.com/kjanat/kp2bw/tree/master/packages/pykeepass-stubs"
 
 [build-system]
-requires      = ["uv_build>=0.10.2,<0.11.0"]
+requires      = ["uv_build>=0.10.4,<0.11.0"]
 build-backend = "uv_build"
+
+[tool.pyright]
+venvPath         = "../../"
+venv             = ".venv"
+typeCheckingMode = "strict"
+pythonVersion    = "3.11"
+
+[tool.ruff]
+preview        = true
+target-version = "py311"
 
 [tool.ruff.lint]
 ignore = ["PYI029"]

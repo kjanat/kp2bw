@@ -281,11 +281,15 @@ name = "pykeepass-stubs"
 version = "0.1.0"
 source = { editable = "packages/pykeepass-stubs" }
 dependencies = [
+    { name = "pykeepass" },
     { name = "types-lxml" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "types-lxml", specifier = ">=2026.2.16" }]
+requires-dist = [
+    { name = "pykeepass", specifier = ">=4.1.1.post1,<4.2" },
+    { name = "types-lxml", specifier = ">=2026.2.16" },
+]
 
 [[package]]
 name = "pyotp"

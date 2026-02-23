@@ -73,6 +73,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   intentional — `__eq__` is on `BaseElement`).
 - Marked stubs as partial in `py.typed` and expanded package
   metadata/classifiers in `packages/pykeepass-stubs/pyproject.toml`.
+- Adopted independent stubs versioning (no lockstep with `pykeepass`) and
+  declared supported runtime compatibility range `pykeepass>=4.1.1.post1,<4.2`.
 
 ### Changed
 
