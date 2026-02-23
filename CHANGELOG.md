@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.0.0a1] - 2026-02-23
+
 ### Added
 
 - **`bw serve` HTTP transport** -- New `BitwardenServeClient` in
@@ -231,7 +233,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.0.0a1...HEAD
+[3.0.0a1]: https://github.com/kjanat/kp2bw/compare/v2.0.0...v3.0.0a1
+[2.0.0]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc3...v2.0.0
 [2.0.0rc3]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc2...v2.0.0rc3
 [2.0.0rc2]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/kjanat/kp2bw/compare/c9ef571eabd345db94751f7dec845e49756e9d47...v2.0.0rc1
