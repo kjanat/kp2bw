@@ -9,6 +9,37 @@ from pykeepass import PyKeePass, create_database
 
 logger = logging.getLogger("e2e")
 
+SENSITIVE_ARG_FLAGS = {
+    "--bitwarden-password",
+    "--keepass-password",
+    "--passwordenv",
+    "--session",
+}
+
+
+def _collect_sensitive_values(command: list[str]) -> tuple[str, ...]:
+    """Collect sensitive CLI values from command arguments."""
+    values: list[str] = []
+    for i, arg in enumerate(command[:-1]):
+        if arg in SENSITIVE_ARG_FLAGS:
+            values.append(command[i + 1])
+    return tuple(values)
+
+
+def _redact_output(output: str, *, command: list[str], secrets: tuple[str, ...]) -> str:
+    """Redact sensitive values from command output."""
+    if not output:
+        return output
+
+    if "--raw" in command:
+        return "[redacted raw output]"
+
+    redacted = output
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, "***")
+    return redacted
+
 
 def _run(
     command: list[str],
@@ -16,13 +47,11 @@ def _run(
     env: dict[str, str],
     timeout: float = 300,
 ) -> str:
-    # Redact passwords from log output
+    secrets = _collect_sensitive_values(command)
+
+    # Redact sensitive values from log output
     safe_cmd = " ".join(
-        "***"
-        if i > 0
-        and command[i - 1]
-        in ("--keepass-password", "--bitwarden-password", "--passwordenv")
-        else arg
+        "***" if i > 0 and command[i - 1] in SENSITIVE_ARG_FLAGS else arg
         for i, arg in enumerate(command)
     )
     logger.info(f"Running: {safe_cmd}")
@@ -43,18 +72,22 @@ def _run(
             stdout = stdout.decode("utf-8", errors="replace")
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
+        stdout = _redact_output(stdout, command=command, secrets=secrets)
+        stderr = _redact_output(stderr, command=command, secrets=secrets)
         raise AssertionError(
             f"Command timed out after {timeout}s: {safe_cmd}\n"
             f"stdout:\n{stdout}\n"
             f"stderr:\n{stderr}"
         ) from exc
     if result.returncode != 0:
+        stdout = _redact_output(result.stdout, command=command, secrets=secrets)
+        stderr = _redact_output(result.stderr, command=command, secrets=secrets)
         raise AssertionError(
             f"Command failed ({result.returncode}): {safe_cmd}\n"
-            f"stdout:\n{result.stdout}\n"
-            f"stderr:\n{result.stderr}"
+            f"stdout:\n{stdout}\n"
+            f"stderr:\n{stderr}"
         )
-    logger.debug(f"  stdout: {result.stdout[:200]}")
+    logger.debug(f"  stdout chars: {len(result.stdout)}")
     return result.stdout.strip()
 
 

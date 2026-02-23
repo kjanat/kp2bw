@@ -1,5 +1,6 @@
 services:
   vaultwarden:
+    container_name: server
     build:
       context: .
       dockerfile: Dockerfile.vaultwarden
@@ -18,6 +19,7 @@ services:
     networks: [testnet]
 
   test:
+    container_name: kp2bw
     build:
       context: ..
       dockerfile: tests/Dockerfile.test
