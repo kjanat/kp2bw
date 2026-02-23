@@ -1,0 +1,160 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+# adapted from https://github.com/kjanat/notso-glb/blob/e9dec45b481d09651034c54ddc5913589b7156b9/.github/workflows/pr-test-comment.yml
+---
+name: PR Test Comment
+on: { pull_request: { types: [opened, synchronize, reopened, closed] } }
+permissions: { contents: read, pull-requests: write }
+env: # Configure these for your project
+  CLI_NAME: "kp2bw" # CLI command name (defaults to repo name if empty)
+  PYTHON_VERSION: "3.14" # Python version for uvx (leave empty to omit -p flag)
+  # Example commands (one per line, use {cmd} as placeholder for full uvx command)
+  CLI_EXAMPLES: |
+    # Show version
+    {cmd} --version
+    # Migrate KeePass DB (interactive password prompts)
+    {cmd} vault.kdbx
+    # Non-interactive with env vars
+    KP2BW_KEEPASS_PASSWORD=kppass KP2BW_BITWARDEN_PASSWORD=bwpass {cmd} vault.kdbx -y
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update PR comment
+        uses: actions/github-script@v8
+        env:
+          CLI_NAME: ${{ env.CLI_NAME }}
+          PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
+          CLI_EXAMPLES: ${{ env.CLI_EXAMPLES }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { number: prNumber, state, merged: isMerged, merge_commit_sha, head: { sha: headSha, ref: headRef } } = context.payload.pull_request;
+            const [shortSha, isClosed] = [headSha.substring(0, 7), state === 'closed'];
+
+            // Read config from env (with defaults)
+            const cliName = process.env.CLI_NAME || repo;
+            const pythonVersion = process.env.PYTHON_VERSION;
+            const pyFlag = pythonVersion ? `-p${pythonVersion} ` : '';
+            const cliExamples = process.env.CLI_EXAMPLES || '';
+
+            const markerComment = `<!-- ${repo}-pr-test-comment -->`;
+            const gitUrl = `git+https://github.com/${owner}/${repo}`;
+            const fence = '```';
+
+            // Build examples section from env
+            const buildExamples = (ref) => {
+              if (!cliExamples.trim()) return '';
+              const baseCmd = `uvx ${pyFlag}--from ${gitUrl}@${ref} ${cliName}`;
+              const examples = cliExamples.replace(/\{cmd\}/g, baseCmd);
+              return `\n\n📋 Example usage\n\n${fence}bash\n${examples.trim()}\n${fence}`;
+            };
+
+            // Check for existing comment first (cheaper than listing all files)
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number: prNumber }
+            );
+
+            const existingComment = comments.find(c =>
+              c.body?.includes(markerComment)
+            );
+
+            // If no existing comment, check if PR has Python file changes
+            if (!existingComment) {
+              const files = await github.paginate(
+                github.rest.pulls.listFiles,
+                { owner, repo, pull_number: prNumber }
+              );
+
+              const pythonFiles = files.filter(f =>
+                (f.filename.endsWith('.py') || f.previous_filename?.endsWith('.py')) &&
+                (f.status === 'added' || f.status === 'modified' || f.status === 'renamed' || f.status === 'removed')
+              );
+
+              console.log(`Found ${pythonFiles.length} changed Python files`);
+
+              if (pythonFiles.length === 0) {
+                console.log('No Python files changed, skipping comment');
+                return;
+              }
+            }
+
+            let body;
+
+            if (isClosed) {
+              // Get commit message for the final commit
+              const { data: commit } = await github.rest.git.getCommit({
+                owner,
+                repo,
+                commit_sha: headSha,
+              });
+              const commitMessage = commit.message.split('\n')[0]; // First line only
+
+              const status = isMerged ? '✅ Merged' : '❌ Closed';
+              const mergeInfo = isMerged && merge_commit_sha
+                ? `\n\n**Merge commit:** ${merge_commit_sha}`
+                : '';
+
+              body = `${markerComment}
+            ## 📦 Test this PR (archived)
+
+            > **Status:** ${status}
+
+            This PR has been ${isMerged ? 'merged' : 'closed'}. You can still test the final state:
+
+            ${fence}bash
+            uvx ${pyFlag}--from ${gitUrl}@${headSha} ${cliName} --help
+            ${fence}
+
+            📋 PR Details
+
+            | Field              | Value            |
+            |--------------------|------------------|
+            | **Final commit**   | ${headSha}       |
+            | **Commit message** | ${commitMessage} |
+            | **Branch**         | \`${headRef}\`   |${mergeInfo}${buildExamples(headSha)}
+
+            ---
+            🤖 Archived on ${isMerged ? 'merge' : 'close'}`;
+            } else {
+              // Active PR - show branch-based commands
+              body = `${markerComment}
+            ## 🧪 Test this PR
+
+            You can test this PR directly using \`uvx\`:
+
+            **From branch:**
+
+            ${fence}bash
+            uvx ${pyFlag}--from ${gitUrl}@${headRef} ${cliName} --help
+            ${fence}
+
+            **From specific commit (\`${shortSha}\`):**
+
+            ${fence}bash
+            uvx ${pyFlag}--from ${gitUrl}@${headSha} ${cliName} --help
+            ${fence}${buildExamples(headRef)}
+
+            ---
+            🤖 Auto-updated on push • Commit: ${shortSha}`;
+            }
+
+            if (existingComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingComment.id,
+                body,
+              });
+              console.log(`Updated comment ${existingComment.id}`);
+            } else {
+              // Create new comment
+              const { data: newComment } = await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+              console.log(`Created comment ${newComment.id}`);
+            }
