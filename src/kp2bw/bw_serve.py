@@ -50,6 +50,7 @@ class BitwardenServeClient:
     _http: httpx.Client
     _previous_sigterm: Callable[[int, FrameType | None], Any] | int | None
     _previous_sigint: Callable[[int, FrameType | None], Any] | int | None
+    _folders: dict[str, str]  # name → id cache
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -70,10 +71,15 @@ class BitwardenServeClient:
         )
         self._org_id = org_id
 
+        self._folders = {}
+
         self._start_serve()
         self._wait_for_ready()
         self._unlock(password)
         self._sync()
+
+        # Populate folder cache from existing vault state.
+        self._folders = self.list_folders()
 
         # Register cleanup handlers so the bw serve process is always
         # terminated — even on unhandled exceptions or signals.
@@ -219,6 +225,55 @@ class BitwardenServeClient:
     def sync(self) -> None:
         """Force a vault sync (public API)."""
         self._sync()
+
+    # ------------------------------------------------------------------
+    # CRUD — folders
+    # ------------------------------------------------------------------
+
+    def list_folders(self) -> dict[str, str]:
+        """Return ``{name: id}`` mapping of all vault folders."""
+        data = self._request("GET", "/list/object/folders")
+        folders: list[dict[str, Any]] = data.get("data", [])
+        return {f["name"]: f["id"] for f in folders}
+
+    def create_folder(self, name: str) -> str:
+        """Create a folder and return its server-assigned ID.
+
+        Returns the cached ID if a folder with this name already exists.
+        """
+        existing = self._folders.get(name)
+        if existing is not None:
+            return existing
+
+        data = self._request("POST", "/object/folder", json_body={"name": name})
+        folder_id: str = data["id"]
+        self._folders[name] = folder_id
+        logger.debug(f"Created folder {name!r} → {folder_id}")
+        return folder_id
+
+    def has_folder(self, name: str) -> bool:
+        """Check whether a folder with the given name exists."""
+        return name in self._folders
+
+    # ------------------------------------------------------------------
+    # CRUD — items
+    # ------------------------------------------------------------------
+
+    def list_items(self, *, folder_id: str | None = None) -> list[dict[str, Any]]:
+        """Return all vault items, optionally filtered by folder ID."""
+        params: dict[str, str] | None = None
+        if folder_id is not None:
+            params = {"folderid": folder_id}
+        data = self._request("GET", "/list/object/items", params=params)
+        items: list[dict[str, Any]] = data.get("data", [])
+        return items
+
+    def create_item(self, item: dict[str, Any]) -> str:
+        """Create a single vault item via HTTP and return its ID."""
+        data = self._request("POST", "/object/item", json_body=item)
+        item_id: str = data["id"]
+        logger.debug(f"Created item {item.get('name', '?')!r} → {item_id}")
+        return item_id
 
     # ------------------------------------------------------------------
     # Properties

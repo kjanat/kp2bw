@@ -25,3 +25,14 @@ Started: 2026-02-23
 - Added `httpx>=0.28.0` to runtime dependencies
 - Files changed: `src/kp2bw/bw_serve.py` (new), `pyproject.toml`, `uv.lock`
 - **Learnings:** `ty` is strict about `signal.getsignal` return type — can't use `callable()` to narrow since `int` is callable; use `isinstance(prev, int)` guard instead
+
+## Task - serve-crud
+
+- Added CRUD methods to `BitwardenServeClient`: `list_folders`, `create_folder`, `has_folder`, `list_items`, `create_item`
+- `list_folders()` returns `{name: id}` dict from `GET /list/object/folders`
+- `create_folder(name)` returns cached ID or creates via `POST /object/folder`; auto-caches
+- `list_items(folder_id=)` returns items from `GET /list/object/items` with optional folderid filter
+- `create_item(item)` posts to `POST /object/item`, returns server-assigned ID
+- `__init__` now loads folder cache after sync via `self._folders = self.list_folders()`
+- Files changed: `src/kp2bw/bw_serve.py`
+- **Learnings:** bw serve list endpoints nest data under `data.data` (outer `data` from envelope, inner `data` from list response)

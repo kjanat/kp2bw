@@ -18,7 +18,7 @@
       "description": "HTTP wrappers for create_folder, create_item, list_items, list_folders via bw serve. Folder name→id cache. Used as fallback for org items.",
       "files": ["src/kp2bw/bw_serve.py"],
       "priority": "architecture",
-      "passes": false
+      "passes": true
     },
     {
       "id": "dedup-via-serve",
