@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -6,21 +7,40 @@ from pathlib import Path
 
 from pykeepass import PyKeePass, create_database
 
+logger = logging.getLogger("e2e")
 
-def _run(command: list[str], *, env: dict[str, str]) -> str:
+
+def _run(
+    command: list[str],
+    *,
+    env: dict[str, str],
+    timeout: float = 300,
+) -> str:
+    # Redact passwords from log output
+    safe_cmd = " ".join(
+        "***"
+        if i > 0
+        and command[i - 1]
+        in ("--keepass-password", "--bitwarden-password", "--passwordenv")
+        else arg
+        for i, arg in enumerate(command)
+    )
+    logger.info(f"Running: {safe_cmd}")
     result = subprocess.run(
         command,
         check=False,
         capture_output=True,
         text=True,
         env=env,
+        timeout=timeout,
     )
     if result.returncode != 0:
         raise AssertionError(
-            f"Command failed ({result.returncode}): {' '.join(command)}\n"
+            f"Command failed ({result.returncode}): {safe_cmd}\n"
             f"stdout:\n{result.stdout}\n"
             f"stderr:\n{result.stderr}"
         )
+    logger.debug(f"  stdout: {result.stdout[:200]}")
     return result.stdout.strip()
 
 
@@ -121,6 +141,11 @@ def _assert_bw_serve_available(env: dict[str, str]) -> None:
 
 
 def main() -> None:
+    logging.basicConfig(
+        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+        level=logging.DEBUG,
+    )
+
     repo_root = Path(__file__).resolve().parents[1]
     cert_path = Path(
         os.environ.get(
@@ -144,15 +169,21 @@ def main() -> None:
         env["BITWARDENCLI_APPDATA_DIR"] = str(appdata)
         env["NODE_EXTRA_CA_CERTS"] = str(cert_path)
 
+        logger.info("Checking bw serve availability")
         _assert_bw_serve_available(env)
         _ = _run(["bw", "config", "server", server_url], env=env)
 
+        logger.info("Logging in to Bitwarden")
         initial_session = _login_session(env, bw_email, bw_password)
+        logger.info("Listing pre-migration items")
         before_items = _bw_json(env, "list", "items", "--session", initial_session)
+        logger.info(f"Found {len(before_items)} existing items")
 
         snapshot_path = tmp / "snapshot.kdbx"
         _create_keepass_snapshot(snapshot_path, kp_password)
+        logger.info("Created KeePass snapshot")
 
+        logger.info("Running kp2bw migration (first pass)")
         _ = _run(
             [
                 "uv",
@@ -167,10 +198,13 @@ def main() -> None:
                 "999",
                 "--no-metadata",
                 "-y",
+                "-v",
             ],
             env=env,
         )
+        logger.info("First migration pass complete")
 
+        logger.info("Running kp2bw migration (idempotency pass)")
         _ = _run(
             [
                 "uv",
@@ -185,9 +219,11 @@ def main() -> None:
                 "999",
                 "--no-metadata",
                 "-y",
+                "-v",
             ],
             env=env,
         )
+        logger.info("Second migration pass complete")
 
         session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)

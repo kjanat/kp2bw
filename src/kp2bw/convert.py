@@ -6,7 +6,6 @@ from typing import Any
 
 from pykeepass import Attachment, Entry, Group, PyKeePass
 
-from .bw_import import write_and_import
 from .bw_serve import BitwardenServeClient
 from .exceptions import ConversionError
 
@@ -517,16 +516,14 @@ class Converter:
         return filename, data
 
     def _create_bitwarden_items_for_entries(self) -> None:
-        """Import entries via ``bw serve`` + ``bw import`` and upload attachments."""
+        """Create entries via ``bw serve`` HTTP API and upload attachments."""
         logger.info("Connecting and reading existing folders and entries")
 
         with BitwardenServeClient(
             self._bitwarden_password,
             org_id=self._bitwarden_organization_id,
         ) as bw:
-            # --- Phase 1: Partition entries ---------------------------------
-            # Separate entries that can be bulk-imported from those that need
-            # individual creation (org items requiring collection assignment).
+            # --- Phase 1: Partition entries and resolve collections ----------
             import_entries: dict[str, tuple[str | None, BwItem]] = {}
             attachment_map: dict[str, list[AttachmentItem]] = {}
 
@@ -552,45 +549,26 @@ class Converter:
                 logger.info("No new entries to import")
                 return
 
-            # --- Phase 2: Bulk import via bw import -------------------------
-            logger.info(f"Importing {len(import_entries)} entries via bw import")
-            write_and_import(import_entries)
-
-            # --- Phase 3: Post-import sync and ID recovery ------------------
-            bw.sync()
-            bw.refresh_dedup_index()
+            # --- Phase 2: Create items via bw serve HTTP API ----------------
+            logger.info(f"Creating {len(import_entries)} items via bw serve HTTP API")
+            key_to_id = bw.create_items_batch(import_entries)
+            logger.info(f"Created {len(key_to_id)} items")
 
             if not attachment_map:
                 logger.info("No attachments to upload")
                 return
 
-            # Recover server-assigned item IDs by matching (name, folderId).
-            # Multiple entries can share the same (folder, name) — collect all
-            # IDs per key so each attachment batch resolves to a distinct item.
-            items = bw.list_items()
-            folder_id_to_name: dict[str, str] = {
-                fid: fname for fname, fid in bw.folders.items()
-            }
-            id_lookup: dict[tuple[str | None, str], list[str]] = {}
-            for item in items:
-                fid: str | None = item.get("folderId") or None
-                fname = folder_id_to_name.get(fid, None) if fid else None
-                id_lookup.setdefault((fname, item["name"]), []).append(item["id"])
-
-            # --- Phase 4: Parallel attachment uploads -----------------------
+            # --- Phase 3: Parallel attachment uploads -----------------------
             upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
             for key, attachments in attachment_map.items():
-                folder, bw_item = import_entries[key]
-                lookup_key = (folder, bw_item["name"])
-                ids = id_lookup.get(lookup_key)
-                if not ids:
+                item_id = key_to_id.get(key)
+                if not item_id:
+                    folder, bw_item = import_entries[key]
                     logger.warning(
-                        f"Could not find imported item {bw_item['name']!r} "
+                        f"Could not find item ID for {bw_item['name']!r} "
                         f"in folder {folder!r} for attachment upload"
                     )
                     continue
-                # Pop the first available ID so duplicate names each get their own.
-                item_id = ids.pop(0)
 
                 file_pairs = [self._materialise_attachment(att) for att in attachments]
                 upload_items.append((item_id, file_pairs))

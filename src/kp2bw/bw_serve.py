@@ -314,6 +314,40 @@ class BitwardenServeClient:
         logger.debug(f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
 
+    def create_items_batch(
+        self,
+        entries: dict[str, tuple[str | None, dict[str, Any]]],
+    ) -> dict[str, str]:
+        """Create folders and items via HTTP, returning ``{key: item_id}``.
+
+        *entries* maps arbitrary keys to ``(folder_name, bw_item_dict)`` tuples.
+        Folders are created/resolved first, then items are created sequentially
+        with the correct ``folderId`` bound.
+        """
+        # Ensure all required folders exist.
+        folder_names = {fname for fname, _ in entries.values() if fname}
+        for fname in sorted(folder_names):
+            self.create_folder(fname)
+
+        key_to_id: dict[str, str] = {}
+        total = len(entries)
+        for idx, (key, (folder_name, bw_item)) in enumerate(entries.items(), 1):
+            # Bind folder ID.
+            item = dict(bw_item)  # shallow copy
+            if folder_name:
+                item["folderId"] = self._folders.get(folder_name)
+            else:
+                item["folderId"] = None
+            item.pop("firstlevel", None)
+
+            item_id = self.create_item(item)
+            key_to_id[key] = item_id
+
+            if idx % 25 == 0 or idx == total:
+                logger.info(f"  Created {idx}/{total} items")
+
+        return key_to_id
+
     # ------------------------------------------------------------------
     # Deduplication
     # ------------------------------------------------------------------

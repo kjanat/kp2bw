@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import tempfile
 from pathlib import Path
 from subprocess import STDOUT, CalledProcessError, check_output
@@ -60,13 +61,30 @@ def build_import_file(
     }
 
 
-def run_import(filepath: Path) -> None:
-    """Execute ``bw import bitwardenjson <filepath>`` as a subprocess."""
+def run_import(filepath: Path, *, timeout: float = 120) -> None:
+    """Execute ``bw import bitwardenjson <filepath>`` as a subprocess.
+
+    .. warning::
+
+       ``bw import`` on CLI >= 2026.1.0 prompts for the master password
+       interactively, which blocks when stdin is not a TTY.  Prefer using
+       :meth:`~bw_serve.BitwardenServeClient.create_items_batch` instead.
+    """
     args = ["bw", "import", "bitwardenjson", str(filepath)]
     logger.debug("Running bw import")
     try:
-        output = check_output(args, stderr=STDOUT)
+        output = check_output(
+            args,
+            stderr=STDOUT,
+            stdin=subprocess.DEVNULL,
+            timeout=timeout,
+        )
         logger.debug(f"bw import returned {len(output)} bytes")
+    except subprocess.TimeoutExpired as exc:
+        raise BitwardenClientError(
+            f"bw import timed out after {timeout}s (likely waiting for "
+            "interactive password prompt — use bw serve HTTP API instead)"
+        ) from exc
     except CalledProcessError as exc:
         msg = ""
         if isinstance(exc.output, bytes):
