@@ -41,6 +41,8 @@ kp2bw/
 - Intra-package imports are relative (`from .module import X`).
 - `bw serve` is localhost-only and password is passed via env var, not CLI arg.
 - Tests are executable scripts (`main()` + assertions), not pytest collection.
+- `tests/test_script_adapters.py` provides pytest wrappers so `pytest` collects tests; script files remain the source-of-truth.
+- Heavy adapters are opt-in: set `KP2BW_RUN_PACKAGING_TESTS=1` and/or `KP2BW_RUN_E2E_TESTS=1`.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
@@ -66,6 +68,11 @@ uv run kp2bw <keepass_file>
 uv run ruff check
 uv run ty check
 uv run basedpyright
+uv run pytest -q tests/test_script_adapters.py
+
+# Opt-in adapters for packaging and e2e scripts
+KP2BW_RUN_PACKAGING_TESTS=1 uv run pytest -q tests/test_script_adapters.py -k "smoke or stubs"
+KP2BW_RUN_E2E_TESTS=1 uv run pytest -q tests/test_script_adapters.py -k e2e
 
 uv run python tests/e2e_vaultwarden_test.py
 

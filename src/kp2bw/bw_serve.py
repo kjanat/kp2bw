@@ -30,6 +30,26 @@ _SERVE_POLL_INTERVAL_S: float = 0.25
 # Default HTTP timeout for individual requests.
 _HTTP_TIMEOUT_S: float = 60.0
 
+# Max length for sanitized CLI output snippets in logs/errors.
+_SANITIZED_OUTPUT_MAX_CHARS: int = 240
+
+
+def sanitize_cli_output(
+    output: str,
+    *,
+    secrets: tuple[str, ...] = (),
+    max_chars: int = _SANITIZED_OUTPUT_MAX_CHARS,
+) -> str:
+    """Normalize and redact CLI output for safe logging/errors."""
+    sanitized = " ".join(output.split())
+    for secret in secrets:
+        if not secret:
+            continue
+        sanitized = sanitized.replace(secret, "***")
+    if len(sanitized) > max_chars:
+        return sanitized[:max_chars] + "...[truncated]"
+    return sanitized
+
 
 def _find_free_port() -> int:
     """Find an available TCP port on localhost."""
@@ -137,11 +157,14 @@ class BitwardenServeClient:
             logger.warning("bw unlock timed out while obtaining session key")
             return None
         if result.returncode != 0:
-            logger.warning(
+            stderr_text = sanitize_cli_output(result.stderr, secrets=(password,))
+            message = (
                 f"bw unlock exited with code {result.returncode}; "
-                f"bw serve will start without BW_SESSION; "
-                f"stderr: {result.stderr.strip()}"
+                f"bw serve will start without BW_SESSION"
             )
+            if stderr_text:
+                message += f"; stderr: {stderr_text}"
+            logger.warning(message)
             return None
         session = result.stdout.strip()
         if session:
@@ -177,11 +200,8 @@ class BitwardenServeClient:
             if self._process is not None and self._process.poll() is not None:
                 stderr_text = ""
                 if self._process.stderr is not None:
-                    stderr_text = (
-                        self._process.stderr
-                        .read()
-                        .decode("utf-8", errors="replace")
-                        .strip()
+                    stderr_text = sanitize_cli_output(
+                        self._process.stderr.read().decode("utf-8", errors="replace")
                     )
                 message = (
                     f"bw serve exited unexpectedly with code {self._process.returncode}"
@@ -245,8 +265,13 @@ class BitwardenServeClient:
             if signum == signal.SIGTERM
             else self._previous_sigint
         )
-        if isinstance(previous, int) or previous is None:
-            # SIG_DFL / SIG_IGN / None — just exit.
+        if previous == signal.SIG_IGN:
+            # Respect ignored signal handlers.
+            return
+        if previous == signal.SIG_DFL or previous is None:
+            # Default handler / None — just exit.
+            raise SystemExit(128 + signum)
+        if isinstance(previous, int):
             raise SystemExit(128 + signum)
         previous(signum, _frame)
 
