@@ -94,3 +94,12 @@ Started: 2026-02-23
 - `bitwardenclient.py` kept for now (will be deleted when all references confirmed removed)
 - Files changed: `src/kp2bw/convert.py`, `src/kp2bw/bw_serve.py`
 - **Learnings:** `isinstance(att, Attachment)` works better for type narrowing than `isinstance(att, tuple)` when Attachment is from stubs; ruff preview catches `noqa` for non-enabled rules
+
+## Task - e2e-tests
+
+- Added `_assert_bw_serve_available()` guard at test start — fails fast if bw CLI lacks serve support
+- Existing test structure works unchanged — tests CLI output not internal transport
+- `bw serve` inherits `BITWARDENCLI_APPDATA_DIR` and `NODE_EXTRA_CA_CERTS` from parent env
+- CI workflow already installs `@bitwarden/cli@2026.1.0` which has `bw serve`
+- Files changed: `tests/e2e_vaultwarden_test.py`
+- **Learnings:** e2e test is transport-agnostic since it tests via CLI, not imports

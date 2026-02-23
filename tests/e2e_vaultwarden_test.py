@@ -80,6 +80,22 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
     kp.save()
 
 
+def _assert_bw_serve_available(env: dict[str, str]) -> None:
+    """Verify the bw CLI supports ``bw serve`` (required by the new transport)."""
+    result = subprocess.run(
+        ["bw", "serve", "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            "bw serve is not available. kp2bw v3 requires bw CLI with serve support.\n"
+            f"stderr: {result.stderr}"
+        )
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cert_path = Path(
@@ -104,6 +120,7 @@ def main() -> None:
         env["BITWARDENCLI_APPDATA_DIR"] = str(appdata)
         env["NODE_EXTRA_CA_CERTS"] = str(cert_path)
 
+        _assert_bw_serve_available(env)
         _ = _run(["bw", "config", "server", server_url], env=env)
         _ = _run(["bw", "login", bw_email, bw_password, "--nointeraction"], env=env)
 
