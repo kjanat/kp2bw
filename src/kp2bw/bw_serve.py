@@ -443,6 +443,8 @@ class BitwardenServeClient:
         """Create an org collection and return its ID. Cached."""
         if not name:
             return None
+        if not self._org_id:
+            return None
 
         if self._collections is None:
             self._collections = {}
@@ -487,7 +489,15 @@ class BitwardenServeClient:
                 f"Attachment upload failed for {filename!r} on item {item_id}: "
                 f"HTTP {resp.status_code}"
             )
-        body: dict[str, Any] = resp.json()
+
+        try:
+            body: dict[str, Any] = resp.json()
+        except ValueError as exc:
+            raise BitwardenClientError(
+                f"Attachment upload returned non-JSON response "
+                f"(HTTP {resp.status_code}) for {filename!r} on item {item_id}"
+            ) from exc
+
         if not body.get("success", False):
             msg = body.get("message", "unknown error")
             raise BitwardenClientError(
