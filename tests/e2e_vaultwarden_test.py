@@ -138,58 +138,6 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
     kp.save()
 
 
-def _smoke_test_bw_serve(env: dict[str, str], session: str) -> None:
-    """Diagnostic: verify ``bw serve`` can start and bind to a port."""
-    import urllib.request
-
-    serve_env = env.copy()
-    serve_env["BW_SESSION"] = session
-    serve_proc = subprocess.Popen(
-        ["bw", "serve", "--port", "19876", "--hostname", "localhost"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=serve_env,
-    )
-    try:
-        stdout, stderr = serve_proc.communicate(timeout=15)
-        logger.info(
-            f"bw serve exited with code {serve_proc.returncode} "
-            f"stdout={stdout.decode(errors='replace')!r} "
-            f"stderr={stderr.decode(errors='replace')!r}"
-        )
-    except subprocess.TimeoutExpired:
-        # 15s passed and it's still running — check if port is up
-        port_ok = False
-        try:
-            with urllib.request.urlopen(
-                "http://127.0.0.1:19876/status", timeout=2
-            ) as resp:
-                logger.info(
-                    f"bw serve /status returned {resp.status}: "
-                    f"{resp.read().decode()[:200]}"
-                )
-                port_ok = True
-        except OSError as exc:
-            logger.warning(f"bw serve /status unreachable after 15s: {exc}")
-        serve_proc.terminate()
-        try:
-            stdout, stderr = serve_proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            serve_proc.kill()
-            stdout, stderr = serve_proc.communicate(timeout=5)
-        logger.info(
-            f"bw serve (killed) stdout={stdout.decode(errors='replace')!r} "
-            f"stderr={stderr.decode(errors='replace')!r}"
-        )
-        if not port_ok:
-            raise AssertionError(
-                "bw serve did not become responsive within 15s. "
-                f"stdout={stdout.decode(errors='replace')!r} "
-                f"stderr={stderr.decode(errors='replace')!r}"
-            )
-
-
 def _assert_bw_serve_available(env: dict[str, str]) -> None:
     """Verify the bw CLI supports ``bw serve`` (required by the new transport)."""
     result = subprocess.run(
@@ -244,10 +192,6 @@ def main() -> None:
         logger.info("Listing pre-migration items")
         before_items = _bw_json(env, "list", "items", "--session", initial_session)
         logger.info(f"Found {len(before_items)} existing items")
-
-        # Diagnostic: smoke-test bw serve directly to verify it can start
-        logger.info("Smoke-testing bw serve directly")
-        _smoke_test_bw_serve(env, initial_session)
 
         snapshot_path = tmp / "snapshot.kdbx"
         _create_keepass_snapshot(snapshot_path, kp_password)

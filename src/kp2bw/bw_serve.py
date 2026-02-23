@@ -151,7 +151,7 @@ class BitwardenServeClient:
 
     def _start_serve(self, session: str | None = None) -> None:
         """Spawn ``bw serve --port <port> --hostname localhost``."""
-        cmd = ["bw", "serve", "--port", str(self._port), "--hostname", "localhost"]
+        cmd = ["bw", "serve", "--port", str(self._port), "--hostname", "127.0.0.1"]
         env: dict[str, str] | None = None
         if session:
             env = {**os.environ, "BW_SESSION": session}
@@ -162,36 +162,8 @@ class BitwardenServeClient:
         self._process = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
             env=env,
         )
-
-    def _read_output(self, *, timeout: float = 5.0) -> str:
-        """Drain captured stdout and stderr from the ``bw serve`` process.
-
-        Uses ``communicate(timeout=...)`` so we never block indefinitely on a
-        live process pipe.  If the process is already dead the call returns
-        immediately.
-        """
-        if self._process is None:
-            return "(no output)"
-        try:
-            stdout_data, stderr_data = self._process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return "(output read timed out — process still running)"
-        except ValueError:
-            return "(stream closed)"
-        parts: list[str] = []
-        if stdout_data:
-            parts.append(
-                f"stdout: {stdout_data.decode('utf-8', errors='replace').strip()}"
-            )
-        if stderr_data:
-            parts.append(
-                f"stderr: {stderr_data.decode('utf-8', errors='replace').strip()}"
-            )
-        return "; ".join(parts) if parts else "(no output)"
 
     def _wait_for_ready(self) -> None:
         """Poll ``GET /status`` until the server is responsive."""
@@ -200,10 +172,8 @@ class BitwardenServeClient:
         while time.monotonic() < deadline:
             # Check the process hasn't died.
             if self._process is not None and self._process.poll() is not None:
-                output = self._read_output()
                 raise BitwardenClientError(
-                    f"bw serve exited unexpectedly with code "
-                    f"{self._process.returncode}: {output}"
+                    f"bw serve exited unexpectedly with code {self._process.returncode}"
                 )
             try:
                 resp = self._http.get("/status")
@@ -215,9 +185,7 @@ class BitwardenServeClient:
                 pass
             time.sleep(_SERVE_POLL_INTERVAL_S)
 
-        # Terminate the process first so _read_stderr()/communicate() can
-        # read the pipe without blocking forever (the pipe only gets EOF when
-        # the child exits).
+        # Terminate the process before raising so close() is clean.
         if self._process is not None and self._process.poll() is None:
             self._process.terminate()
             try:
@@ -225,11 +193,9 @@ class BitwardenServeClient:
             except subprocess.TimeoutExpired:
                 self._process.kill()
                 self._process.wait(timeout=2)
-        output = self._read_output()
         self.close()
         raise BitwardenClientError(
-            f"bw serve did not become ready within "
-            f"{_SERVE_STARTUP_TIMEOUT_S}s: {output}"
+            f"bw serve did not become ready within {_SERVE_STARTUP_TIMEOUT_S}s"
         )
 
     def close(self) -> None:

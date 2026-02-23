@@ -1,0 +1,8 @@
+.git
+.jj
+.venv
+__pycache__
+*.pyc
+.*_cache
+node_modules
+.opencode

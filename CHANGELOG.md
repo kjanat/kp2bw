@@ -6,6 +6,37 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Docker Compose e2e infrastructure** -- `tests/Dockerfile.vaultwarden`,
+  `tests/Dockerfile.test`, `tests/docker-compose.yml`, and `.dockerignore` for
+  fully containerized Vaultwarden integration tests. Fixture data is COPY'd into
+  the Vaultwarden image; the test image bundles Python 3.14, `uv`, `bun`,
+  Node.js, and `@bitwarden/cli`.
+
+### Changed
+
+- **CI workflow simplified** -- `integration-docker.yml` reduced to a single
+  `docker compose up --build --abort-on-container-exit --exit-code-from test`
+  invocation, replacing multi-step `bw` CLI setup.
+- **Regenerated TLS certs** -- Self-signed cert now includes `DNS:vaultwarden`
+  SAN for Docker Compose service-name resolution.
+
+### Fixed
+
+- **`bw serve` IPv6 binding** -- `--hostname localhost` caused Node.js/Koa to
+  bind to `::1` (IPv6 loopback) while `httpx` connected to `127.0.0.1` (IPv4),
+  resulting in a 60 s timeout. Changed to `--hostname 127.0.0.1`.
+- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE`/`stderr=PIPE`
+  from `_start_serve()` Popen call; child now inherits parent file descriptors.
+  Removed dead `_read_output()` method that depended on piped streams.
+
+### Removed
+
+- **Diagnostic `_smoke_test_bw_serve()`** -- Removed from e2e test; it launched
+  `bw serve` with piped stdout (which also triggered the IPv6 binding issue) and
+  blocked the test run.
+
 ## [3.0.0a1] - 2026-02-23
 
 ### Added

@@ -1,0 +1,38 @@
+services:
+  vaultwarden:
+    build:
+      context: .
+      dockerfile: Dockerfile.vaultwarden
+    environment:
+      I_REALLY_WANT_VOLATILE_STORAGE: "true"
+      WEBSOCKET_ENABLED: "false"
+      SIGNUPS_ALLOWED: "false"
+      DOMAIN: "https://vaultwarden"
+      ROCKET_PORT: "443"
+      ROCKET_TLS: '{certs="/ssl/cert.pem",key="/ssl/key.pem"}'
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://localhost/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks: [testnet]
+
+  test:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile.test
+    depends_on:
+      vaultwarden:
+        condition: service_healthy
+    environment:
+      BW_SERVER_URL: "https://vaultwarden"
+      BW_CERT_PATH: "/app/tests/fixtures/vaultwarden-certs/cert.pem"
+      NODE_EXTRA_CA_CERTS: "/app/tests/fixtures/vaultwarden-certs/cert.pem"
+      BW_TEST_EMAIL: "integration@example.com"
+      BW_TEST_PASSWORD: "TestMasterPassword123!"
+      KP_TEST_PASSWORD: "KpSnapshotPassword123!"
+    networks: [testnet]
+
+networks:
+  testnet:
