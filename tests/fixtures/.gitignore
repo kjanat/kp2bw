@@ -1,0 +1,14 @@
+# Keep only the explicit E2E fixture assets tracked here,
+# even if they match repository-level or global ignore rules.
+*
+!.gitignore
+
+!vaultwarden-certs/
+!vaultwarden-certs/cert.pem
+!vaultwarden-certs/key.pem
+
+!vaultwarden-data/
+!vaultwarden-data/db.sqlite3
+!vaultwarden-data/rsa_key.pem
+!vaultwarden-data/tmp/
+!vaultwarden-data/tmp/.gitkeep

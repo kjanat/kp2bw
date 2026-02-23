@@ -6,6 +6,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Vaultwarden Docker integration workflow** -- Added
+  `.github/workflows/integration-docker.yml` to run end-to-end migration checks
+  against a local Vaultwarden container in CI.
+- **Vaultwarden e2e test** -- Added `tests/e2e_vaultwarden_test.py`, which
+  creates a KeePass snapshot, runs `kp2bw`, and validates folder/item migration,
+  URL + custom-field mapping, and idempotency.
+- **Tracked integration fixtures** -- Added fixture allowlist rules in
+  `tests/fixtures/.gitignore` plus seeded Vaultwarden fixture assets under
+  `tests/fixtures/vaultwarden-data/` and `tests/fixtures/vaultwarden-certs/`.
+
+### Changed
+
+- **Contributor guidance** -- Updated `AGENTS.md` with release tag naming,
+  Vaultwarden integration-test workflow details, and fixture tracking notes.
+
+### Fixed
+
+- **Sensitive logging** -- `BitwardenClient._exec()` no longer logs raw `bw`
+  commands or raw command output; debug logs now use non-sensitive telemetry
+  only (generic command message, exit code, output byte count).
+
 ## [2.0.0rc1] - 2026-02-23
 
 ### Added

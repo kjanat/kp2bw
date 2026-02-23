@@ -29,13 +29,23 @@ packages/pykeepass-stubs/ # uv workspace member — PEP 561 type stubs
     ├── exceptions.pyi
     ├── group.pyi
     └── pykeepass.pyi
+
+tests/
+├── smoke_test.py
+├── stubs_smoke_test.py
+├── e2e_vaultwarden_test.py
+└── fixtures/
+    ├── .gitignore
+    ├── vaultwarden-certs/
+    └── vaultwarden-data/
 ```
 
 - **src layout** — all source under `src/kp2bw/`
 - **Workspace** — root `pyproject.toml` declares `packages/pykeepass-stubs` as a
   workspace member; stubs are installed as an editable dev dependency
 - Entry point: `kp2bw.cli:main`
-- No tests exist yet
+- CI workflows include release smoke tests and a Docker-based Vaultwarden e2e
+  migration test
 
 ## Build / Lint / Check Commands
 
@@ -66,6 +76,9 @@ bun --cwd=scripts typecheck    # checks github-script modules via tsgo
 # Run a single check on one file
 uv run ruff check src/kp2bw/convert.py
 uv run ty check src/kp2bw/convert.py
+
+# Local end-to-end migration check (requires running Vaultwarden + bw CLI)
+uv run python tests/e2e_vaultwarden_test.py
 ```
 
 **Always run `uv run ty check` and `uv run ruff check` before finishing work.**
@@ -73,6 +86,18 @@ Both must pass with zero errors.
 
 **When changes touch `scripts/`, also run `bun --cwd=scripts typecheck`.** This
 must pass with zero errors.
+
+## Integration Testing (Vaultwarden)
+
+- CI workflow: `.github/workflows/integration-docker.yml`
+- The e2e test starts from a seeded Vaultwarden fixture snapshot under
+  `tests/fixtures/vaultwarden-data/` and certs under
+  `tests/fixtures/vaultwarden-certs/`.
+- `tests/fixtures/.gitignore` intentionally uses an allowlist so fixture files
+  like `db.sqlite3` are tracked despite root ignore rules.
+- `tests/e2e_vaultwarden_test.py` validates folder/item migration, URL and
+  custom field mapping, and import idempotency (re-running import does not
+  duplicate entries).
 
 ## Python Version
 
@@ -161,6 +186,9 @@ logger.info(...)  # progress reporting
 logger.warning(...)  # non-fatal issues
 logger.error(...)  # operation failures
 ```
+
+Never log raw `bw` command strings or raw command output, because they can
+contain sensitive values (master password, session key, vault data).
 
 ### Error Handling
 
