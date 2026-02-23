@@ -78,6 +78,32 @@ must pass with zero errors.
 
 - **Requires Python >= 3.14** (set in `.python-version` and `pyproject.toml`)
 
+## Releases and Tag Naming
+
+- Main package publish is handled by `.github/workflows/publish.yml` and is
+  triggered by GitHub Releases (`released` / `prereleased`), not by pushing a
+  tag alone.
+- Main package version tags use `v<version>` (for example `v2.0.0rc1`) and
+  should match the root project version reported by `uv version`.
+- `pykeepass-stubs` publish is handled by
+  `.github/workflows/publish-stubs.yml` and is triggered by pushing tags that
+  match `stubs-v*`.
+- Stubs release tags use `stubs-v<version>` (for example `stubs-v0.1.0`) and
+  must match `packages/pykeepass-stubs/pyproject.toml` version.
+- Version check scripts normalize prefixes before comparison:
+  - main package accepts `v...`
+  - stubs accepts `stubs-v...` and `v...`
+
+```bash
+# stubs release tag example
+git tag -a stubs-v0.1.0 -m "Release pykeepass-stubs 0.1.0"
+git push origin stubs-v0.1.0
+
+# main package release tag example (then create GitHub Release)
+git tag -a v2.0.0rc1 -m "Release v2.0.0rc1"
+git push origin v2.0.0rc1
+```
+
 ## Code Style
 
 ### Imports
