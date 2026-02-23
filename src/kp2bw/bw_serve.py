@@ -120,6 +120,7 @@ class BitwardenServeClient:
 
     def _get_session(self, password: str) -> str | None:
         """Unlock the vault via ``bw unlock --raw`` and return the session key."""
+        logger.debug("Obtaining session key via bw unlock --raw")
         try:
             result = subprocess.run(
                 ["bw", "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
@@ -136,12 +137,15 @@ class BitwardenServeClient:
         if result.returncode != 0:
             logger.warning(
                 f"bw unlock exited with code {result.returncode}; "
-                f"bw serve will start without BW_SESSION"
+                f"bw serve will start without BW_SESSION; "
+                f"stderr: {result.stderr.strip()}"
             )
             return None
         session = result.stdout.strip()
         if session:
             logger.debug("Obtained session key via bw unlock")
+        else:
+            logger.warning("bw unlock returned empty session key")
         return session or None
 
     def _start_serve(self, session: str | None = None) -> None:
@@ -150,33 +154,43 @@ class BitwardenServeClient:
         env: dict[str, str] | None = None
         if session:
             env = {**os.environ, "BW_SESSION": session}
-        logger.debug(f"Starting bw serve on port {self._port}")
+        logger.debug(
+            f"Starting bw serve on port {self._port} "
+            f"(BW_SESSION={'set' if session else 'not set'})"
+        )
         self._process = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
         )
 
-    def _read_stderr(self, *, timeout: float = 5.0) -> str:
-        """Drain captured stderr from the ``bw serve`` process.
+    def _read_output(self, *, timeout: float = 5.0) -> str:
+        """Drain captured stdout and stderr from the ``bw serve`` process.
 
         Uses ``communicate(timeout=...)`` so we never block indefinitely on a
         live process pipe.  If the process is already dead the call returns
         immediately.
         """
-        if self._process is None or self._process.stderr is None:
+        if self._process is None:
             return "(no output)"
         try:
-            _, data = self._process.communicate(timeout=timeout)
+            stdout_data, stderr_data = self._process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            return "(stderr read timed out — process still running)"
+            return "(output read timed out — process still running)"
         except ValueError:
             return "(stream closed)"
-        if not data:
-            return "(no output)"
-        return data.decode("utf-8", errors="replace").strip()
+        parts: list[str] = []
+        if stdout_data:
+            parts.append(
+                f"stdout: {stdout_data.decode('utf-8', errors='replace').strip()}"
+            )
+        if stderr_data:
+            parts.append(
+                f"stderr: {stderr_data.decode('utf-8', errors='replace').strip()}"
+            )
+        return "; ".join(parts) if parts else "(no output)"
 
     def _wait_for_ready(self) -> None:
         """Poll ``GET /status`` until the server is responsive."""
@@ -185,10 +199,10 @@ class BitwardenServeClient:
         while time.monotonic() < deadline:
             # Check the process hasn't died.
             if self._process is not None and self._process.poll() is not None:
-                stderr = self._read_stderr()
+                output = self._read_output()
                 raise BitwardenClientError(
                     f"bw serve exited unexpectedly with code "
-                    f"{self._process.returncode}: {stderr}"
+                    f"{self._process.returncode}: {output}"
                 )
             try:
                 resp = self._http.get("/status")
@@ -210,11 +224,11 @@ class BitwardenServeClient:
             except subprocess.TimeoutExpired:
                 self._process.kill()
                 self._process.wait(timeout=2)
-        stderr = self._read_stderr()
+        output = self._read_output()
         self.close()
         raise BitwardenClientError(
             f"bw serve did not become ready within "
-            f"{_SERVE_STARTUP_TIMEOUT_S}s: {stderr}"
+            f"{_SERVE_STARTUP_TIMEOUT_S}s: {output}"
         )
 
     def close(self) -> None:
