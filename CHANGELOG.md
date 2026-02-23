@@ -53,9 +53,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`bw serve` IPv6 binding** -- `--hostname localhost` caused Node.js/Koa to
   bind to `::1` (IPv6 loopback) while `httpx` connected to `127.0.0.1` (IPv4),
   resulting in a 60 s timeout. Changed to `--hostname 127.0.0.1`.
-- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE`/`stderr=PIPE`
-  from `_start_serve()` Popen call; child now inherits parent file descriptors.
-  Removed dead `_read_output()` method that depended on piped streams.
+- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE` from
+  `_start_serve()`; stderr remains piped for crash diagnostics while stdout now
+  inherits parent file descriptors. Removed dead `_read_output()` method that
+  depended on piped streams.
 - **Signal handler restore crash** -- `close()` could raise `TypeError` when
   restoring signal handlers that were `None` (C-installed handlers). Now guards
   against `None` before calling `signal.signal()`.

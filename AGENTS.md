@@ -27,7 +27,7 @@ kp2bw/
 | Task                     | Location                              | Notes                                                              |
 | ------------------------ | ------------------------------------- | ------------------------------------------------------------------ |
 | CLI flags, prompts, envs | `src/kp2bw/cli.py`                    | Entrypoint `kp2bw.cli:main` and `python -m kp2bw` handoff          |
-| Conversion orchestration | `src/kp2bw/convert.py`                | 4-phase top-level flow; item+attachment migration logic            |
+| Conversion orchestration | `src/kp2bw/convert.py`                | 3-phase top-level flow; item+attachment migration logic            |
 | Bitwarden HTTP transport | `src/kp2bw/bw_serve.py`               | `bw serve` lifecycle, dedup index, batch create, attachment upload |
 | Release version gating   | `scripts/version-check-shared.mjs`    | Normalizes release/tag prefixes; drives workflow gates             |
 | Main package publishing  | `.github/workflows/publish.yml`       | Triggered by GitHub Release events, not tag push                   |
