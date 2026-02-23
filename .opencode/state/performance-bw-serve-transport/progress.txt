@@ -46,3 +46,14 @@ Started: 2026-02-23
 - Reversed folder id→name lookup for mapping item folderId back to folder names
 - Files changed: `src/kp2bw/bw_serve.py`
 - **Learnings:** old client used `list` for dedup (O(K) per check); new uses `set` (O(1))
+
+## Task - import-batch
+
+- Created `src/kp2bw/bw_import.py` with three functions:
+  - `build_import_file(entries)` — collects unique folders, assigns synthetic UUIDs, builds `bitwardenjson` dict
+  - `run_import(filepath)` — executes `bw import bitwardenjson <path>` subprocess
+  - `write_and_import(entries)` — orchestrator: build → write temp file → import → delete temp
+- Shallow-copies item dicts to avoid mutating caller state
+- Strips transient `firstlevel` key from items (not part of import format)
+- Files changed: `src/kp2bw/bw_import.py` (new)
+- **Learnings:** ruff PERF102 catches dict `.items()` when only `.values()` needed; SIM115 requires context manager for `NamedTemporaryFile`

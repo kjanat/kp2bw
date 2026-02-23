@@ -34,7 +34,7 @@
       "description": "Build Bitwarden JSON import dict from parsed entries. Synthetic UUIDs for folder cross-refs. Write temp file, execute bw import bitwardenjson, delete temp file.",
       "files": ["src/kp2bw/bw_import.py"],
       "priority": "architecture",
-      "passes": false
+      "passes": true
     },
     {
       "id": "async-attachments",
