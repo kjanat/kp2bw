@@ -26,14 +26,28 @@ def _run(
         for i, arg in enumerate(command)
     )
     logger.info(f"Running: {safe_cmd}")
-    result = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=timeout,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # exc.stdout/stderr may be bytes even with text=True on some versions
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        raise AssertionError(
+            f"Command timed out after {timeout}s: {safe_cmd}\n"
+            f"stdout:\n{stdout}\n"
+            f"stderr:\n{stderr}"
+        ) from exc
     if result.returncode != 0:
         raise AssertionError(
             f"Command failed ({result.returncode}): {safe_cmd}\n"

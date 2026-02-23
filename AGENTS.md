@@ -201,20 +201,21 @@ from .exceptions import BitwardenClientError  # for bw CLI failures
 from .exceptions import ConversionError  # for migration logic errors
 ```
 
-Catch specific exceptions with **tuple syntax** (not comma-separated):
+Both comma and tuple syntax are valid for catching multiple exceptions.
+PEP 758 made `except X, Y:` mean `except (X, Y):` in Python 3.14+.
+Ruff formats to comma syntax for our `target-version = "py314"`. **Do not
+"fix" this to tuple syntax — it is correct as-is.**
 
 ```python
-# CORRECT
-except (ConversionError, KeyError, AttributeError):
-
-# WRONG — this is Python 2 syntax and a runtime bug
+# Both are equivalent and correct on Python 3.14+:
 except ConversionError, KeyError, AttributeError:
+except (ConversionError, KeyError, AttributeError):
 ```
 
 For non-fatal errors during batch processing, log a warning and continue:
 
 ```python
-except (ConversionError, KeyError):
+except ConversionError, KeyError:
     logger.warning(f"!! Could not resolve entry for {title} !!")
 ```
 

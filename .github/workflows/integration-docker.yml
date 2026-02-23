@@ -61,6 +61,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Run Vaultwarden end-to-end migration test
+        timeout-minutes: 5
         env:
           BW_SERVER_URL: https://localhost:18443
           BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
@@ -70,7 +71,7 @@ jobs:
         run: uv run python tests/e2e_vaultwarden_test.py
 
       - name: Show Vaultwarden logs on failure
-        if: failure()
+        if: failure() || cancelled()
         run: docker logs kp2bw-vaultwarden
 
       - name: Stop Vaultwarden

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import logging
+import os
 import signal
 import socket
 import subprocess
@@ -88,7 +89,8 @@ class BitwardenServeClient:
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
-        self._start_serve()
+        session = self._get_session(password)
+        self._start_serve(session)
         self._wait_for_ready()
         self._unlock(password)
         self._sync()
@@ -116,24 +118,60 @@ class BitwardenServeClient:
 
     # -- Start / stop --------------------------------------------------
 
-    def _start_serve(self) -> None:
+    def _get_session(self, password: str) -> str | None:
+        """Unlock the vault via ``bw unlock --raw`` and return the session key."""
+        try:
+            result = subprocess.run(
+                ["bw", "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                stdin=subprocess.DEVNULL,
+                env={**os.environ, "_KP2BW_BW_PW": password},
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("bw unlock timed out while obtaining session key")
+            return None
+        if result.returncode != 0:
+            logger.warning(
+                f"bw unlock exited with code {result.returncode}; "
+                f"bw serve will start without BW_SESSION"
+            )
+            return None
+        session = result.stdout.strip()
+        if session:
+            logger.debug("Obtained session key via bw unlock")
+        return session or None
+
+    def _start_serve(self, session: str | None = None) -> None:
         """Spawn ``bw serve --port <port> --hostname localhost``."""
         cmd = ["bw", "serve", "--port", str(self._port), "--hostname", "localhost"]
+        env: dict[str, str] | None = None
+        if session:
+            env = {**os.environ, "BW_SESSION": session}
         logger.debug(f"Starting bw serve on port {self._port}")
         self._process = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            env=env,
         )
 
-    def _read_stderr(self) -> str:
-        """Drain captured stderr from the ``bw serve`` process."""
+    def _read_stderr(self, *, timeout: float = 5.0) -> str:
+        """Drain captured stderr from the ``bw serve`` process.
+
+        Uses ``communicate(timeout=...)`` so we never block indefinitely on a
+        live process pipe.  If the process is already dead the call returns
+        immediately.
+        """
         if self._process is None or self._process.stderr is None:
             return "(no output)"
-        # Non-blocking read: only grab what's already buffered.
         try:
-            data = self._process.stderr.read()
+            _, data = self._process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return "(stderr read timed out — process still running)"
         except ValueError:
             return "(stream closed)"
         if not data:
@@ -162,6 +200,16 @@ class BitwardenServeClient:
                 pass
             time.sleep(_SERVE_POLL_INTERVAL_S)
 
+        # Terminate the process first so _read_stderr()/communicate() can
+        # read the pipe without blocking forever (the pipe only gets EOF when
+        # the child exits).
+        if self._process is not None and self._process.poll() is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait(timeout=2)
         stderr = self._read_stderr()
         self.close()
         raise BitwardenClientError(
