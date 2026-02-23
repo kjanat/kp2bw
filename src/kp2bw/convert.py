@@ -553,29 +553,32 @@ class Converter:
                 return
 
             # Recover server-assigned item IDs by matching (name, folderId).
+            # Multiple entries can share the same (folder, name) — collect all
+            # IDs per key so each attachment batch resolves to a distinct item.
             items = bw.list_items()
-            # Build lookup: (folder_name, item_name) → item_id
             folder_id_to_name: dict[str, str] = {
                 fid: fname for fname, fid in bw.folders.items()
             }
-            id_lookup: dict[tuple[str | None, str], str] = {}
+            id_lookup: dict[tuple[str | None, str], list[str]] = {}
             for item in items:
                 fid: str | None = item.get("folderId") or None
                 fname = folder_id_to_name.get(fid, None) if fid else None
-                id_lookup[(fname, item["name"])] = item["id"]
+                id_lookup.setdefault((fname, item["name"]), []).append(item["id"])
 
             # --- Phase 4: Parallel attachment uploads -----------------------
             upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
             for key, attachments in attachment_map.items():
                 folder, bw_item = import_entries[key]
                 lookup_key = (folder, bw_item["name"])
-                item_id = id_lookup.get(lookup_key)
-                if item_id is None:
+                ids = id_lookup.get(lookup_key)
+                if not ids:
                     logger.warning(
                         f"Could not find imported item {bw_item['name']!r} "
                         f"in folder {folder!r} for attachment upload"
                     )
                     continue
+                # Pop the first available ID so duplicate names each get their own.
+                item_id = ids.pop(0)
 
                 file_pairs = [self._materialise_attachment(att) for att in attachments]
                 upload_items.append((item_id, file_pairs))
