@@ -10,13 +10,15 @@ jobs:
   vaultwarden-e2e:
     runs-on: ubuntu-latest
     permissions: { contents: read }
+    env: { BITWARDENCLI_DEBUG: "true" }
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v7
-
+      - uses: oven-sh/setup-bun@v2
       - name: Install Bitwarden CLI
-        run: npm install --global @bitwarden/cli@2026.1.0
+        run: bun i -g @bitwarden/cli@latest
+
+      - uses: astral-sh/setup-uv@v7
 
       - name: Prepare isolated Vaultwarden data
         run: rm -rf /tmp/vaultwarden-data && cp -a tests/fixtures/vaultwarden-data /tmp/vaultwarden-data
