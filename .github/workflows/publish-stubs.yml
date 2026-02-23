@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Publish pykeepass-stubs
+on:
+  push: { tags: [stubs-v*] }
+  workflow_dispatch:
+    inputs:
+      version: { description: "Version number (e.g. 0.1.0 or stubs-v0.1.0)", type: string }
+      dry: { description: "Do not publish", type: boolean, default: false }
+defaults: { run: { shell: bash } }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ fromJson(steps.check.outputs.result).name }}
+      version: ${{ fromJson(steps.check.outputs.result).version }}
+      pypi_url: ${{ fromJson(steps.check.outputs.result).pypi_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync
+
+      - uses: actions/github-script@v8
+        id: check
+        with:
+          result-encoding: json
+          script: |
+            const { default: checkStubsVersion } = await import('${{ github.workspace }}/scripts/stubs-version.mjs')
+            return await checkStubsVersion({ core, context, exec })
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: { name: pypi, url: "${{ needs.check.outputs.pypi_url }}" }
+    permissions: { id-token: write, contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync
+      - run: uv build --package pykeepass-stubs --no-sources --out-dir dist-stubs
+
+      - name: Smoke test (wheel)
+        run: uv run --isolated --no-project --with dist-stubs/pykeepass_stubs-*.whl --with pykeepass --with basedpyright tests/stubs_smoke_test.py
+      - name: Smoke test (source distribution)
+        run: uv run --isolated --no-project --with dist-stubs/pykeepass_stubs-*.tar.gz --with pykeepass --with basedpyright tests/stubs_smoke_test.py
+
+      - name: Publish
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry }}
+        run: uv publish dist-stubs/pykeepass_stubs-*.whl dist-stubs/pykeepass_stubs-*.tar.gz

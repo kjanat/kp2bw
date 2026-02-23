@@ -43,6 +43,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Scripts workspace** -- Added `scripts/` JavaScript tooling (`package.json`,
   `tsconfig.json`, `bun.lock`, `.gitignore`) and typed `uv-version.mjs` helper
   for `actions/github-script`.
+- **Stub publish workflow** -- Added `.github/workflows/publish-stubs.yml` with
+  tag-based (`stubs-v*`) publishing for `pykeepass-stubs`, package-specific
+  version checks, and explicit artifact publishing.
+- **Stub release smoke tests** -- Added `tests/stubs_smoke_test.py` and wired it
+  into stub-package publish checks for both wheel and source distributions.
 
 ### Changed (stubs)
 
@@ -66,6 +71,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **\_\_init\_\_.pyi** -- Added `icons` re-export and `__all__` entry.
 - Ignored `PYI029` in stubs `ruff.lint` config (`__repr__` without `__eq__` is
   intentional — `__eq__` is on `BaseElement`).
+- Marked stubs as partial in `py.typed` and expanded package
+  metadata/classifiers in `packages/pykeepass-stubs/pyproject.toml`.
 
 ### Changed
 
