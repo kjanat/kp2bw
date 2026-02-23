@@ -22,11 +22,8 @@ type BwItem = dict[str, Any]
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
 type AttachmentItem = Attachment | tuple[str, str]
 
-# Entry storage: (folder, firstlevel, bw_item) or (folder, firstlevel, bw_item, attachments)
-type EntryValue = (
-    tuple[str | None, str | None, BwItem]
-    | tuple[str | None, str | None, BwItem, list[AttachmentItem]]
-)
+# Entry storage: (folder, firstlevel, bw_item, attachments)
+type EntryValue = tuple[str | None, str | None, BwItem, list[AttachmentItem]]
 
 # Fido2 credential list type
 type Fido2Credentials = list[dict[str, str | None]]
@@ -292,20 +289,15 @@ class Converter:
             attachments.append(("notes", entry.notes))
 
         entry_key: str = str(entry.uuid).replace("-", "").upper()
-        if entry.attachments or attachments:
+        if entry.attachments:
             attachments += entry.attachments
-            self._entries[entry_key] = (
-                folder,
-                firstlevel,
-                bw_item_object,
-                attachments,
-            )
-        else:
-            self._entries[entry_key] = (
-                folder,
-                firstlevel,
-                bw_item_object,
-            )
+
+        self._entries[entry_key] = (
+            folder,
+            firstlevel,
+            bw_item_object,
+            attachments,
+        )
 
     def _parse_kp_ref_string(self, ref_string: str) -> tuple[str, str, str]:
         """Parse a ``{REF:...}`` string into ``(field, lookup_mode, uuid)``."""
@@ -477,14 +469,10 @@ class Converter:
     @staticmethod
     def _unpack_entry(
         entry_value: EntryValue,
-    ) -> tuple[str | None, str | None, BwItem, list[AttachmentItem] | None]:
+    ) -> tuple[str | None, str | None, BwItem, list[AttachmentItem]]:
         """Destructure an entry value into (folder, firstlevel, item, attachments)."""
-        if len(entry_value) == 3:
-            return entry_value[0], entry_value[1], entry_value[2], None
-        folder = entry_value[0]
-        firstlevel = entry_value[1]
-        bw_item = entry_value[2]
-        attachments: list[AttachmentItem] = entry_value[3]  # type: ignore[index]
+        folder, firstlevel, bw_item = entry_value[0:3]
+        attachments = entry_value[3] if len(entry_value) > 3 else []
         return folder, firstlevel, bw_item, attachments
 
     def _resolve_collection(
