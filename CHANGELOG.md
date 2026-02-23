@@ -6,6 +6,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Stubs missing runtime dependency** -- Added explicit `lxml>=6.0.2`
+  dependency to `pykeepass-stubs`; previously only `types-lxml` was declared,
+  leaving the runtime `lxml` import unsatisfied when the stubs package was
+  installed standalone.
+
 ## [2.0.0rc3]
 
 ### Added
