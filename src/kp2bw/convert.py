@@ -141,7 +141,6 @@ class Converter:
         username: str,
         password: str,
         custom_properties: dict[str, list[Any]],
-        collection_id: str | None,
         fido2_credentials: Fido2Credentials | None = None,
     ) -> BwItem:
         """Build a Bitwarden item dict from individual entry fields."""
@@ -157,7 +156,7 @@ class Converter:
 
         return {
             "organizationId": self._bitwarden_organization_id,
-            "collectionIds": [collection_id] if collection_id else [],
+            "collectionIds": [],
             "folderId": None,
             "type": 1,
             "name": title,
@@ -279,7 +278,6 @@ class Converter:
             username=entry.username if entry.username else "",
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
-            collection_id=self._bitwarden_coll_id,
             fido2_credentials=fido2_credentials,
         )
 
@@ -440,7 +438,7 @@ class Converter:
                         ref_result = self._get_referenced_entry(
                             lookup_mode, ref_compare_string
                         )
-                        ref_entry = ref_result[2]
+                        _, _, ref_entry, _ = self._unpack_entry(ref_result)
 
                         value = self._find_referenced_value(ref_entry, field_referenced)
                         setattr(kp_entry, member, value)
@@ -497,13 +495,15 @@ class Converter:
     ) -> str | None:
         """Resolve and set collection ID on *bw_item*."""
         collection_id: str | None = None
-        if firstlevel:
-            if self._bitwarden_coll_id == "auto":
+        if self._bitwarden_coll_id == "auto":
+            if firstlevel:
                 logger.info(f"Searching Collection {firstlevel}")
                 collection_id = bw.create_org_collection(firstlevel)
-            elif self._bitwarden_coll_id:
-                collection_id = self._bitwarden_coll_id
-        bw_item["collectionIds"] = [collection_id] if collection_id else []
+        elif self._bitwarden_coll_id:
+            collection_id = self._bitwarden_coll_id
+
+        if collection_id is not None:
+            bw_item["collectionIds"] = [collection_id]
         return collection_id
 
     @staticmethod

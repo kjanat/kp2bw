@@ -83,11 +83,11 @@ uv run ty check src/kp2bw/convert.py
 uv run python tests/e2e_vaultwarden_test.py
 ```
 
-**Always run `uv run ty check` and `uv run ruff check` before finishing work.**
+**Always run `ruff`, `ty`, and `basedpyright` before finishing work.**\
 Both must pass with zero errors.
 
-**When changes touch `scripts/`, also run `bun --cwd=scripts typecheck`.** This
-must pass with zero errors.
+**When changes touch `scripts/`, also run `bun --cwd=scripts typecheck`.**\
+This must pass with zero errors.
 
 ## Integration Testing (Vaultwarden)
 

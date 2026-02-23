@@ -164,6 +164,7 @@ class BitwardenServeClient:
         self._process = subprocess.Popen(
             cmd,
             stdin=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             env=env,
         )
 
@@ -174,9 +175,20 @@ class BitwardenServeClient:
         while time.monotonic() < deadline:
             # Check the process hasn't died.
             if self._process is not None and self._process.poll() is not None:
-                raise BitwardenClientError(
+                stderr_text = ""
+                if self._process.stderr is not None:
+                    stderr_text = (
+                        self._process.stderr
+                        .read()
+                        .decode("utf-8", errors="replace")
+                        .strip()
+                    )
+                message = (
                     f"bw serve exited unexpectedly with code {self._process.returncode}"
                 )
+                if stderr_text:
+                    message += f"; stderr: {stderr_text}"
+                raise BitwardenClientError(message)
             try:
                 resp = self._http.get("/status")
                 if resp.status_code == 200:
@@ -187,14 +199,6 @@ class BitwardenServeClient:
                 pass
             time.sleep(_SERVE_POLL_INTERVAL_S)
 
-        # Terminate the process before raising so close() is clean.
-        if self._process is not None and self._process.poll() is None:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait(timeout=2)
         self.close()
         raise BitwardenClientError(
             f"bw serve did not become ready within {_SERVE_STARTUP_TIMEOUT_S}s"
