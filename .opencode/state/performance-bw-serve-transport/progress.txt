@@ -57,3 +57,14 @@ Started: 2026-02-23
 - Strips transient `firstlevel` key from items (not part of import format)
 - Files changed: `src/kp2bw/bw_import.py` (new)
 - **Learnings:** ruff PERF102 catches dict `.items()` when only `.values()` needed; SIM115 requires context manager for `NamedTemporaryFile`
+
+## Task - async-attachments
+
+- Added three methods to `BitwardenServeClient`:
+  - `upload_attachment(client, item_id, filename, data)` — async single multipart POST
+  - `upload_attachments_parallel(items, max_concurrency=4)` — async bounded gather with `asyncio.Semaphore`
+  - `upload_attachments(items, max_concurrency=4)` — sync wrapper via `asyncio.run()`
+- `items` arg is `list[tuple[str, list[tuple[str, bytes]]]]` — item_id → list of (filename, data) pairs
+- Uses separate `httpx.AsyncClient` for async operations (sync client can't do async)
+- Files changed: `src/kp2bw/bw_serve.py`
+- **Learnings:** none — clean implementation, all checks passed first try

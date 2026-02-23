@@ -42,7 +42,7 @@
       "description": "asyncio + httpx.AsyncClient with semaphore-bounded concurrency for multipart attachment uploads to POST /attachment?itemid=<id>.",
       "files": ["src/kp2bw/bw_serve.py"],
       "priority": "architecture",
-      "passes": false
+      "passes": true
     },
     {
       "id": "collection-support",

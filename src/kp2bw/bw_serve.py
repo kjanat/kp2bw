@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import logging
 import signal
@@ -306,6 +307,89 @@ class BitwardenServeClient:
         """Re-query the vault and rebuild the dedup index."""
         self._folders = self.list_folders()
         self._existing_entries = self._build_dedup_index()
+
+    # ------------------------------------------------------------------
+    # Async attachment uploads
+    # ------------------------------------------------------------------
+
+    async def upload_attachment(
+        self,
+        client: httpx.AsyncClient,
+        item_id: str,
+        filename: str,
+        data: bytes,
+    ) -> None:
+        """Upload one attachment via multipart ``POST /attachment``."""
+        resp = await client.post(
+            "/attachment",
+            params={"itemid": item_id},
+            files={"file": (filename, data)},
+        )
+        if resp.status_code >= 400:
+            raise BitwardenClientError(
+                f"Attachment upload failed for {filename!r} on item {item_id}: "
+                f"HTTP {resp.status_code}"
+            )
+        body: dict[str, Any] = resp.json()
+        if not body.get("success", False):
+            msg = body.get("message", "unknown error")
+            raise BitwardenClientError(
+                f"Attachment upload error for {filename!r}: {msg}"
+            )
+        logger.debug(f"Uploaded attachment {filename!r} to item {item_id}")
+
+    async def upload_attachments_parallel(
+        self,
+        items: list[tuple[str, list[tuple[str, bytes]]]],
+        *,
+        max_concurrency: int = 4,
+    ) -> None:
+        """Upload all attachments with bounded parallelism.
+
+        *items* is a list of ``(item_id, [(filename, data), ...])`` tuples.
+        """
+        total = sum(len(atts) for _, atts in items)
+        if total == 0:
+            return
+
+        logger.info(f"Uploading {total} attachments (concurrency={max_concurrency})")
+        sem = asyncio.Semaphore(max_concurrency)
+
+        async def _upload_one(
+            client: httpx.AsyncClient,
+            item_id: str,
+            filename: str,
+            data: bytes,
+        ) -> None:
+            async with sem:
+                await self.upload_attachment(client, item_id, filename, data)
+
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=_HTTP_TIMEOUT_S,
+        ) as client:
+            tasks: list[asyncio.Task[None]] = []
+            for item_id, attachments in items:
+                for filename, data in attachments:
+                    tasks.append(
+                        asyncio.create_task(
+                            _upload_one(client, item_id, filename, data)
+                        )
+                    )
+            await asyncio.gather(*tasks)
+
+        logger.info(f"Uploaded {total} attachments")
+
+    def upload_attachments(
+        self,
+        items: list[tuple[str, list[tuple[str, bytes]]]],
+        *,
+        max_concurrency: int = 4,
+    ) -> None:
+        """Synchronous wrapper for :meth:`upload_attachments_parallel`."""
+        asyncio.run(
+            self.upload_attachments_parallel(items, max_concurrency=max_concurrency)
+        )
 
     # ------------------------------------------------------------------
     # Properties
