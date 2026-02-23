@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-23
+
 ### Fixed
 
 - **Stubs missing runtime dependency** -- Added explicit `lxml>=6.0.2`

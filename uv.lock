@@ -129,7 +129,7 @@ wheels = [
 
 [[package]]
 name = "kp2bw"
-version = "2.0.0rc3"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "pykeepass" },
