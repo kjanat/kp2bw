@@ -34,6 +34,26 @@ def _bw_json(env: dict[str, str], *args: str) -> list[dict[str, object]]:
         ) from exc
 
 
+def _unlock_session(env: dict[str, str], password: str) -> str:
+    unlock_env = env.copy()
+    unlock_env["BW_PASSWORD"] = password
+
+    for _ in range(2):
+        session = _run(
+            ["bw", "unlock", "--raw", "--passwordenv", "BW_PASSWORD"],
+            env=unlock_env,
+        )
+        if session:
+            return session
+
+        _ = _run(["bw", "lock"], env=env)
+
+    status = _run(["bw", "status"], env=env)
+    raise AssertionError(
+        f"bw unlock returned an empty session token after retries. bw status: {status}"
+    )
+
+
 def _create_keepass_snapshot(path: Path, password: str) -> None:
     create_database(str(path), password=password)
     kp = PyKeePass(str(path), password=password)
@@ -87,7 +107,7 @@ def main() -> None:
         _ = _run(["bw", "config", "server", server_url], env=env)
         _ = _run(["bw", "login", bw_email, bw_password, "--nointeraction"], env=env)
 
-        initial_session = _run(["bw", "unlock", bw_password, "--raw"], env=env)
+        initial_session = _unlock_session(env, bw_password)
         before_items = _bw_json(env, "list", "items", "--session", initial_session)
 
         snapshot_path = tmp / "snapshot.kdbx"
@@ -129,7 +149,7 @@ def main() -> None:
             env=env,
         )
 
-        session = _run(["bw", "unlock", bw_password, "--raw"], env=env)
+        session = _unlock_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
 
         folders = _bw_json(env, "list", "folders", "--session", session)
