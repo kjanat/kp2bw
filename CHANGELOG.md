@@ -53,6 +53,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   process and included it in timeout/crash error messages. Closed stdin via
   `subprocess.DEVNULL` to prevent blocking. Increased startup timeout from
   30 s to 60 s for CI headroom.
+- **e2e test empty session token** -- `bw login` + separate `bw unlock --raw`
+  returned an empty session on `@bitwarden/cli@2026.1.0`. Replaced with
+  `bw login --raw` to capture the session in a single step; added
+  lock-then-unlock retry fallback in `_get_session()`.
 - **`bw import` command injection** -- `run_import` used `shell=True` with a
   format-string command; replaced with list-form `subprocess.check_output`
   (no shell).

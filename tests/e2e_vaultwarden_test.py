@@ -34,24 +34,48 @@ def _bw_json(env: dict[str, str], *args: str) -> list[dict[str, object]]:
         ) from exc
 
 
-def _unlock_session(env: dict[str, str], password: str) -> str:
-    unlock_env = env.copy()
-    unlock_env["BW_PASSWORD"] = password
+def _get_session(env: dict[str, str], password: str) -> str:
+    """Unlock the vault and return a session token.
 
-    for _ in range(2):
+    Tries ``bw unlock --raw`` first.  If that returns empty (which can happen
+    with recent CLI versions when the vault is already unlocked after login),
+    falls back to locking then unlocking.
+    """
+    pw_env = env.copy()
+    pw_env["BW_PASSWORD"] = password
+
+    for _ in range(3):
         session = _run(
             ["bw", "unlock", "--raw", "--passwordenv", "BW_PASSWORD"],
-            env=unlock_env,
+            env=pw_env,
         )
         if session:
             return session
 
+        # Lock first so the next unlock has something to do.
         _ = _run(["bw", "lock"], env=env)
 
     status = _run(["bw", "status"], env=env)
     raise AssertionError(
         f"bw unlock returned an empty session token after retries. bw status: {status}"
     )
+
+
+def _login_session(env: dict[str, str], email: str, password: str) -> str:
+    """Log in and return the session token in a single step."""
+    pw_env = env.copy()
+    pw_env["BW_PASSWORD"] = password
+
+    session = _run(
+        ["bw", "login", email, "--passwordenv", "BW_PASSWORD", "--raw"],
+        env=pw_env,
+    )
+    if session:
+        return session
+
+    # Fallback: login may have succeeded without --raw returning a token.
+    # Try unlocking instead.
+    return _get_session(env, password)
 
 
 def _create_keepass_snapshot(path: Path, password: str) -> None:
@@ -122,9 +146,8 @@ def main() -> None:
 
         _assert_bw_serve_available(env)
         _ = _run(["bw", "config", "server", server_url], env=env)
-        _ = _run(["bw", "login", bw_email, bw_password, "--nointeraction"], env=env)
 
-        initial_session = _unlock_session(env, bw_password)
+        initial_session = _login_session(env, bw_email, bw_password)
         before_items = _bw_json(env, "list", "items", "--session", initial_session)
 
         snapshot_path = tmp / "snapshot.kdbx"
@@ -166,7 +189,7 @@ def main() -> None:
             env=env,
         )
 
-        session = _unlock_session(env, bw_password)
+        session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
 
         folders = _bw_json(env, "list", "folders", "--session", session)
