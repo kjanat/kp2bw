@@ -58,7 +58,7 @@
       "description": "Wire new client into convert.py. Update cli.py flags. Add httpx dependency. Remove old bitwardenclient.py.",
       "files": ["src/kp2bw/convert.py", "src/kp2bw/cli.py", "src/kp2bw/bitwardenclient.py", "pyproject.toml"],
       "priority": "integration",
-      "passes": false
+      "passes": true
     },
     {
       "id": "e2e-tests",

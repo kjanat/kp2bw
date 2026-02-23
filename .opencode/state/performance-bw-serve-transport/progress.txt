@@ -10,6 +10,8 @@ Started: 2026-02-23
 - **`signal.getsignal` type**: returns `Callable[[int, FrameType | None], Any] | int | None`, not `signal.Handlers`. Use `isinstance(prev, int) or prev is None` to narrow before calling.
 - **`from __future__ import annotations`**: use in new modules for PEP 604 union syntax in annotations
 - **httpx added as runtime dep**: `httpx>=0.28.0` in pyproject.toml
+- **4-phase import pattern**: partition → bulk import → sync+ID recovery → parallel attachments
+- **`isinstance(att, Attachment)` for narrowing**: prefer checking against the known class rather than `tuple`
 
 ---
 
@@ -77,3 +79,18 @@ Started: 2026-02-23
 - Simplified vs old client: no template fetch needed — POST body includes `organizationId`, `name`, `groups`
 - Files changed: `src/kp2bw/bw_serve.py`
 - **Learnings:** bw serve collection creation doesn't need a template — just POST the full body directly
+
+## Task - cli-integration
+
+- Rewrote `_create_bitwarden_items_for_entries()` — 4-phase architecture:
+  1. Partition entries: resolve collections, dedup, build import dict + attachment map
+  2. Bulk import via `write_and_import()`
+  3. Post-import sync + item ID recovery by `(folder_name, item_name)` matching
+  4. Parallel attachment uploads via `bw.upload_attachments()`
+- Added helper methods: `_unpack_entry()`, `_resolve_collection()`, `_materialise_attachment()`
+- Replaced `BitwardenClient` import with `BitwardenServeClient` + `write_and_import`
+- Added `folders` property to `BitwardenServeClient` for public access to folder cache
+- Removed unused `json` import from convert.py
+- `bitwardenclient.py` kept for now (will be deleted when all references confirmed removed)
+- Files changed: `src/kp2bw/convert.py`, `src/kp2bw/bw_serve.py`
+- **Learnings:** `isinstance(att, Attachment)` works better for type narrowing than `isinstance(att, tuple)` when Attachment is from stubs; ruff preview catches `noqa` for non-enabled rules

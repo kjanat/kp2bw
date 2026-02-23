@@ -457,3 +457,8 @@ class BitwardenServeClient:
     def org_id(self) -> str | None:
         """Organisation ID, if provided."""
         return self._org_id
+
+    @property
+    def folders(self) -> dict[str, str]:
+        """Cached ``{name: id}`` folder mapping."""
+        return self._folders

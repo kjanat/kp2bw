@@ -1,13 +1,13 @@
 import base64
 import binascii
-import json
 import logging
 from itertools import islice
 from typing import Any
 
 from pykeepass import Attachment, Entry, Group, PyKeePass
 
-from .bitwardenclient import BitwardenClient
+from .bw_import import write_and_import
+from .bw_serve import BitwardenServeClient
 from .exceptions import ConversionError
 
 logger = logging.getLogger(__name__)
@@ -464,72 +464,123 @@ class Converter:
 
         logger.debug(f"Resolved {ref_entries_length} REF entries")
 
-    def _create_bitwarden_items_for_entries(self) -> None:
-        i = 1
-        max_i = len(self._entries)
+    @staticmethod
+    def _unpack_entry(
+        entry_value: EntryValue,
+    ) -> tuple[str | None, BwItem, list[AttachmentItem] | None]:
+        """Destructure an entry value into (folder, item, attachments)."""
+        if len(entry_value) == 2:
+            return entry_value[0], entry_value[1], None
+        folder = entry_value[0]
+        bw_item = entry_value[1]
+        attachments: list[AttachmentItem] = entry_value[2]  # type: ignore[index]
+        return folder, bw_item, attachments
 
+    def _resolve_collection(
+        self, bw: BitwardenServeClient, bw_item: BwItem
+    ) -> str | None:
+        """Resolve and set collection ID on *bw_item*, strip ``firstlevel``."""
+        collection_id: str | None = None
+        firstlevel = bw_item.get("firstlevel")
+        if firstlevel:
+            if self._bitwarden_coll_id == "auto":
+                logger.info(f"Searching Collection {firstlevel}")
+                collection_id = bw.create_org_collection(firstlevel)
+            elif self._bitwarden_coll_id:
+                collection_id = self._bitwarden_coll_id
+        bw_item.pop("firstlevel", None)
+        bw_item["collectionIds"] = collection_id
+        return collection_id
+
+    @staticmethod
+    def _materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:
+        """Convert an AttachmentItem to a ``(filename, data)`` pair."""
+        if not isinstance(att, Attachment):
+            # Long custom property — (key, value) text tuple
+            name: str = att[0]
+            value: str = att[1]
+            return name + ".txt", value.encode("UTF-8")
+        # Real pykeepass Attachment
+        filename = att.filename if att.filename else "attachment"
+        data: bytes = att.data
+        return filename, data
+
+    def _create_bitwarden_items_for_entries(self) -> None:
         logger.info("Connecting and reading existing folders and entries")
 
-        bw = BitwardenClient(self._bitwarden_password, self._bitwarden_organization_id)
+        with BitwardenServeClient(
+            self._bitwarden_password,
+            org_id=self._bitwarden_organization_id,
+        ) as bw:
+            # --- Phase 1: Partition entries ---------------------------------
+            # Separate entries that can be bulk-imported from those that need
+            # individual creation (org items requiring collection assignment).
+            import_entries: dict[str, tuple[str | None, BwItem]] = {}
+            attachment_map: dict[str, list[AttachmentItem]] = {}
 
-        for entry_value in self._entries.values():
-            if len(entry_value) == 2:
-                folder, bw_item_object = entry_value[0], entry_value[1]
-                attachments: list[AttachmentItem] | None = None
-            else:
-                folder = entry_value[0]
-                bw_item_object = entry_value[1]
-                # entry_value is a 3-tuple here; index 2 is valid
-                attachments = entry_value[2]  # type: ignore[index]
+            for key, entry_value in self._entries.items():
+                folder, bw_item, attachments = self._unpack_entry(entry_value)
 
-            # collection
-            collection_id: str | None = None
-            coll_info = ""
-            if bw_item_object["firstlevel"]:
-                if self._bitwarden_coll_id == "auto":
-                    logger.info(f"Searching Collection {bw_item_object['firstlevel']}")
-                    collection_id = bw.create_org_get_collection(
-                        bw_item_object["firstlevel"]
-                    )
-                    coll_info = (
-                        " in specified Collection " + bw_item_object["firstlevel"]
-                    )
+                # Resolve collection (mutates bw_item)
+                self._resolve_collection(bw, bw_item)
 
-                elif self._bitwarden_coll_id:
-                    collection_id = self._bitwarden_coll_id
-                    coll_info = " in specified Collection "
-
-            # update object
-            del bw_item_object["firstlevel"]
-            bw_item_object["collectionIds"] = collection_id
-
-            logger.info(
-                f"[{i} of {max_i}] Creating Bitwarden entry in {folder} for {bw_item_object['name']}{coll_info}..."
-            )
-
-            # create entry
-            output = bw.create_entry(folder, bw_item_object)
-            if "error" in output.lower():
-                logger.error(f"!! ERROR: Creation of entry failed: {output} !!")
-                i += 1
-                continue
-            if "skip" in output:
-                i += 1
-                continue
-
-            # upload attachments
-            if attachments:
-                item_id: str = json.loads(output)["id"]
-
-                for attachment in attachments:
+                # Dedup check
+                if bw.entry_exists(folder, bw_item["name"]):
                     logger.info(
-                        f"        - Uploading attachment for item {bw_item_object['name']}..."
+                        f"-- Entry {bw_item['name']} already exists in "
+                        f"folder {folder}. skipping..."
                     )
-                    res = bw.create_attachment(item_id, attachment)
-                    if "failed" in res:
-                        logger.error(f"!! ERROR: Uploading attachment failed: {res}")
+                    continue
 
-            i += 1
+                import_entries[key] = (folder, bw_item)
+                if attachments:
+                    attachment_map[key] = attachments
+
+            if not import_entries:
+                logger.info("No new entries to import")
+                return
+
+            # --- Phase 2: Bulk import via bw import -------------------------
+            logger.info(f"Importing {len(import_entries)} entries via bw import")
+            write_and_import(import_entries)
+
+            # --- Phase 3: Post-import sync and ID recovery ------------------
+            bw.sync()
+            bw.refresh_dedup_index()
+
+            if not attachment_map:
+                logger.info("No attachments to upload")
+                return
+
+            # Recover server-assigned item IDs by matching (name, folderId).
+            items = bw.list_items()
+            # Build lookup: (folder_name, item_name) → item_id
+            folder_id_to_name: dict[str, str] = {
+                fid: fname for fname, fid in bw.folders.items()
+            }
+            id_lookup: dict[tuple[str | None, str], str] = {}
+            for item in items:
+                fid: str | None = item.get("folderId") or None
+                fname = folder_id_to_name.get(fid, None) if fid else None
+                id_lookup[(fname, item["name"])] = item["id"]
+
+            # --- Phase 4: Parallel attachment uploads -----------------------
+            upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
+            for key, attachments in attachment_map.items():
+                folder, bw_item = import_entries[key]
+                lookup_key = (folder, bw_item["name"])
+                item_id = id_lookup.get(lookup_key)
+                if item_id is None:
+                    logger.warning(
+                        f"Could not find imported item {bw_item['name']!r} "
+                        f"in folder {folder!r} for attachment upload"
+                    )
+                    continue
+
+                file_pairs = [self._materialise_attachment(att) for att in attachments]
+                upload_items.append((item_id, file_pairs))
+
+            bw.upload_attachments(upload_items)
 
     def convert(self) -> None:
         # load keepass data from database
