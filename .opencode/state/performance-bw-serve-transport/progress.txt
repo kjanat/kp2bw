@@ -36,3 +36,13 @@ Started: 2026-02-23
 - `__init__` now loads folder cache after sync via `self._folders = self.list_folders()`
 - Files changed: `src/kp2bw/bw_serve.py`
 - **Learnings:** bw serve list endpoints nest data under `data.data` (outer `data` from envelope, inner `data` from list response)
+
+## Task - dedup-via-serve
+
+- Added `_build_dedup_index()` → `dict[str | None, set[str]]` mapping folder names to item name sets
+- Added `entry_exists(folder, name)` for O(1) dedup checks
+- Added `refresh_dedup_index()` to re-query after import
+- `__init__` now builds dedup index after folder cache: `self._existing_entries = self._build_dedup_index()`
+- Reversed folder id→name lookup for mapping item folderId back to folder names
+- Files changed: `src/kp2bw/bw_serve.py`
+- **Learnings:** old client used `list` for dedup (O(K) per check); new uses `set` (O(1))

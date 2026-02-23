@@ -51,6 +51,7 @@ class BitwardenServeClient:
     _previous_sigterm: Callable[[int, FrameType | None], Any] | int | None
     _previous_sigint: Callable[[int, FrameType | None], Any] | int | None
     _folders: dict[str, str]  # name → id cache
+    _existing_entries: dict[str | None, set[str]]  # folder_name → {item names}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -72,14 +73,16 @@ class BitwardenServeClient:
         self._org_id = org_id
 
         self._folders = {}
+        self._existing_entries = {}
 
         self._start_serve()
         self._wait_for_ready()
         self._unlock(password)
         self._sync()
 
-        # Populate folder cache from existing vault state.
+        # Populate folder cache and dedup index from existing vault state.
         self._folders = self.list_folders()
+        self._existing_entries = self._build_dedup_index()
 
         # Register cleanup handlers so the bw serve process is always
         # terminated — even on unhandled exceptions or signals.
@@ -274,6 +277,35 @@ class BitwardenServeClient:
         item_id: str = data["id"]
         logger.debug(f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
+
+    # ------------------------------------------------------------------
+    # Deduplication
+    # ------------------------------------------------------------------
+
+    def _build_dedup_index(self) -> dict[str | None, set[str]]:
+        """Build a ``{folder_name: {item_names}}`` index for O(1) dedup."""
+        id_to_name: dict[str, str] = {
+            fid: fname for fname, fid in self._folders.items()
+        }
+        items = self.list_items()
+        index: dict[str | None, set[str]] = {}
+        for item in items:
+            folder_id: str | None = item.get("folderId") or None
+            folder_name = id_to_name.get(folder_id, None) if folder_id else None
+            index.setdefault(folder_name, set()).add(item["name"])
+        return index
+
+    def entry_exists(self, folder: str | None, name: str) -> bool:
+        """Check whether an entry with *name* already exists in *folder*."""
+        names = self._existing_entries.get(folder)
+        if names is None:
+            return False
+        return name in names
+
+    def refresh_dedup_index(self) -> None:
+        """Re-query the vault and rebuild the dedup index."""
+        self._folders = self.list_folders()
+        self._existing_entries = self._build_dedup_index()
 
     # ------------------------------------------------------------------
     # Properties
