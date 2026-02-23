@@ -15,9 +15,12 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Run Vaultwarden end-to-end migration test
-        run: >-
-          docker compose -f tests/docker-compose.yml up
-          --build --abort-on-container-exit --exit-code-from test
+        run: |
+          echo "::group::Build Docker images"
+          docker compose -f tests/docker-compose.yml build
+          echo "::endgroup::"
+          docker compose -f tests/docker-compose.yml up \
+            --abort-on-container-exit --exit-code-from test
 
       - name: Show Vaultwarden logs on failure
         if: failure() || cancelled()

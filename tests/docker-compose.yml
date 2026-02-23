@@ -5,7 +5,6 @@ services:
       dockerfile: Dockerfile.vaultwarden
     environment:
       I_REALLY_WANT_VOLATILE_STORAGE: "true"
-      WEBSOCKET_ENABLED: "false"
       SIGNUPS_ALLOWED: "false"
       DOMAIN: "https://vaultwarden"
       ROCKET_PORT: "443"

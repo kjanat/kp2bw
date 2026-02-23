@@ -16,6 +16,7 @@ from typing import Any, Self
 
 import httpx
 
+from . import VERBOSE
 from .exceptions import BitwardenClientError
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ class BitwardenServeClient:
 
     def _get_session(self, password: str) -> str | None:
         """Unlock the vault via ``bw unlock --raw`` and return the session key."""
-        logger.debug("Obtaining session key via bw unlock --raw")
+        logger.log(VERBOSE, "Obtaining session key via bw unlock --raw")
         try:
             result = subprocess.run(
                 ["bw", "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
@@ -144,7 +145,7 @@ class BitwardenServeClient:
             return None
         session = result.stdout.strip()
         if session:
-            logger.debug("Obtained session key via bw unlock")
+            logger.log(VERBOSE, "Obtained session key via bw unlock")
         else:
             logger.warning("bw unlock returned empty session key")
         return session or None
@@ -155,9 +156,10 @@ class BitwardenServeClient:
         env: dict[str, str] | None = None
         if session:
             env = {**os.environ, "BW_SESSION": session}
-        logger.debug(
+        logger.log(
+            VERBOSE,
             f"Starting bw serve on port {self._port} "
-            f"(BW_SESSION={'set' if session else 'not set'})"
+            f"(BW_SESSION={'set' if session else 'not set'})",
         )
         self._process = subprocess.Popen(
             cmd,
@@ -179,7 +181,7 @@ class BitwardenServeClient:
                 resp = self._http.get("/status")
                 if resp.status_code == 200:
                     elapsed = time.monotonic() - start
-                    logger.debug(f"bw serve is ready ({elapsed:.1f}s)")
+                    logger.log(VERBOSE, f"bw serve is ready ({elapsed:.1f}s)")
                     return
             except httpx.ConnectError:
                 pass
@@ -207,12 +209,15 @@ class BitwardenServeClient:
         # Unregister atexit to avoid double-close.
         atexit.unregister(self.close)
 
-        # Restore previous signal handlers.
-        signal.signal(signal.SIGTERM, self._previous_sigterm)
-        signal.signal(signal.SIGINT, self._previous_sigint)
+        # Restore previous signal handlers (getsignal can return None for
+        # handlers installed from C code; signal.signal rejects None).
+        if self._previous_sigterm is not None:
+            signal.signal(signal.SIGTERM, self._previous_sigterm)
+        if self._previous_sigint is not None:
+            signal.signal(signal.SIGINT, self._previous_sigint)
 
         if self._process is not None and self._process.poll() is None:
-            logger.debug("Terminating bw serve process")
+            logger.log(VERBOSE, "Terminating bw serve process")
             self._process.terminate()
             try:
                 self._process.wait(timeout=5)
@@ -282,12 +287,12 @@ class BitwardenServeClient:
 
     def _unlock(self, password: str) -> None:
         """Unlock the vault via ``POST /unlock``."""
-        logger.debug("Unlocking vault via bw serve")
+        logger.log(VERBOSE, "Unlocking vault via bw serve")
         self._request("POST", "/unlock", json_body={"password": password})
 
     def _sync(self) -> None:
         """Synchronise vault state via ``POST /sync``."""
-        logger.debug("Syncing vault via bw serve")
+        logger.log(VERBOSE, "Syncing vault via bw serve")
         self._request("POST", "/sync")
 
     def sync(self) -> None:
@@ -316,7 +321,7 @@ class BitwardenServeClient:
         data = self._request("POST", "/object/folder", json_body={"name": name})
         folder_id: str = data["id"]
         self._folders[name] = folder_id
-        logger.debug(f"Created folder {name!r} → {folder_id}")
+        logger.log(VERBOSE, f"Created folder {name!r} → {folder_id}")
         return folder_id
 
     def has_folder(self, name: str) -> bool:
@@ -340,7 +345,7 @@ class BitwardenServeClient:
         """Create a single vault item via HTTP and return its ID."""
         data = self._request("POST", "/object/item", json_body=item)
         item_id: str = data["id"]
-        logger.debug(f"Created item {item.get('name', '?')!r} → {item_id}")
+        logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
 
     def create_items_batch(
@@ -367,8 +372,6 @@ class BitwardenServeClient:
                 item["folderId"] = self._folders.get(folder_name)
             else:
                 item["folderId"] = None
-            item.pop("firstlevel", None)
-
             item_id = self.create_item(item)
             key_to_id[key] = item_id
 
@@ -445,7 +448,7 @@ class BitwardenServeClient:
         )
         coll_id: str = data["id"]
         self._collections[name] = coll_id
-        logger.debug(f"Created org collection {name!r} → {coll_id}")
+        logger.log(VERBOSE, f"Created org collection {name!r} → {coll_id}")
         return coll_id
 
     # ------------------------------------------------------------------
@@ -476,7 +479,7 @@ class BitwardenServeClient:
             raise BitwardenClientError(
                 f"Attachment upload error for {filename!r}: {msg}"
             )
-        logger.debug(f"Uploaded attachment {filename!r} to item {item_id}")
+        logger.log(VERBOSE, f"Uploaded attachment {filename!r} to item {item_id}")
 
     async def upload_attachments_parallel(
         self,

@@ -1,3 +1,5 @@
+<!--markdownlint-disable-file no-duplicate-heading-->
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -13,14 +15,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fully containerized Vaultwarden integration tests. Fixture data is COPY'd into
   the Vaultwarden image; the test image bundles Python 3.14, `uv`, `bun`,
   Node.js, and `@bitwarden/cli`.
+- **`-d`/`--debug` flag** -- Separate debug verbosity level that includes
+  third-party library logs (pykeepass, httpx). `-v` now shows kp2bw operational
+  detail only (custom VERBOSE level at 15), `-d` enables full DEBUG for
+  everything.
+- **Custom VERBOSE logging level** -- `kp2bw.VERBOSE` (15) sits between DEBUG
+  and INFO, matching PowerShell's Write-Verbose/Write-Debug distinction.
 
 ### Changed
 
 - **CI workflow simplified** -- `integration-docker.yml` reduced to a single
   `docker compose up --build --abort-on-container-exit --exit-code-from test`
   invocation, replacing multi-step `bw` CLI setup.
+- **CI build output collapsible** -- Docker image build phase wrapped in
+  `::group::` markers so it collapses in GitHub Actions logs.
 - **Regenerated TLS certs** -- Self-signed cert now includes `DNS:vaultwarden`
   SAN for Docker Compose service-name resolution.
+- **`firstlevel` refactored out of BwItem dict** -- Internal collection-routing
+  key now travels as a separate `EntryValue` tuple element instead of being
+  smuggled inside the Bitwarden API payload dict.
+- **`collectionIds` corrected to array** -- Now emits `[id]` or `[]` per the
+  Bitwarden API spec, instead of a bare string or `None`.
 
 ### Fixed
 
@@ -30,6 +45,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE`/`stderr=PIPE`
   from `_start_serve()` Popen call; child now inherits parent file descriptors.
   Removed dead `_read_output()` method that depended on piped streams.
+- **Signal handler restore crash** -- `close()` could raise `TypeError` when
+  restoring signal handlers that were `None` (C-installed handlers). Now guards
+  against `None` before calling `signal.signal()`.
+- **Third-party debug log spam** -- `-v` no longer sets root logger to DEBUG;
+  pykeepass/httpx debug messages only appear with `-d`.
+- **Deprecated `WEBSOCKET_ENABLED` env var** -- Removed from docker-compose.yml;
+  silently ignored since Vaultwarden 1.29.
+- **Dockerfile.test missing `pipefail`** -- Added `SHELL` directive so `curl`
+  failures in pipe are not masked.
 
 ### Removed
 
@@ -271,5 +295,3 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 [2.0.0rc2]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/kjanat/kp2bw/compare/c9ef571eabd345db94751f7dec845e49756e9d47...v2.0.0rc1
 [Upstream]: https://github.com/kjanat/kp2bw/compare/jampe:kp2bw:f41b4e6a10a2c9fc55d144d048b4923c94eb43d6...kjanat:kp2bw:c9ef571eabd345db94751f7dec845e49756e9d47
-
-<!--markdownlint-disable-file no-duplicate-heading-->

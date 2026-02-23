@@ -6,6 +6,7 @@ from typing import Any
 
 from pykeepass import Attachment, Entry, Group, PyKeePass
 
+from . import VERBOSE
 from .bw_serve import BitwardenServeClient
 from .exceptions import ConversionError
 
@@ -21,9 +22,10 @@ type BwItem = dict[str, Any]
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
 type AttachmentItem = Attachment | tuple[str, str]
 
-# Entry storage: 2-tuple (folder, bw_item) or 3-tuple (folder, bw_item, attachments)
+# Entry storage: (folder, firstlevel, bw_item) or (folder, firstlevel, bw_item, attachments)
 type EntryValue = (
-    tuple[str | None, BwItem] | tuple[str | None, BwItem, list[AttachmentItem]]
+    tuple[str | None, str | None, BwItem]
+    | tuple[str | None, str | None, BwItem, list[AttachmentItem]]
 )
 
 # Fido2 credential list type
@@ -140,7 +142,6 @@ class Converter:
         password: str,
         custom_properties: dict[str, list[Any]],
         collection_id: str | None,
-        firstlevel: str | None,
         fido2_credentials: Fido2Credentials | None = None,
     ) -> BwItem:
         """Build a Bitwarden item dict from individual entry fields."""
@@ -156,8 +157,7 @@ class Converter:
 
         return {
             "organizationId": self._bitwarden_organization_id,
-            "collectionIds": collection_id,
-            "firstlevel": firstlevel,
+            "collectionIds": [collection_id] if collection_id else [],
             "folderId": None,
             "type": 1,
             "name": title,
@@ -270,6 +270,7 @@ class Converter:
             notes = expired_prefix + notes
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
+        firstlevel = self._get_folder_firstlevel(entry)
         bw_item_object = self._create_bw_python_object(
             title=title,
             notes=notes,
@@ -279,7 +280,6 @@ class Converter:
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
             collection_id=self._bitwarden_coll_id,
-            firstlevel=self._get_folder_firstlevel(entry),
             fido2_credentials=fido2_credentials,
         )
 
@@ -298,12 +298,14 @@ class Converter:
             attachments += entry.attachments
             self._entries[entry_key] = (
                 folder,
+                firstlevel,
                 bw_item_object,
                 attachments,
             )
         else:
             self._entries[entry_key] = (
                 folder,
+                firstlevel,
                 bw_item_object,
             )
 
@@ -377,7 +379,7 @@ class Converter:
             # Skip expired entries if requested
             if self._skip_expired and entry.expired:
                 skipped_expired += 1
-                logger.debug(f"Skipping expired entry: {entry.title}")
+                logger.log(VERBOSE, f"Skipping expired entry: {entry.title}")
                 continue
 
             # prevent not iterable errors at "in" checks
@@ -438,7 +440,7 @@ class Converter:
                         ref_result = self._get_referenced_entry(
                             lookup_mode, ref_compare_string
                         )
-                        ref_entry = ref_result[1]
+                        ref_entry = ref_result[2]
 
                         value = self._find_referenced_value(ref_entry, field_referenced)
                         setattr(kp_entry, member, value)
@@ -472,34 +474,36 @@ class Converter:
                     f"!! Could not resolve entry for {group_path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
                 )
 
-        logger.debug(f"Resolved {ref_entries_length} REF entries")
+        logger.log(VERBOSE, f"Resolved {ref_entries_length} REF entries")
 
     @staticmethod
     def _unpack_entry(
         entry_value: EntryValue,
-    ) -> tuple[str | None, BwItem, list[AttachmentItem] | None]:
-        """Destructure an entry value into (folder, item, attachments)."""
-        if len(entry_value) == 2:
-            return entry_value[0], entry_value[1], None
+    ) -> tuple[str | None, str | None, BwItem, list[AttachmentItem] | None]:
+        """Destructure an entry value into (folder, firstlevel, item, attachments)."""
+        if len(entry_value) == 3:
+            return entry_value[0], entry_value[1], entry_value[2], None
         folder = entry_value[0]
-        bw_item = entry_value[1]
-        attachments: list[AttachmentItem] = entry_value[2]  # type: ignore[index]
-        return folder, bw_item, attachments
+        firstlevel = entry_value[1]
+        bw_item = entry_value[2]
+        attachments: list[AttachmentItem] = entry_value[3]  # type: ignore[index]
+        return folder, firstlevel, bw_item, attachments
 
     def _resolve_collection(
-        self, bw: BitwardenServeClient, bw_item: BwItem
+        self,
+        bw: BitwardenServeClient,
+        bw_item: BwItem,
+        firstlevel: str | None,
     ) -> str | None:
-        """Resolve and set collection ID on *bw_item*, strip ``firstlevel``."""
+        """Resolve and set collection ID on *bw_item*."""
         collection_id: str | None = None
-        firstlevel = bw_item.get("firstlevel")
         if firstlevel:
             if self._bitwarden_coll_id == "auto":
                 logger.info(f"Searching Collection {firstlevel}")
                 collection_id = bw.create_org_collection(firstlevel)
             elif self._bitwarden_coll_id:
                 collection_id = self._bitwarden_coll_id
-        bw_item.pop("firstlevel", None)
-        bw_item["collectionIds"] = collection_id
+        bw_item["collectionIds"] = [collection_id] if collection_id else []
         return collection_id
 
     @staticmethod
@@ -528,10 +532,12 @@ class Converter:
             attachment_map: dict[str, list[AttachmentItem]] = {}
 
             for key, entry_value in self._entries.items():
-                folder, bw_item, attachments = self._unpack_entry(entry_value)
+                folder, firstlevel, bw_item, attachments = self._unpack_entry(
+                    entry_value
+                )
 
                 # Resolve collection (mutates bw_item)
-                self._resolve_collection(bw, bw_item)
+                self._resolve_collection(bw, bw_item, firstlevel)
 
                 # Dedup check
                 if bw.entry_exists(folder, bw_item["name"]):

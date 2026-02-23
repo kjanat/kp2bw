@@ -11,6 +11,7 @@ from subprocess import STDOUT, CalledProcessError, check_output
 from typing import Any
 from uuid import uuid4
 
+from . import VERBOSE
 from .exceptions import BitwardenClientError
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ def run_import(filepath: Path, *, timeout: float = 120) -> None:
        :meth:`~bw_serve.BitwardenServeClient.create_items_batch` instead.
     """
     args = ["bw", "import", "bitwardenjson", str(filepath)]
-    logger.debug("Running bw import")
+    logger.log(VERBOSE, "Running bw import")
     try:
         output = check_output(
             args,
@@ -79,7 +80,7 @@ def run_import(filepath: Path, *, timeout: float = 120) -> None:
             stdin=subprocess.DEVNULL,
             timeout=timeout,
         )
-        logger.debug(f"bw import returned {len(output)} bytes")
+        logger.log(VERBOSE, f"bw import returned {len(output)} bytes")
     except subprocess.TimeoutExpired as exc:
         raise BitwardenClientError(
             f"bw import timed out after {timeout}s (likely waiting for "

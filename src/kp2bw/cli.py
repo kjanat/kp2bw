@@ -5,7 +5,7 @@ import sys
 from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from typing import NoReturn
 
-from . import __version__
+from . import VERBOSE, __version__
 from .convert import Converter
 
 
@@ -161,6 +161,14 @@ def _argparser() -> MyArgParser:
         action="store_true",
         default=None,
     )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        dest="debug",
+        help="Debug output — includes third-party library logs (env: KP2BW_DEBUG)",
+        action="store_true",
+        default=None,
+    )
 
     return parser
 
@@ -231,6 +239,11 @@ def main() -> None:
                 os.environ.get("KP2BW_VERBOSE"), env_var="KP2BW_VERBOSE"
             )
         )
+        debug = (
+            args.debug
+            if args.debug is not None
+            else _parse_bool_env(os.environ.get("KP2BW_DEBUG"), env_var="KP2BW_DEBUG")
+        )
     except ValueError as exc:
         _ = sys.stderr.write(f"ERROR: {exc}\n\n")
         _argparser().print_help()
@@ -257,6 +270,7 @@ def main() -> None:
     migrate_metadata = migrate_metadata if migrate_metadata is not None else True
     skip_confirm = skip_confirm if skip_confirm is not None else False
     verbose = verbose if verbose is not None else False
+    debug = debug if debug is not None else False
 
     if args.bw_coll and not args.bw_org:
         _ = sys.stderr.write(
@@ -266,8 +280,16 @@ def main() -> None:
         sys.exit(2)
 
     # logging
-    if verbose:
-        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.DEBUG)
+    #   default : INFO  (progress messages)
+    #   -v      : VERBOSE for kp2bw (operational detail)
+    #   -d      : DEBUG  for everything (incl. pykeepass, httpx, …)
+    if debug:
+        logging.basicConfig(
+            format="%(levelname)s: %(name)s: %(message)s", level=logging.DEBUG
+        )
+    elif verbose:
+        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
+        logging.getLogger("kp2bw").setLevel(VERBOSE)
     else:
         logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 

@@ -157,8 +157,9 @@ def _assert_bw_serve_available(env: dict[str, str]) -> None:
 def main() -> None:
     logging.basicConfig(
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
-        level=logging.DEBUG,
+        level=logging.INFO,
     )
+    logger.setLevel(logging.DEBUG)
 
     repo_root = Path(__file__).resolve().parents[1]
     cert_path = Path(
