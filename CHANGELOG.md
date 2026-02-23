@@ -8,51 +8,60 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **``bw serve`` HTTP transport** -- New ``BitwardenServeClient`` in
-  ``bw_serve.py`` manages a persistent ``bw serve`` process with HTTP API
+- **`bw serve` HTTP transport** -- New `BitwardenServeClient` in
+  `bw_serve.py` manages a persistent `bw serve` process with HTTP API
   access, replacing the one-subprocess-per-operation model. Includes automatic
   port selection, health polling, vault unlock/sync, signal-safe cleanup, and
-  ``atexit`` registration.
-- **Batch import via ``bw import``** -- New ``bw_import.py`` module builds
-  Bitwarden-format JSON and invokes ``bw import`` for bulk item creation,
+  `atexit` registration.
+- **Batch import via `bw import`** -- New `bw_import.py` module builds
+  Bitwarden-format JSON and invokes `bw import` for bulk item creation,
   dramatically reducing the number of subprocess calls.
-- **Dedup index** -- ``BitwardenServeClient`` maintains an
-  ``O(1)`` ``dict[str | None, set[str]]`` index of existing vault entries to
+- **Dedup index** -- `BitwardenServeClient` maintains an
+  `O(1)` `dict[str | None, set[str]]` index of existing vault entries to
   skip duplicates without per-item API calls.
 - **Async parallel attachment uploads** -- Attachments are uploaded concurrently
-  via ``asyncio`` with a bounded semaphore (default 4) for backpressure.
-- **Org collection CRUD with cache** -- ``bw serve``-based collection
+  via `asyncio` with a bounded semaphore (default 4) for backpressure.
+- **Org collection CRUD with cache** -- `bw serve`-based collection
   creation/listing with an in-memory name-to-ID cache, avoiding repeated API
   round-trips.
-- **``bw serve`` availability guard in e2e test** -- ``_assert_bw_serve_available()``
+- **`bw serve` availability guard in e2e test** -- `_assert_bw_serve_available()`
   pre-flight check before running the Vaultwarden integration test.
-- **``httpx`` runtime dependency** -- Added ``httpx>=0.28.0`` for the HTTP
+- **`httpx` runtime dependency** -- Added `httpx>=0.28.0` for the HTTP
   transport layer.
 
 ### Changed
 
-- **4-phase migration architecture** -- ``convert.py``
-  ``_create_bitwarden_items_for_entries()`` rewritten: (1) partition entries,
+- **4-phase migration architecture** -- `convert.py`
+  `_create_bitwarden_items_for_entries()` rewritten: (1) partition entries,
   (2) bulk import, (3) post-import sync and ID recovery, (4) parallel
   attachment uploads.
 - **Version bump to 3.0.0a1** -- Major version increment reflecting the
-  breaking change from subprocess-per-item to ``bw serve`` transport.
+  breaking change from subprocess-per-item to `bw serve` transport.
 - **100% docstring coverage** -- Added docstrings to all functions and methods
-  across ``convert.py``, ``cli.py``, and ``bitwardenclient.py``.
+  across `convert.py`, `cli.py`, and `bitwardenclient.py`.
 
 ### Fixed
 
-- **Signal handler init race** -- ``_previous_sigterm`` / ``_previous_sigint``
-  are now assigned before ``_start_serve()`` so that ``close()`` is safe to
-  call at any point during ``__init__`` (e.g. when ``_wait_for_ready`` times
+- **Signal handler init race** -- `_previous_sigterm` / `_previous_sigint`
+  are now assigned before `_start_serve()` so that `close()` is safe to
+  call at any point during `__init__` (e.g. when `_wait_for_ready` times
   out).
 - **Duplicate item name ID lookup** -- Post-import ID recovery now collects all
-  IDs per ``(folder, name)`` pair and pops them in order, so entries sharing the
+  IDs per `(folder, name)` pair and pops them in order, so entries sharing the
   same name each get their own server-assigned ID for attachment uploads.
-- **``bw serve`` startup diagnostics** -- Captured stderr from the ``bw serve``
+- **`bw serve` startup diagnostics** -- Captured stderr from the `bw serve`
   process and included it in timeout/crash error messages. Closed stdin via
-  ``subprocess.DEVNULL`` to prevent blocking. Increased startup timeout from
+  `subprocess.DEVNULL` to prevent blocking. Increased startup timeout from
   30 s to 60 s for CI headroom.
+- **`bw import` command injection** -- `run_import` used `shell=True` with a
+  format-string command; replaced with list-form `subprocess.check_output`
+  (no shell).
+- **`close()` double-call crash** -- `BitwardenServeClient.close()` was not
+  idempotent; second call could restore stale signal handlers or raise on
+  `_http.close()`. Added `_closed` guard.
+- **Attachment upload fail-fast** -- `asyncio.gather` abandoned remaining
+  uploads on first error; now uses `return_exceptions=True` to collect all
+  failures before raising an aggregate error.
 
 ## [2.0.0] - 2026-02-23
 

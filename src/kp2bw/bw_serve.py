@@ -54,6 +54,7 @@ class BitwardenServeClient:
     _folders: dict[str, str]  # name → id cache
     _existing_entries: dict[str | None, set[str]]  # folder_name → {item names}
     _collections: dict[str, str] | None  # name → id cache (None if no org)
+    _closed: bool
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -68,6 +69,7 @@ class BitwardenServeClient:
         self._port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{self._port}"
         self._process = None
+        self._closed = False
         self._http = httpx.Client(
             base_url=self._base_url,
             timeout=_HTTP_TIMEOUT_S,
@@ -169,6 +171,10 @@ class BitwardenServeClient:
 
     def close(self) -> None:
         """Terminate the ``bw serve`` process and release resources."""
+        if self._closed:
+            return
+        self._closed = True
+
         # Unregister atexit to avoid double-close.
         atexit.unregister(self.close)
 
@@ -187,7 +193,10 @@ class BitwardenServeClient:
                 self._process.wait(timeout=5)
 
         self._process = None
-        self._http.close()
+        try:
+            self._http.close()
+        except Exception:
+            logger.debug("Ignoring error while closing HTTP client", exc_info=True)
 
     def _signal_handler(self, signum: int, _frame: FrameType | None) -> None:
         """Handle SIGTERM/SIGINT by cleaning up, then re-raising."""
@@ -444,7 +453,15 @@ class BitwardenServeClient:
                             _upload_one(client, item_id, filename, data)
                         )
                     )
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        failures = [r for r in results if isinstance(r, BaseException)]
+        if failures:
+            for err in failures:
+                logger.error(f"Attachment upload failed: {err}")
+            raise BitwardenClientError(
+                f"{len(failures)}/{total} attachment uploads failed"
+            )
 
         logger.info(f"Uploaded {total} attachments")
 

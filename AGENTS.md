@@ -270,13 +270,13 @@ selected or ignored, so the **default rule set** applies.
 
 ## Dependencies
 
-| Package        | Purpose                          |
-| -------------- | -------------------------------- |
-| `pykeepass`    | Read KeePass .kdbx files         |
-| `httpx`        | HTTP client for `bw serve` API   |
-| `ruff`         | Linter + formatter (dev)         |
-| `ty`           | Type checker (dev)               |
-| `basedpyright` | Type checker (dev)               |
-| `lxml`         | XML processing (dev)             |
-| `types-lxml`   | lxml type stubs (dev)            |
-| `tombi`        | TOML formatter (dev)             |
+| Package        | Purpose                        |
+| -------------- | ------------------------------ |
+| `pykeepass`    | Read KeePass .kdbx files       |
+| `httpx`        | HTTP client for `bw serve` API |
+| `ruff`         | Linter + formatter (dev)       |
+| `ty`           | Type checker (dev)             |
+| `basedpyright` | Type checker (dev)             |
+| `lxml`         | XML processing (dev)           |
+| `types-lxml`   | lxml type stubs (dev)          |
+| `tombi`        | TOML formatter (dev)           |

@@ -62,10 +62,10 @@ def build_import_file(
 
 def run_import(filepath: Path) -> None:
     """Execute ``bw import bitwardenjson <filepath>`` as a subprocess."""
-    cmd = f'bw import bitwardenjson "{filepath}"'
+    args = ["bw", "import", "bitwardenjson", str(filepath)]
     logger.debug("Running bw import")
     try:
-        output = check_output(cmd, stderr=STDOUT, shell=True)
+        output = check_output(args, stderr=STDOUT)
         logger.debug(f"bw import returned {len(output)} bytes")
     except CalledProcessError as exc:
         msg = ""
