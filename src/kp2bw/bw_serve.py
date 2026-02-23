@@ -20,7 +20,7 @@ from .exceptions import BitwardenClientError
 logger = logging.getLogger(__name__)
 
 # How long to wait for `bw serve` to become responsive.
-_SERVE_STARTUP_TIMEOUT_S: float = 30.0
+_SERVE_STARTUP_TIMEOUT_S: float = 60.0
 
 # Polling interval when waiting for serve to start.
 _SERVE_POLL_INTERVAL_S: float = 0.25
@@ -120,31 +120,51 @@ class BitwardenServeClient:
         logger.debug(f"Starting bw serve on port {self._port}")
         self._process = subprocess.Popen(
             cmd,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
+
+    def _read_stderr(self) -> str:
+        """Drain captured stderr from the ``bw serve`` process."""
+        if self._process is None or self._process.stderr is None:
+            return "(no output)"
+        # Non-blocking read: only grab what's already buffered.
+        try:
+            data = self._process.stderr.read()
+        except ValueError:
+            return "(stream closed)"
+        if not data:
+            return "(no output)"
+        return data.decode("utf-8", errors="replace").strip()
 
     def _wait_for_ready(self) -> None:
         """Poll ``GET /status`` until the server is responsive."""
-        deadline = time.monotonic() + _SERVE_STARTUP_TIMEOUT_S
+        start = time.monotonic()
+        deadline = start + _SERVE_STARTUP_TIMEOUT_S
         while time.monotonic() < deadline:
             # Check the process hasn't died.
             if self._process is not None and self._process.poll() is not None:
+                stderr = self._read_stderr()
                 raise BitwardenClientError(
-                    f"bw serve exited unexpectedly with code {self._process.returncode}"
+                    f"bw serve exited unexpectedly with code "
+                    f"{self._process.returncode}: {stderr}"
                 )
             try:
                 resp = self._http.get("/status")
                 if resp.status_code == 200:
-                    logger.debug("bw serve is ready")
+                    elapsed = time.monotonic() - start
+                    logger.debug(f"bw serve is ready ({elapsed:.1f}s)")
                     return
             except httpx.ConnectError:
                 pass
             time.sleep(_SERVE_POLL_INTERVAL_S)
 
+        stderr = self._read_stderr()
         self.close()
         raise BitwardenClientError(
-            f"bw serve did not become ready within {_SERVE_STARTUP_TIMEOUT_S}s"
+            f"bw serve did not become ready within "
+            f"{_SERVE_STARTUP_TIMEOUT_S}s: {stderr}"
         )
 
     def close(self) -> None:
