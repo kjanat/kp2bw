@@ -4,7 +4,17 @@ version         = "1.1.0"
 description     = "Imports and existing KeePass db with REF fields into Bitwarden"
 readme          = "README.md"
 requires-python = ">=3.14"
-classifiers     = []
+keywords        = ["bitwarden", "cli", "keepass", "migration", "password-manager"]
+classifiers     = [
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+  "Topic :: Utilities",
+  "Typing :: Typed",
+]
 dependencies    = ["pykeepass>=4.1.1.post1"]
 
 [[project.authors]]
@@ -12,6 +22,8 @@ name  = "Kaj Kowalski"
 email = "info@kajkowalski.nl"
 
 [project.urls]
+Changelog  = "https://github.com/kjanat/kp2bw/blob/master/CHANGELOG.md"
+Issues     = "https://github.com/kjanat/kp2bw/issues"
 Repository = "https://github.com/kjanat/kp2bw"
 
 [project.scripts]
