@@ -53,6 +53,7 @@ class BitwardenServeClient:
     _previous_sigint: Callable[[int, FrameType | None], Any] | int | None
     _folders: dict[str, str]  # name → id cache
     _existing_entries: dict[str | None, set[str]]  # folder_name → {item names}
+    _collections: dict[str, str] | None  # name → id cache (None if no org)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -75,6 +76,7 @@ class BitwardenServeClient:
 
         self._folders = {}
         self._existing_entries = {}
+        self._collections = None
 
         self._start_serve()
         self._wait_for_ready()
@@ -84,6 +86,10 @@ class BitwardenServeClient:
         # Populate folder cache and dedup index from existing vault state.
         self._folders = self.list_folders()
         self._existing_entries = self._build_dedup_index()
+
+        # Load existing org collections if an org ID was provided.
+        if self._org_id:
+            self._collections = self.list_collections()
 
         # Register cleanup handlers so the bw serve process is always
         # terminated — even on unhandled exceptions or signals.
@@ -307,6 +313,48 @@ class BitwardenServeClient:
         """Re-query the vault and rebuild the dedup index."""
         self._folders = self.list_folders()
         self._existing_entries = self._build_dedup_index()
+
+    # ------------------------------------------------------------------
+    # CRUD — org collections
+    # ------------------------------------------------------------------
+
+    def list_collections(self) -> dict[str, str]:
+        """Return ``{name: id}`` mapping of org collections."""
+        if not self._org_id:
+            return {}
+        data = self._request(
+            "GET",
+            "/list/object/org-collections",
+            params={"organizationid": self._org_id},
+        )
+        colls: list[dict[str, Any]] = data.get("data", [])
+        return {c["name"]: c["id"] for c in colls}
+
+    def create_org_collection(self, name: str) -> str | None:
+        """Create an org collection and return its ID. Cached."""
+        if not name:
+            return None
+
+        if self._collections is None:
+            self._collections = {}
+
+        existing = self._collections.get(name)
+        if existing is not None:
+            return existing
+
+        data = self._request(
+            "POST",
+            "/object/org-collection",
+            json_body={
+                "organizationId": self._org_id,
+                "name": name,
+                "groups": [],
+            },
+        )
+        coll_id: str = data["id"]
+        self._collections[name] = coll_id
+        logger.debug(f"Created org collection {name!r} → {coll_id}")
+        return coll_id
 
     # ------------------------------------------------------------------
     # Async attachment uploads

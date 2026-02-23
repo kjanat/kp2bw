@@ -68,3 +68,12 @@ Started: 2026-02-23
 - Uses separate `httpx.AsyncClient` for async operations (sync client can't do async)
 - Files changed: `src/kp2bw/bw_serve.py`
 - **Learnings:** none — clean implementation, all checks passed first try
+
+## Task - collection-support
+
+- Added `list_collections()` → `{name: id}` from `GET /list/object/org-collections`
+- Added `create_org_collection(name)` → cached `POST /object/org-collection`
+- `__init__` loads existing collections if `org_id` set
+- Simplified vs old client: no template fetch needed — POST body includes `organizationId`, `name`, `groups`
+- Files changed: `src/kp2bw/bw_serve.py`
+- **Learnings:** bw serve collection creation doesn't need a template — just POST the full body directly

@@ -50,7 +50,7 @@
       "description": "POST /object/org-collection via serve. Template fetch. Cached collection creation.",
       "files": ["src/kp2bw/bw_serve.py"],
       "priority": "integration",
-      "passes": false
+      "passes": true
     },
     {
       "id": "cli-integration",
