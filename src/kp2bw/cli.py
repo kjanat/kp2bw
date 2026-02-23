@@ -5,6 +5,7 @@ import sys
 from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from typing import NoReturn
 
+from . import __version__
 from .convert import Converter
 
 
@@ -50,6 +51,13 @@ def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
 
 def _argparser() -> MyArgParser:
     parser = MyArgParser(description="KeePass 2.x to Bitwarden converter by @jampe")
+
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
 
     parser.add_argument("keepass_file", help="Path to your KeePass 2.x db.")
     parser.add_argument(

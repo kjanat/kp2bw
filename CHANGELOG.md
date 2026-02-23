@@ -6,6 +6,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0rc3]
+
+### Added
+
+- **CLI version flag** -- Added `-V` / `--version` to print installed `kp2bw`
+  version and exit.
+
+### Fixed
+
+- **Publish workflow token permissions** -- Added explicit least-privilege
+  `permissions: { contents: read }` on the integration gate job in
+  `.github/workflows/publish.yml` to satisfy CodeQL
+  `actions/missing-workflow-permissions`.
+
 ## [2.0.0rc2]
 
 ### Added
@@ -138,7 +152,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc2...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc3...HEAD
+[2.0.0rc3]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc2...v2.0.0rc3
 [2.0.0rc2]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/kjanat/kp2bw/compare/c9ef571eabd345db94751f7dec845e49756e9d47...v2.0.0rc1
 [Upstream]: https://github.com/kjanat/kp2bw/compare/jampe:kp2bw:f41b4e6a10a2c9fc55d144d048b4923c94eb43d6...kjanat:kp2bw:c9ef571eabd345db94751f7dec845e49756e9d47
