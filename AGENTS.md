@@ -84,7 +84,7 @@ uv run python tests/e2e_vaultwarden_test.py
 ```
 
 **Always run `ruff`, `ty`, and `basedpyright` before finishing work.**\
-Both must pass with zero errors.
+All three must pass with zero errors.
 
 **When changes touch `scripts/`, also run `bun --cwd=scripts typecheck`.**\
 This must pass with zero errors.
@@ -251,22 +251,22 @@ selected or ignored, so the **default rule set** applies.
   persistent `bw serve` process on a random localhost port and communicates via
   `httpx` HTTP requests. Provides folder/item/collection CRUD, dedup index, and
   async parallel attachment uploads.
-- **Batch import** — `bw_import.py` builds Bitwarden-format JSON and shells out
-  to `bw import` once for bulk item creation, avoiding per-item subprocess
-  overhead.
+- **Legacy batch import** — `bw_import.py` builds Bitwarden-format JSON and
+  shells out to `bw import`. Retained as legacy/reference code and not imported
+  by `convert.py`.
 - **Legacy client** — `BitwardenClient` in `bitwardenclient.py` wraps the `bw`
   CLI via `subprocess.check_output(shell=True)`. Retained in the tree but no
   longer imported by `convert.py`.
 - All data flows through Python dicts (no dataclasses/Pydantic)
-- Entries are stored as tuples: `(folder, bw_item_object)` or
-  `(folder, bw_item_object, attachments)`
+- Entries are stored as tuples: `(folder, firstlevel, bw_item_object)` or
+  `(folder, firstlevel, bw_item_object, attachments)`
 - KeePassXC passkey attributes (`KPEX_PASSKEY_*`) are converted to Bitwarden
   `fido2Credentials` and excluded from regular custom fields
 - The `convert()` method is the main orchestrator: `_load_keepass_data()` →
   `_resolve_entries_with_references()` → `_create_bitwarden_items_for_entries()`
-- `_create_bitwarden_items_for_entries()` uses a 4-phase architecture:
-  (1) partition entries and resolve collections, (2) bulk import via
-  `bw import`, (3) post-import sync and ID recovery, (4) parallel attachment
+- `_create_bitwarden_items_for_entries()` uses a 3-phase architecture:
+  (1) partition entries and resolve collections, (2) create items via
+  `bw.create_items_batch()` over `bw serve` HTTP API, (3) parallel attachment
   uploads
 
 ## Dependencies

@@ -278,7 +278,14 @@ class BitwardenServeClient:
                 f"bw serve returned HTTP {resp.status_code} for {method} {path}"
             )
 
-        body: dict[str, Any] = resp.json()
+        try:
+            body: dict[str, Any] = resp.json()
+        except ValueError as exc:
+            raise BitwardenClientError(
+                f"bw serve returned non-JSON response "
+                f"(HTTP {resp.status_code}) for {method} {path}"
+            ) from exc
+
         if not body.get("success", False):
             msg = body.get("message", "unknown error")
             raise BitwardenClientError(f"bw serve error on {method} {path}: {msg}")
@@ -398,7 +405,10 @@ class BitwardenServeClient:
         for item in items:
             folder_id: str | None = item.get("folderId") or None
             folder_name = id_to_name.get(folder_id, None) if folder_id else None
-            index.setdefault(folder_name, set()).add(item["name"])
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            index.setdefault(folder_name, set()).add(name)
         return index
 
     def entry_exists(self, folder: str | None, name: str) -> bool:
