@@ -347,7 +347,6 @@ class Converter:
         # reset data structures
         self._kp_ref_entries = []
         self._entries = {}
-        custom_protected: list[str] = []
 
         # Identify recycle bin group for filtering
         recyclebin_group: Group | None = kp.recyclebin_group
@@ -381,7 +380,8 @@ class Converter:
                 self._kp_ref_entries.append(entry)
                 continue
 
-            custom_protected.extend(
+            # Build per-entry list of protected custom properties
+            custom_protected: list[str] = [
                 field
                 for field in entry.custom_properties
                 if (
@@ -391,7 +391,7 @@ class Converter:
                 )
                 is not None
                 and elem.attrib.get("Protected", "False") == "True"
-            )
+            ]
 
             # Normal entry
             if self._import_tags:

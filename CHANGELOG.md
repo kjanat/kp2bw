@@ -12,6 +12,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dependency to `pykeepass-stubs`; previously only `types-lxml` was declared,
   leaving the runtime `lxml` import unsatisfied when the stubs package was
   installed standalone.
+- **`except` clauses using Python 2 syntax** -- `except ValueError,
+  binascii.Error` and `except ConversionError, KeyError, AttributeError` only
+  caught the first exception type; the remaining names were silently
+  misinterpreted as the exception variable. Fixed to tuple syntax
+  `except (A, B)`.
+- **Protected custom fields leaking across entries** -- `custom_protected` list
+  was initialized once before the entry loop and accumulated field names from
+  every entry, causing later entries to incorrectly treat same-named properties
+  as protected. Now reset per entry.
 
 ## [2.0.0rc3]
 
