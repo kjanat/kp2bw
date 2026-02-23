@@ -6,6 +6,54 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **``bw serve`` HTTP transport** -- New ``BitwardenServeClient`` in
+  ``bw_serve.py`` manages a persistent ``bw serve`` process with HTTP API
+  access, replacing the one-subprocess-per-operation model. Includes automatic
+  port selection, health polling, vault unlock/sync, signal-safe cleanup, and
+  ``atexit`` registration.
+- **Batch import via ``bw import``** -- New ``bw_import.py`` module builds
+  Bitwarden-format JSON and invokes ``bw import`` for bulk item creation,
+  dramatically reducing the number of subprocess calls.
+- **Dedup index** -- ``BitwardenServeClient`` maintains an
+  ``O(1)`` ``dict[str | None, set[str]]`` index of existing vault entries to
+  skip duplicates without per-item API calls.
+- **Async parallel attachment uploads** -- Attachments are uploaded concurrently
+  via ``asyncio`` with a bounded semaphore (default 4) for backpressure.
+- **Org collection CRUD with cache** -- ``bw serve``-based collection
+  creation/listing with an in-memory name-to-ID cache, avoiding repeated API
+  round-trips.
+- **``bw serve`` availability guard in e2e test** -- ``_assert_bw_serve_available()``
+  pre-flight check before running the Vaultwarden integration test.
+- **``httpx`` runtime dependency** -- Added ``httpx>=0.28.0`` for the HTTP
+  transport layer.
+
+### Changed
+
+- **4-phase migration architecture** -- ``convert.py``
+  ``_create_bitwarden_items_for_entries()`` rewritten: (1) partition entries,
+  (2) bulk import, (3) post-import sync and ID recovery, (4) parallel
+  attachment uploads.
+- **Version bump to 3.0.0a1** -- Major version increment reflecting the
+  breaking change from subprocess-per-item to ``bw serve`` transport.
+- **100% docstring coverage** -- Added docstrings to all functions and methods
+  across ``convert.py``, ``cli.py``, and ``bitwardenclient.py``.
+
+### Fixed
+
+- **Signal handler init race** -- ``_previous_sigterm`` / ``_previous_sigint``
+  are now assigned before ``_start_serve()`` so that ``close()`` is safe to
+  call at any point during ``__init__`` (e.g. when ``_wait_for_ready`` times
+  out).
+- **Duplicate item name ID lookup** -- Post-import ID recovery now collects all
+  IDs per ``(folder, name)`` pair and pops them in order, so entries sharing the
+  same name each get their own server-assigned ID for attachment uploads.
+- **``bw serve`` startup diagnostics** -- Captured stderr from the ``bw serve``
+  process and included it in timeout/crash error messages. Closed stdin via
+  ``subprocess.DEVNULL`` to prevent blocking. Increased startup timeout from
+  30 s to 60 s for CI headroom.
+
 ## [2.0.0] - 2026-02-23
 
 ### Fixed
@@ -170,7 +218,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc3...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0...HEAD
 [2.0.0rc3]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc2...v2.0.0rc3
 [2.0.0rc2]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/kjanat/kp2bw/compare/c9ef571eabd345db94751f7dec845e49756e9d47...v2.0.0rc1

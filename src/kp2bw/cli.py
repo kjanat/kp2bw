@@ -10,13 +10,17 @@ from .convert import Converter
 
 
 class MyArgParser(ArgumentParser):
+    """Argument parser that prints help on error instead of just usage."""
+
     def error(self, message: str) -> NoReturn:
+        """Print the error message followed by full help, then exit."""
         _ = sys.stderr.write(f"{self.prog}: {message}\n\n")
         self.print_help()
         sys.exit(2)
 
 
 def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
+    """Parse an environment variable string into a boolean, or ``None`` if unset."""
     if value is None:
         return None
 
@@ -36,6 +40,7 @@ def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
 
 
 def _split_csv_env(value: str | None) -> list[str] | None:
+    """Split a comma-separated environment variable into a list of trimmed strings."""
     if value is None:
         return None
 
@@ -44,12 +49,14 @@ def _split_csv_env(value: str | None) -> list[str] | None:
 
 
 def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
+    """Return *arg_value* if set, otherwise fall back to the named environment variable."""
     if arg_value is not None:
         return arg_value
     return os.environ.get(env_var)
 
 
 def _argparser() -> MyArgParser:
+    """Build and return the CLI argument parser with all flags and env-var support."""
     parser = MyArgParser(description="KeePass 2.x to Bitwarden converter by @jampe")
 
     parser.add_argument(
@@ -159,6 +166,7 @@ def _argparser() -> MyArgParser:
 
 
 def _read_password(arg: str | None, prompt: str) -> str:
+    """Return *arg* if provided, otherwise prompt interactively for a password."""
     if not arg:
         arg = getpass.getpass(prompt=prompt)
 
@@ -166,6 +174,7 @@ def _read_password(arg: str | None, prompt: str) -> str:
 
 
 def main() -> None:
+    """Entry point: parse arguments, resolve env vars, and run the converter."""
     args: Namespace = _argparser().parse_args()
 
     # string options: CLI > env > None/default

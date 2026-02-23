@@ -64,6 +64,7 @@ class Converter:
         include_recyclebin: bool = False,
         migrate_metadata: bool = True,
     ) -> None:
+        """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._keepass_file_path = keepass_file_path
         self._keepass_password = keepass_password
         self._keepass_keyfile_path = keepass_keyfile_path
@@ -143,6 +144,7 @@ class Converter:
         firstlevel: str | None,
         fido2_credentials: Fido2Credentials | None = None,
     ) -> BwItem:
+        """Build a Bitwarden item dict from individual entry fields."""
         login: dict[str, Any] = {
             "uris": [{"match": None, "uri": url}] if url else [],
             "username": username,
@@ -174,12 +176,14 @@ class Converter:
         }
 
     def _generate_folder_name(self, entry: Entry) -> str | None:
+        """Return the full group path as a ``/``-joined folder name."""
         group = entry.group
         if group is None or not group.path:
             return None
         return "/".join(p for p in group.path if p is not None)
 
     def _generate_prefix(self, entry: Entry, skip: int) -> str:
+        """Build a display prefix from the group path, skipping the first *skip* segments."""
         group = entry.group
         if group is None or not group.path:
             return ""
@@ -190,6 +194,7 @@ class Converter:
         return out
 
     def _get_folder_firstlevel(self, entry: Entry) -> str | None:
+        """Return the first path segment of the entry's group (top-level folder)."""
         group = entry.group
         if group is None or not group.path:
             return None
@@ -229,6 +234,7 @@ class Converter:
     def _add_bw_entry_to_entries_dict(
         self, entry: Entry, custom_protected: list[str] | None
     ) -> None:
+        """Convert a KeePass entry into a Bitwarden item and store it in ``_entries``."""
         folder = self._generate_folder_name(entry)
         prefix = ""
         if folder and self._path2name:
@@ -303,6 +309,7 @@ class Converter:
             )
 
     def _parse_kp_ref_string(self, ref_string: str) -> tuple[str, str, str]:
+        """Parse a ``{REF:...}`` string into ``(field, lookup_mode, uuid)``."""
         # {REF:U@I:CFC0141068E83547BCEEAF0C1ADABAE0}
         tokens = ref_string.split(":")
 
@@ -317,6 +324,7 @@ class Converter:
     def _get_referenced_entry(
         self, lookup_mode: str, ref_compare_string: str
     ) -> EntryValue:
+        """Look up a previously parsed entry by UUID or other reference mode."""
         if lookup_mode == "I":
             # KP_ID lookup
             try:
@@ -330,6 +338,7 @@ class Converter:
     def _find_referenced_value(
         self, ref_entry: BwItem, field_referenced: str
     ) -> str | None:
+        """Extract the referenced login field (username/password) from a resolved entry."""
         for member, reference_key in self._member_reference_resolving_dict.items():
             if field_referenced == reference_key:
                 return ref_entry["login"][member]
@@ -337,6 +346,7 @@ class Converter:
         raise ConversionError("Unsupported REF field_referenced")
 
     def _load_keepass_data(self) -> None:
+        """Open the KeePass database and populate ``_entries`` with parsed items."""
         # aggregate entries
         kp = PyKeePass(
             filename=self._keepass_file_path,
@@ -409,6 +419,7 @@ class Converter:
         logger.info(f"Parsed {len(self._entries)} entries")
 
     def _resolve_entries_with_references(self) -> None:
+        """Resolve ``{REF:...}`` cross-references and merge or create entries accordingly."""
         ref_entries_length = len(self._kp_ref_entries)
 
         if ref_entries_length == 0:
@@ -506,6 +517,7 @@ class Converter:
         return filename, data
 
     def _create_bitwarden_items_for_entries(self) -> None:
+        """Import entries via ``bw serve`` + ``bw import`` and upload attachments."""
         logger.info("Connecting and reading existing folders and entries")
 
         with BitwardenServeClient(
@@ -586,6 +598,7 @@ class Converter:
             bw.upload_attachments(upload_items)
 
     def convert(self) -> None:
+        """Run the full KeePass-to-Bitwarden migration pipeline."""
         # load keepass data from database
         self._load_keepass_data()
 

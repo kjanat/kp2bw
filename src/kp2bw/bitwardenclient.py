@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 class BitwardenClient:
+    """Legacy Bitwarden CLI wrapper using one subprocess per operation."""
+
     TEMPORARY_ATTACHMENT_FOLDER: str = "attachment-temp"
 
     _orgId: str | None
@@ -25,6 +27,7 @@ class BitwardenClient:
     _colls: dict[str, str] | None
 
     def __init__(self, password: str, org_id: str | None) -> None:
+        """Unlock the vault, sync state, and cache existing folders and entries."""
         # check for bw cli installation
         if "bitwarden" not in self._exec("bw"):
             raise BitwardenClientError(
@@ -70,18 +73,22 @@ class BitwardenClient:
             self._colls = None
 
     def __del__(self) -> None:
+        """Remove the temporary attachment directory on garbage collection."""
         # cleanup temp directory
         self._remove_temporary_attachment_folder()
 
     def _create_temporary_attachment_folder(self) -> None:
+        """Create the temporary directory used to stage attachment files on disk."""
         if not os.path.isdir(self.TEMPORARY_ATTACHMENT_FOLDER):
             os.mkdir(self.TEMPORARY_ATTACHMENT_FOLDER)
 
     def _remove_temporary_attachment_folder(self) -> None:
+        """Delete the temporary attachment staging directory if it exists."""
         if os.path.isdir(self.TEMPORARY_ATTACHMENT_FOLDER):
             shutil.rmtree(self.TEMPORARY_ATTACHMENT_FOLDER)
 
     def _exec(self, command: str) -> str:
+        """Execute a ``bw`` CLI command via shell and return its decoded output."""
         output: bytes
         try:
             logger.debug("-- Executing Bitwarden CLI command")
@@ -99,6 +106,7 @@ class BitwardenClient:
         return output.decode("utf-8", "ignore")
 
     def _get_existing_folder_entries(self) -> dict[str | None, list[str]]:
+        """Build a mapping of folder name to list of item names already in the vault."""
         folder_id_lookup_helper: dict[str, str] = {
             folder_id: folder_name for folder_name, folder_id in self._folders.items()
         }
@@ -118,18 +126,22 @@ class BitwardenClient:
         }
 
     def _exec_with_session(self, command: str) -> str:
+        """Execute a ``bw`` command with the session key appended."""
         return self._exec(f"{command} --session '{self._key}'")
 
     def has_folder(self, folder: str | None) -> bool:
+        """Return whether the given folder name already exists in the vault."""
         return folder in self._folders
 
     def _get_platform_dependent_echo_str(self, string: str) -> str:
+        """Return a platform-appropriate ``echo`` command for piping into ``bw``."""
         if platform.system() == "Windows":
             return f"echo {string}"
         else:
             return f"echo '{string}'"
 
     def create_folder(self, folder: str | None) -> None:
+        """Create a folder in the vault if it does not already exist."""
         if not folder or self.has_folder(folder):
             return
 
@@ -145,6 +157,7 @@ class BitwardenClient:
         self._folders[output_obj["name"]] = output_obj["id"]
 
     def create_entry(self, folder: str | None, entry: dict[str, Any]) -> str:
+        """Create a vault item in the given folder, skipping duplicates."""
         # check if already exists
         if (
             folder in self._folder_entries
@@ -174,6 +187,7 @@ class BitwardenClient:
     def create_attachment(
         self, item_id: str, attachment: tuple[str, str] | Attachment
     ) -> str:
+        """Write an attachment to a temp file and upload it to the given vault item."""
         # store attachment on disk
         filename: str
         data: bytes
@@ -207,6 +221,7 @@ class BitwardenClient:
         return output
 
     def create_org_get_collection(self, collectionname: str | None) -> str | None:
+        """Get or create an organisation collection and return its ID."""
         if not collectionname:
             return None
 

@@ -13,9 +13,11 @@ src/kp2bw/
 ├── __init__.py           # Package version via importlib.metadata
 ├── __main__.py           # python -m kp2bw support
 ├── py.typed              # PEP 561 marker
-├── bitwardenclient.py    # Wraps `bw` CLI (subprocess)
+├── bitwardenclient.py    # Legacy subprocess-per-op wrapper (retained, unused)
+├── bw_import.py          # Batch import via `bw import` subprocess
+├── bw_serve.py           # `bw serve` HTTP transport + CRUD + async attachments
 ├── cli.py                # Argument parsing, entry point
-├── convert.py            # Core migration logic
+├── convert.py            # Core migration logic (4-phase architecture)
 └── exceptions.py         # BitwardenClientError, ConversionError
 
 packages/pykeepass-stubs/ # uv workspace member — PEP 561 type stubs
@@ -244,7 +246,16 @@ selected or ignored, so the **default rule set** applies.
 
 ## Architecture Notes
 
-- `BitwardenClient` wraps the `bw` CLI via `subprocess.check_output(shell=True)`
+- **Primary transport** — `BitwardenServeClient` in `bw_serve.py` manages a
+  persistent `bw serve` process on a random localhost port and communicates via
+  `httpx` HTTP requests. Provides folder/item/collection CRUD, dedup index, and
+  async parallel attachment uploads.
+- **Batch import** — `bw_import.py` builds Bitwarden-format JSON and shells out
+  to `bw import` once for bulk item creation, avoiding per-item subprocess
+  overhead.
+- **Legacy client** — `BitwardenClient` in `bitwardenclient.py` wraps the `bw`
+  CLI via `subprocess.check_output(shell=True)`. Retained in the tree but no
+  longer imported by `convert.py`.
 - All data flows through Python dicts (no dataclasses/Pydantic)
 - Entries are stored as tuples: `(folder, bw_item_object)` or
   `(folder, bw_item_object, attachments)`
@@ -252,15 +263,20 @@ selected or ignored, so the **default rule set** applies.
   `fido2Credentials` and excluded from regular custom fields
 - The `convert()` method is the main orchestrator: `_load_keepass_data()` →
   `_resolve_entries_with_references()` → `_create_bitwarden_items_for_entries()`
+- `_create_bitwarden_items_for_entries()` uses a 4-phase architecture:
+  (1) partition entries and resolve collections, (2) bulk import via
+  `bw import`, (3) post-import sync and ID recovery, (4) parallel attachment
+  uploads
 
 ## Dependencies
 
-| Package        | Purpose                  |
-| -------------- | ------------------------ |
-| `pykeepass`    | Read KeePass .kdbx files |
-| `ruff`         | Linter + formatter (dev) |
-| `ty`           | Type checker (dev)       |
-| `basedpyright` | Type checker (dev)       |
-| `lxml`         | XML processing (dev)     |
-| `types-lxml`   | lxml type stubs (dev)    |
-| `tombi`        | TOML formatter (dev)     |
+| Package        | Purpose                          |
+| -------------- | -------------------------------- |
+| `pykeepass`    | Read KeePass .kdbx files         |
+| `httpx`        | HTTP client for `bw serve` API   |
+| `ruff`         | Linter + formatter (dev)         |
+| `ty`           | Type checker (dev)               |
+| `basedpyright` | Type checker (dev)               |
+| `lxml`         | XML processing (dev)             |
+| `types-lxml`   | lxml type stubs (dev)            |
+| `tombi`        | TOML formatter (dev)             |
