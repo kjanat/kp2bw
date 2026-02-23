@@ -1,7 +1,8 @@
 import getpass
 import logging
+import os
 import sys
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from typing import NoReturn
 
 from .convert import Converter
@@ -14,82 +15,136 @@ class MyArgParser(ArgumentParser):
         sys.exit(2)
 
 
+def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
+    if value is None:
+        return None
+
+    normalized = value.strip().lower()
+    true_values = {"1", "true", "yes", "y", "on"}
+    false_values = {"0", "false", "no", "n", "off"}
+
+    if normalized in true_values:
+        return True
+    if normalized in false_values:
+        return False
+
+    raise ValueError(
+        f"Invalid boolean value for {env_var}: {value!r}. "
+        "Use one of 1/0, true/false, yes/no, on/off."
+    )
+
+
+def _split_csv_env(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+
+    tags = [tag.strip() for tag in value.split(",") if tag.strip()]
+    return tags or None
+
+
+def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
+    if arg_value is not None:
+        return arg_value
+    return os.environ.get(env_var)
+
+
 def _argparser() -> MyArgParser:
     parser = MyArgParser(description="KeePass 2.x to Bitwarden converter by @jampe")
 
     parser.add_argument("keepass_file", help="Path to your KeePass 2.x db.")
-    parser.add_argument("-kppw", dest="kp_pw", help="KeePass db password", default=None)
     parser.add_argument(
-        "-kpkf", dest="kp_keyfile", help="KeePass db key file", default=None
+        "-k",
+        "--keepass-password",
+        dest="kp_pw",
+        help="KeePass db password (env: KP2BW_KEEPASS_PASSWORD)",
+        default=None,
     )
-    parser.add_argument("-bwpw", dest="bw_pw", help="Bitwarden password", default=None)
     parser.add_argument(
-        "-bworg", dest="bw_org", help="Bitwarden Organization Id", default=None
+        "-K",
+        "--keepass-keyfile",
+        dest="kp_keyfile",
+        help="KeePass db key file (env: KP2BW_KEEPASS_KEYFILE)",
+        default=None,
     )
     parser.add_argument(
-        "-import_tags",
+        "-b",
+        "--bitwarden-password",
+        dest="bw_pw",
+        help="Bitwarden password (env: KP2BW_BITWARDEN_PASSWORD)",
+        default=None,
+    )
+    parser.add_argument(
+        "-o",
+        "--bitwarden-org",
+        dest="bw_org",
+        help="Bitwarden Organization Id (env: KP2BW_BITWARDEN_ORG)",
+        default=None,
+    )
+    parser.add_argument(
+        "-t",
+        "--import-tags",
         dest="import_tags",
-        help="Only import tagged items",
+        help="Only import tagged items (env: KP2BW_IMPORT_TAGS as comma-separated values)",
         nargs="+",
         default=None,
     )
     parser.add_argument(
-        "-bwcoll",
+        "-c",
+        "--bitwarden-collection",
         dest="bw_coll",
-        help="Id of Org-Collection, or 'auto' to use name from toplevel-folders",
+        help="Id of Org-Collection, or 'auto' for top-level folder names (env: KP2BW_BITWARDEN_COLLECTION)",
         default=None,
     )
     parser.add_argument(
-        "-path2name",
-        dest="path2name",
-        help="Prepend folderpath of entries to each name",
-        action="store_const",
-        const=True,
-        default=True,
+        "--path-to-name",
+        dest="path_to_name",
+        help="Prepend folder path to each entry name (env: KP2BW_PATH_TO_NAME)",
+        action=BooleanOptionalAction,
+        default=None,
     )
     parser.add_argument(
-        "-path2nameskip",
-        dest="path2nameskip",
-        help="Skip first X folders for path2name (default: 1)",
-        default=1,
+        "--path-to-name-skip",
+        dest="path_to_name_skip",
+        help="Skip first N folders for path prefix (default: 1, env: KP2BW_PATH_TO_NAME_SKIP)",
+        default=None,
         type=int,
     )
     parser.add_argument(
-        "-skip-expired",
+        "--skip-expired",
         dest="skip_expired",
-        help="Skip entries that have expired in KeePass",
-        action="store_true",
-        default=False,
+        help="Skip expired KeePass entries (env: KP2BW_SKIP_EXPIRED)",
+        action=BooleanOptionalAction,
+        default=None,
     )
     parser.add_argument(
-        "-include-recyclebin",
+        "--include-recycle-bin",
         dest="include_recyclebin",
-        help="Include entries from the KeePass Recycle Bin (excluded by default)",
-        action="store_true",
-        default=False,
+        help="Include KeePass Recycle Bin entries (env: KP2BW_INCLUDE_RECYCLE_BIN)",
+        action=BooleanOptionalAction,
+        default=None,
     )
     parser.add_argument(
-        "-no-metadata",
+        "--metadata",
         dest="migrate_metadata",
-        help="Do not migrate KeePass metadata (tags, expiry, timestamps) as custom fields",
-        action="store_false",
-        default=True,
+        help="Migrate KeePass metadata as custom fields (env: KP2BW_MIGRATE_METADATA)",
+        action=BooleanOptionalAction,
+        default=None,
     )
     parser.add_argument(
         "-y",
+        "--yes",
         dest="skip_confirm",
-        help="Skips the confirm bw installation question",
-        action="store_const",
-        const=True,
-        default=False,
+        help="Skip the bw CLI setup confirmation prompt (env: KP2BW_YES)",
+        action="store_true",
+        default=None,
     )
     parser.add_argument(
         "-v",
+        "--verbose",
         dest="verbose",
-        help="Verbose output",
-        action="store_const",
-        const=True,
-        default=False,
+        help="Verbose output (env: KP2BW_VERBOSE)",
+        action="store_true",
+        default=None,
     )
 
     return parser
@@ -105,19 +160,102 @@ def _read_password(arg: str | None, prompt: str) -> str:
 def main() -> None:
     args: Namespace = _argparser().parse_args()
 
+    # string options: CLI > env > None/default
+    args.kp_pw = _with_env(args.kp_pw, "KP2BW_KEEPASS_PASSWORD")
+    args.kp_keyfile = _with_env(args.kp_keyfile, "KP2BW_KEEPASS_KEYFILE")
+    args.bw_pw = _with_env(args.bw_pw, "KP2BW_BITWARDEN_PASSWORD")
+    args.bw_org = _with_env(args.bw_org, "KP2BW_BITWARDEN_ORG")
+    args.bw_coll = _with_env(args.bw_coll, "KP2BW_BITWARDEN_COLLECTION")
+    args.import_tags = args.import_tags or _split_csv_env(
+        os.environ.get("KP2BW_IMPORT_TAGS")
+    )
+
+    # bool/int options: CLI > env > code default
+    try:
+        path_to_name = (
+            args.path_to_name
+            if args.path_to_name is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_PATH_TO_NAME"), env_var="KP2BW_PATH_TO_NAME"
+            )
+        )
+        skip_expired = (
+            args.skip_expired
+            if args.skip_expired is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_SKIP_EXPIRED"), env_var="KP2BW_SKIP_EXPIRED"
+            )
+        )
+        include_recyclebin = (
+            args.include_recyclebin
+            if args.include_recyclebin is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_INCLUDE_RECYCLE_BIN"),
+                env_var="KP2BW_INCLUDE_RECYCLE_BIN",
+            )
+        )
+        migrate_metadata = (
+            args.migrate_metadata
+            if args.migrate_metadata is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_MIGRATE_METADATA"),
+                env_var="KP2BW_MIGRATE_METADATA",
+            )
+        )
+        skip_confirm = (
+            args.skip_confirm
+            if args.skip_confirm is not None
+            else _parse_bool_env(os.environ.get("KP2BW_YES"), env_var="KP2BW_YES")
+        )
+        verbose = (
+            args.verbose
+            if args.verbose is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_VERBOSE"), env_var="KP2BW_VERBOSE"
+            )
+        )
+    except ValueError as exc:
+        _ = sys.stderr.write(f"ERROR: {exc}\n\n")
+        _argparser().print_help()
+        sys.exit(2)
+
+    path_to_name_skip = args.path_to_name_skip
+    if path_to_name_skip is None:
+        env_skip = os.environ.get("KP2BW_PATH_TO_NAME_SKIP")
+        if env_skip is None:
+            path_to_name_skip = 1
+        else:
+            try:
+                path_to_name_skip = int(env_skip)
+            except ValueError:
+                _ = sys.stderr.write(
+                    f"ERROR: Invalid integer value for KP2BW_PATH_TO_NAME_SKIP: {env_skip!r}\n\n"
+                )
+                _argparser().print_help()
+                sys.exit(2)
+
+    path_to_name = path_to_name if path_to_name is not None else False
+    skip_expired = skip_expired if skip_expired is not None else False
+    include_recyclebin = include_recyclebin if include_recyclebin is not None else False
+    migrate_metadata = migrate_metadata if migrate_metadata is not None else True
+    skip_confirm = skip_confirm if skip_confirm is not None else False
+    verbose = verbose if verbose is not None else False
+
     if args.bw_coll and not args.bw_org:
-        _ = sys.stderr.write("ERROR: -bwcoll requires --bworg\n\n")
+        _ = sys.stderr.write(
+            "ERROR: --bitwarden-collection requires --bitwarden-org\n\n"
+        )
         _argparser().print_help()
         sys.exit(2)
 
     # logging
-    if args.verbose:
+    if verbose:
         logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.DEBUG)
     else:
         logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 
     # bw confirmation
-    if not args.skip_confirm:
+    if not skip_confirm:
         confirm: str | None = None
         print("Do you have bw cli installed and is it set up?")
         print(
@@ -149,12 +287,12 @@ def main() -> None:
         bitwarden_password=bw_pw,
         bitwarden_organization_id=args.bw_org,
         bitwarden_coll_id=args.bw_coll,
-        path2name=args.path2name,
-        path2nameskip=args.path2nameskip,
+        path2name=path_to_name,
+        path2nameskip=path_to_name_skip,
         import_tags=args.import_tags,
-        skip_expired=args.skip_expired,
-        include_recyclebin=args.include_recyclebin,
-        migrate_metadata=args.migrate_metadata,
+        skip_expired=skip_expired,
+        include_recyclebin=include_recyclebin,
+        migrate_metadata=migrate_metadata,
     )
     c.convert()
 

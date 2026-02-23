@@ -2,6 +2,7 @@
 ---
 name: Integration (Docker)
 on:
+  workflow_call:
   pull_request:
   push: { branches: [master] }
   workflow_dispatch:

@@ -29,8 +29,12 @@ jobs:
             const { default: checkUvVersion } = await import('${{ github.workspace }}/scripts/uv-version.mjs')
             return await checkUvVersion({ core, context, exec })
 
-  publish:
+  integration:
     needs: check
+    uses: ./.github/workflows/integration-docker.yml
+
+  publish:
+    needs: [check, integration]
     runs-on: ubuntu-latest
     environment: { name: pypi-kp2bw, url: "${{ needs.check.outputs.pypi_url }}" }
     permissions: { id-token: write, contents: read }

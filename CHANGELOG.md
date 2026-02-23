@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0rc2]
+
 ### Added
 
 - **Vaultwarden Docker integration workflow** -- Added
@@ -22,6 +24,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Contributor guidance** -- Updated `AGENTS.md` with release tag naming,
   Vaultwarden integration-test workflow details, and fixture tracking notes.
+- **CLI interface modernization** -- Replaced legacy single-dash long options
+  (`-kppw`, `-bworg`, etc.) with standard long flags plus short aliases
+  (for example `--keepass-password` / `-k`) and added consistent `KP2BW_*`
+  environment-variable support with clear precedence (`CLI > env > default`).
 
 ### Fixed
 
@@ -132,6 +138,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc1...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc2...HEAD
+[2.0.0rc2]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/kjanat/kp2bw/compare/c9ef571eabd345db94751f7dec845e49756e9d47...v2.0.0rc1
 [Upstream]: https://github.com/kjanat/kp2bw/compare/jampe:kp2bw:f41b4e6a10a2c9fc55d144d048b4923c94eb43d6...kjanat:kp2bw:c9ef571eabd345db94751f7dec845e49756e9d47
