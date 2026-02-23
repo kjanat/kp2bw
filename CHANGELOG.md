@@ -35,6 +35,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `py.typed` marker (PEP 561) for both `kp2bw` and stub packages.
 - `__main__.py` module — enables `python -m kp2bw`.
 - `__version__` exposed via `importlib.metadata` in `__init__.py`.
+- **Publish workflow** -- Added `.github/workflows/publish.yml` release workflow
+  with a version-check gate and dynamic PyPI environment URL.
+- **Release smoke tests** -- Added `tests/smoke_test.py` and wired it into
+  publish for both wheel and source distributions to verify package contents,
+  entry points, imports, and CLI help.
+- **Scripts workspace** -- Added `scripts/` JavaScript tooling (`package.json`,
+  `tsconfig.json`, `bun.lock`, `.gitignore`) and typed `uv-version.mjs` helper
+  for `actions/github-script`.
 
 ### Changed (stubs)
 
@@ -67,6 +75,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed legacy `setup.py`, `setup.cfg`, and `kp2bw.egg-info/`.
 - Replaced `KpEntry`/`KpGroup` type aliases (were `Any`) with real pykeepass
   types (`Entry`, `Group`) from stubs, eliminating ~130 basedpyright warnings.
+- Added contributor guidance to run `bun --cwd=scripts typecheck` when files
+  under `scripts/` are changed.
+- Updated local Zed JavaScript language-server configuration to include `tsgo`
+  with `vtsls`.
 
 ### Fixed
 

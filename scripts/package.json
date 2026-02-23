@@ -1,0 +1,12 @@
+{
+  "type": "module",
+  "scripts": {
+    "fmt": "dprint fmt .",
+    "typecheck": "tsgo --noEmit"
+  },
+  "devDependencies": {
+    "@actions/github-script": "github:actions/github-script",
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev.20260222.1"
+  }
+}

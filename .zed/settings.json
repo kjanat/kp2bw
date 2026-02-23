@@ -8,5 +8,10 @@
 			"external": { "command": "dprint", "arguments": ["fmt", "--config-discovery=global", "--stdin", "{buffer_path}"] }
 		}
 	],
-	"prettier": { "allowed": false }
+	"prettier": { "allowed": false },
+	"languages": {
+		"JavaScript": {
+			"language_servers": ["tsgo", "vtsls"]
+		}
+	}
 }

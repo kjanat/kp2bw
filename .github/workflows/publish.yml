@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Publish
+on:
+  release: { types: [released] }
+  workflow_dispatch:
+    inputs:
+      version: { description: "Version number (e.g. v3.1.7)", type: string }
+      dry: { description: "Do not publish", type: boolean, default: false }
+defaults: { run: { shell: bash } }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ fromJson(steps.check.outputs.result).name }}
+      version: ${{ fromJson(steps.check.outputs.result).version }}
+      pypi_url: ${{ fromJson(steps.check.outputs.result).pypi_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync
+
+      - uses: actions/github-script@v8
+        id: check
+        with:
+          result-encoding: json
+          script: |
+            const { default: checkUvVersion } = await import('${{ github.workspace }}/scripts/uv-version.mjs')
+            return await checkUvVersion({ core, context, exec })
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: { name: pypi, url: "${{ needs.check.outputs.pypi_url }}" }
+    permissions: { id-token: write, contents: read }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync
+      - run: uv build --no-sources
+
+      # Check that basic features work and we didn't miss to include crucial files
+      - name: Smoke test (wheel)
+        run: uv run --isolated --no-project --with dist/kp2bw-*.whl tests/smoke_test.py
+      - name: Smoke test (source distribution)
+        run: uv run --isolated --no-project --with dist/kp2bw-*.tar.gz tests/smoke_test.py
+
+      - name: Publish
+        run: uv publish

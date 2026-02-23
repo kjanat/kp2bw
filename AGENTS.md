@@ -60,6 +60,9 @@ uv run tombi fmt pyproject.toml  # TOML formatting (run via dprint if configured
 uv run ty check                # primary type checker (Astral)
 uv run basedpyright            # secondary type checker
 
+# Type checking (scripts/ JavaScript)
+bun --cwd=scripts typecheck    # checks github-script modules via tsgo
+
 # Run a single check on one file
 uv run ruff check src/kp2bw/convert.py
 uv run ty check src/kp2bw/convert.py
@@ -67,6 +70,9 @@ uv run ty check src/kp2bw/convert.py
 
 **Always run `uv run ty check` and `uv run ruff check` before finishing work.**
 Both must pass with zero errors.
+
+**When changes touch `scripts/`, also run `bun --cwd=scripts typecheck`.** This
+must pass with zero errors.
 
 ## Python Version
 
