@@ -78,6 +78,14 @@ class BitwardenServeClient:
         self._existing_entries = {}
         self._collections = None
 
+        # Register cleanup handlers early so close() is safe to call at
+        # any point during init (e.g. if _wait_for_ready times out).
+        self._previous_sigterm = signal.getsignal(signal.SIGTERM)
+        self._previous_sigint = signal.getsignal(signal.SIGINT)
+        atexit.register(self.close)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        signal.signal(signal.SIGINT, self._signal_handler)
+
         self._start_serve()
         self._wait_for_ready()
         self._unlock(password)
@@ -90,14 +98,6 @@ class BitwardenServeClient:
         # Load existing org collections if an org ID was provided.
         if self._org_id:
             self._collections = self.list_collections()
-
-        # Register cleanup handlers so the bw serve process is always
-        # terminated — even on unhandled exceptions or signals.
-        atexit.register(self.close)
-        self._previous_sigterm = signal.getsignal(signal.SIGTERM)
-        self._previous_sigint = signal.getsignal(signal.SIGINT)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        signal.signal(signal.SIGINT, self._signal_handler)
 
     # -- Context manager -----------------------------------------------
 
