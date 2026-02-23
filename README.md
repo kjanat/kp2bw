@@ -31,12 +31,22 @@ the built-in Bitwarden importer:
 ## Installation
 
 ```bash
-uv tool install git+https://github.com/kjanat/kp2bw
+# install with:
+uv tool install kp2bw
+kp2bw passwords.kdbx
+
+# or run directly without installing:
+uvx kp2bw
 ```
 
-Or run directly without installing:
+or from a GitHub URL:
 
 ```bash
+# install with:
+uv tool install git+https://github.com/kjanat/kp2bw
+kp2bw passwords.kdbx
+
+# run directly without installing:
 uvx --from git+https://github.com/kjanat/kp2bw kp2bw passwords.kdbx
 ```
 

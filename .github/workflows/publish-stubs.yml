@@ -11,6 +11,7 @@ defaults: { run: { shell: bash } }
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions: { contents: read }
     outputs:
       name: ${{ fromJson(steps.check.outputs.result).name }}
       version: ${{ fromJson(steps.check.outputs.result).version }}
@@ -31,7 +32,7 @@ jobs:
   publish:
     needs: check
     runs-on: ubuntu-latest
-    environment: { name: pypi, url: "${{ needs.check.outputs.pypi_url }}" }
+    environment: { name: pypi-pykeepass-stubs, url: "${{ needs.check.outputs.pypi_url }}" }
     permissions: { id-token: write, contents: read }
     steps:
       - uses: actions/checkout@v6
