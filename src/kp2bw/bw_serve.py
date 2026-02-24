@@ -374,12 +374,19 @@ class BitwardenServeClient:
     # CRUD — items
     # ------------------------------------------------------------------
 
-    def list_items(self, *, folder_id: str | None = None) -> list[dict[str, Any]]:
-        """Return all vault items, optionally filtered by folder ID."""
-        params: dict[str, str] | None = None
+    def list_items(
+        self,
+        *,
+        folder_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return vault items, optionally filtered by folder or organization ID."""
+        params: dict[str, str] = {}
         if folder_id is not None:
-            params = {"folderid": folder_id}
-        data = self._request("GET", "/list/object/items", params=params)
+            params["folderid"] = folder_id
+        if organization_id is not None:
+            params["organizationId"] = organization_id
+        data = self._request("GET", "/list/object/items", params=params or None)
         items: list[dict[str, Any]] = data.get("data", [])
         return items
 
@@ -427,11 +434,16 @@ class BitwardenServeClient:
     # ------------------------------------------------------------------
 
     def _build_dedup_index(self) -> dict[str | None, set[str]]:
-        """Build a ``{folder_name: {item_names}}`` index for O(1) dedup."""
+        """Build a ``{folder_name: {item_names}}`` index for O(1) dedup.
+
+        When an organization ID is configured, only items belonging to that
+        organization are indexed so personal-vault entries don't shadow the
+        (empty) org vault during import.
+        """
         id_to_name: dict[str, str] = {
             fid: fname for fname, fid in self._folders.items()
         }
-        items = self.list_items()
+        items = self.list_items(organization_id=self._org_id)
         index: dict[str | None, set[str]] = {}
         for item in items:
             folder_id: str | None = item.get("folderId") or None

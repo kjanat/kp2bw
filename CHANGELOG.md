@@ -8,6 +8,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Org import dedup matched personal vault** -- `_build_dedup_index()` fetched
+  all vault items regardless of `--bitwarden-org`, causing personal-vault entries
+  to shadow the (empty) org vault and skip every import. Now passes
+  `organizationId` to `bw serve`'s `/list/object/items` so only org-scoped items
+  are checked when importing to an organization.
+
 ## [3.0.0a1] - 2026-02-24
 
 ### Added
