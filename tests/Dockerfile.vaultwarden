@@ -1,0 +1,5 @@
+FROM vaultwarden/server:latest
+COPY fixtures/vaultwarden-data/db.sqlite3 /data/db.sqlite3
+COPY fixtures/vaultwarden-data/rsa_key.pem /data/rsa_key.pem
+COPY fixtures/vaultwarden-certs/cert.pem /ssl/cert.pem
+COPY fixtures/vaultwarden-certs/key.pem /ssl/key.pem

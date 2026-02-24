@@ -1,3 +1,5 @@
+<!--markdownlint-disable-file no-duplicate-heading-->
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -5,6 +7,145 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## [3.0.0a1] - 2026-02-24
+
+### Added
+
+- **`bw serve` HTTP transport** -- New `BitwardenServeClient` in
+  `bw_serve.py` manages a persistent `bw serve` process with HTTP API
+  access, replacing the one-subprocess-per-operation model. Includes automatic
+  port selection, health polling, vault unlock/sync, signal-safe cleanup, and
+  `atexit` registration.
+- **Batch import via `bw import`** -- New `bw_import.py` module builds
+  Bitwarden-format JSON and invokes `bw import` for bulk item creation,
+  dramatically reducing the number of subprocess calls.
+- **Dedup index** -- `BitwardenServeClient` maintains an
+  `O(1)` `dict[str | None, set[str]]` index of existing vault entries to
+  skip duplicates without per-item API calls.
+- **Async parallel attachment uploads** -- Attachments are uploaded concurrently
+  via `asyncio` with a bounded semaphore (default 4) for backpressure.
+- **Org collection CRUD with cache** -- `bw serve`-based collection
+  creation/listing with an in-memory name-to-ID cache, avoiding repeated API
+  round-trips.
+- **`bw serve` availability guard in e2e test** -- `_assert_bw_serve_available()`
+  pre-flight check before running the Vaultwarden integration test.
+- **`httpx` runtime dependency** -- Added `httpx>=0.28.0` for the HTTP
+  transport layer.
+- **Docker Compose e2e infrastructure** -- `tests/Dockerfile.vaultwarden`,
+  `tests/Dockerfile.test`, `tests/docker-compose.yml`, and `.dockerignore` for
+  fully containerized Vaultwarden integration tests. Fixture data is COPY'd into
+  the Vaultwarden image; the test image bundles Python 3.14, `uv`, `bun`,
+  Node.js, and `@bitwarden/cli`.
+- **`-d`/`--debug` flag** -- Separate debug verbosity level that includes
+  third-party library logs (pykeepass, httpx). `-v` now shows kp2bw operational
+  detail only (custom VERBOSE level at 15), `-d` enables full DEBUG for
+  everything.
+- **Custom VERBOSE logging level** -- `kp2bw.VERBOSE` (15) sits between DEBUG
+  and INFO, matching PowerShell's Write-Verbose/Write-Debug distinction.
+- **Pytest adapters for script tests** -- Added
+  `tests/test_script_adapters.py` so `pytest` can collect and run script-style
+  test modules while preserving `main()`-based direct execution.
+- **CLI-output sanitization tests** -- Added
+  `tests/bw_serve_sanitization_test.py` to verify secret redaction, whitespace
+  normalization, and truncation behavior.
+
+### Changed
+
+- **3-phase migration architecture** -- `convert.py`
+  `_create_bitwarden_items_for_entries()` rewritten: (1) partition entries and
+  resolve collections, (2) create items via `bw serve` HTTP API, (3) parallel
+  attachment uploads.
+- **Version bump to 3.0.0a1** -- Major version increment reflecting the
+  breaking change from subprocess-per-item to `bw serve` transport.
+- **100% docstring coverage** -- Added docstrings to all functions and methods
+  across `convert.py`, `cli.py`, and `bitwardenclient.py`.
+- **CI workflow simplified** -- `integration-docker.yml` reduced to a single
+  `docker compose up --build --abort-on-container-exit --exit-code-from test`
+  invocation, replacing multi-step `bw` CLI setup.
+- **CI build output collapsible** -- Docker image build phase wrapped in
+  `::group::` markers so it collapses in GitHub Actions logs.
+- **Regenerated TLS certs** -- Self-signed cert now includes `DNS:vaultwarden`
+  SAN for Docker Compose service-name resolution.
+- **`firstlevel` refactored out of BwItem dict** -- Internal collection-routing
+  key now travels as a separate `EntryValue` tuple element instead of being
+  smuggled inside the Bitwarden API payload dict.
+- **`collectionIds` corrected to array** -- Now emits `[id]` or `[]` per the
+  Bitwarden API spec, instead of a bare string or `None`.
+- **`EntryValue` normalized to one tuple shape** -- Internal converter storage
+  now always carries attachments as a list (empty when none), removing
+  3-tuple/4-tuple branching and `type: ignore` indexing.
+- **Test workflow documentation expanded** -- Added adapter-driven pytest
+  commands and opt-in env flags for packaging/e2e script tests in `AGENTS.md`.
+
+### Fixed
+
+- **Signal handler init race** -- `_previous_sigterm` / `_previous_sigint`
+  are now assigned before `_start_serve()` so that `close()` is safe to
+  call at any point during `__init__` (e.g. when `_wait_for_ready` times
+  out).
+- **Duplicate item name ID lookup** -- Post-import ID recovery now collects all
+  IDs per `(folder, name)` pair and pops them in order, so entries sharing the
+  same name each get their own server-assigned ID for attachment uploads.
+- **`bw serve` startup diagnostics** -- Captured stderr from the `bw serve`
+  process and included it in timeout/crash error messages. Closed stdin via
+  `subprocess.DEVNULL` to prevent blocking. Increased startup timeout from
+  30 s to 60 s for CI headroom.
+- **e2e test empty session token** -- `bw login` + separate `bw unlock --raw`
+  returned an empty session on `@bitwarden/cli@2026.1.0`. Replaced with
+  `bw login --raw` to capture the session in a single step; added
+  lock-then-unlock retry fallback in `_get_session()`.
+- **`bw import` command injection** -- `run_import` used `shell=True` with a
+  format-string command; replaced with list-form `subprocess.check_output`
+  (no shell).
+- **`close()` double-call crash** -- `BitwardenServeClient.close()` was not
+  idempotent; second call could restore stale signal handlers or raise on
+  `_http.close()`. Added `_closed` guard.
+- **Attachment upload fail-fast** -- `asyncio.gather` abandoned remaining
+  uploads on first error; now uses `return_exceptions=True` to collect all
+  failures before raising an aggregate error.
+- **`bw serve` IPv6 binding** -- `--hostname localhost` caused Node.js/Koa to
+  bind to `::1` (IPv6 loopback) while `httpx` connected to `127.0.0.1` (IPv4),
+  resulting in a 60 s timeout. Changed to `--hostname 127.0.0.1`.
+- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE` from
+  `_start_serve()`; stderr remains piped for crash diagnostics while stdout now
+  inherits parent file descriptors. Removed dead `_read_output()` method that
+  depended on piped streams.
+- **Signal handler restore crash** -- `close()` could raise `TypeError` when
+  restoring signal handlers that were `None` (C-installed handlers). Now guards
+  against `None` before calling `signal.signal()`.
+- **Third-party debug log spam** -- `-v` no longer sets root logger to DEBUG;
+  pykeepass/httpx debug messages only appear with `-d`.
+- **Deprecated `WEBSOCKET_ENABLED` env var** -- Removed from docker-compose.yml;
+  silently ignored since Vaultwarden 1.29.
+- **Dockerfile.test missing `pipefail`** -- Added `SHELL` directive so `curl`
+  failures in pipe are not masked.
+- **Root-level explicit collection assignment** -- Entries without a first-level
+  KeePass group now still receive an explicitly configured Bitwarden
+  collection ID.
+- **Org collection create with missing org ID** -- `create_org_collection()` now
+  short-circuits when no org ID is configured instead of attempting a POST with
+  `organizationId: None`.
+- **Attachment upload JSON parse failures** -- Non-JSON `/attachment` responses
+  now raise `BitwardenClientError` with HTTP context instead of leaking decode
+  exceptions.
+- **`bw serve` response parse hardening** -- Core `_request()` now maps
+  non-JSON responses to `BitwardenClientError`; dedup index also skips malformed
+  item names safely.
+- **Signal-ignore semantics** -- `_signal_handler()` now respects inherited
+  `SIG_IGN` handlers instead of forcing process exit.
+- **Sensitive stderr exposure in diagnostics** -- `bw unlock` and early
+  `bw serve` stderr output is now sanitized (secret redaction + truncation)
+  before logs/error messages are emitted.
+- **E2E command output redaction** -- Integration helper now redacts
+  `--session`/`--passwordenv` values and `--raw` command output in failure
+  messages.
+
+### Removed
+
+- **Diagnostic `_smoke_test_bw_serve()`** -- Removed from e2e test; it launched
+  `bw serve` with piped stdout (which also triggered the IPv6 binding issue) and
+  blocked the test run.
 
 ## [2.0.0] - 2026-02-23
 
@@ -170,7 +311,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc3...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.0.0a1...HEAD
+[3.0.0a1]: https://github.com/kjanat/kp2bw/compare/v2.0.0...v3.0.0a1
+[2.0.0]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc3...v2.0.0
 [2.0.0rc3]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc2...v2.0.0rc3
 [2.0.0rc2]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/kjanat/kp2bw/compare/c9ef571eabd345db94751f7dec845e49756e9d47...v2.0.0rc1

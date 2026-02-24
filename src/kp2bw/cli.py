@@ -5,18 +5,22 @@ import sys
 from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from typing import NoReturn
 
-from . import __version__
+from . import VERBOSE, __version__
 from .convert import Converter
 
 
 class MyArgParser(ArgumentParser):
+    """Argument parser that prints help on error instead of just usage."""
+
     def error(self, message: str) -> NoReturn:
+        """Print the error message followed by full help, then exit."""
         _ = sys.stderr.write(f"{self.prog}: {message}\n\n")
         self.print_help()
         sys.exit(2)
 
 
 def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
+    """Parse an environment variable string into a boolean, or ``None`` if unset."""
     if value is None:
         return None
 
@@ -36,6 +40,7 @@ def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
 
 
 def _split_csv_env(value: str | None) -> list[str] | None:
+    """Split a comma-separated environment variable into a list of trimmed strings."""
     if value is None:
         return None
 
@@ -44,12 +49,14 @@ def _split_csv_env(value: str | None) -> list[str] | None:
 
 
 def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
+    """Return *arg_value* if set, otherwise fall back to the named environment variable."""
     if arg_value is not None:
         return arg_value
     return os.environ.get(env_var)
 
 
 def _argparser() -> MyArgParser:
+    """Build and return the CLI argument parser with all flags and env-var support."""
     parser = MyArgParser(description="KeePass 2.x to Bitwarden converter by @jampe")
 
     parser.add_argument(
@@ -154,11 +161,20 @@ def _argparser() -> MyArgParser:
         action="store_true",
         default=None,
     )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        dest="debug",
+        help="Debug output — includes third-party library logs (env: KP2BW_DEBUG)",
+        action="store_true",
+        default=None,
+    )
 
     return parser
 
 
 def _read_password(arg: str | None, prompt: str) -> str:
+    """Return *arg* if provided, otherwise prompt interactively for a password."""
     if not arg:
         arg = getpass.getpass(prompt=prompt)
 
@@ -166,6 +182,7 @@ def _read_password(arg: str | None, prompt: str) -> str:
 
 
 def main() -> None:
+    """Entry point: parse arguments, resolve env vars, and run the converter."""
     args: Namespace = _argparser().parse_args()
 
     # string options: CLI > env > None/default
@@ -222,6 +239,11 @@ def main() -> None:
                 os.environ.get("KP2BW_VERBOSE"), env_var="KP2BW_VERBOSE"
             )
         )
+        debug = (
+            args.debug
+            if args.debug is not None
+            else _parse_bool_env(os.environ.get("KP2BW_DEBUG"), env_var="KP2BW_DEBUG")
+        )
     except ValueError as exc:
         _ = sys.stderr.write(f"ERROR: {exc}\n\n")
         _argparser().print_help()
@@ -248,6 +270,7 @@ def main() -> None:
     migrate_metadata = migrate_metadata if migrate_metadata is not None else True
     skip_confirm = skip_confirm if skip_confirm is not None else False
     verbose = verbose if verbose is not None else False
+    debug = debug if debug is not None else False
 
     if args.bw_coll and not args.bw_org:
         _ = sys.stderr.write(
@@ -257,8 +280,16 @@ def main() -> None:
         sys.exit(2)
 
     # logging
-    if verbose:
-        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.DEBUG)
+    #   default : INFO  (progress messages)
+    #   -v      : VERBOSE for kp2bw (operational detail)
+    #   -d      : DEBUG  for everything (incl. pykeepass, httpx, …)
+    if debug:
+        logging.basicConfig(
+            format="%(levelname)s: %(name)s: %(message)s", level=logging.DEBUG
+        )
+    elif verbose:
+        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
+        logging.getLogger("kp2bw").setLevel(VERBOSE)
     else:
         logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 

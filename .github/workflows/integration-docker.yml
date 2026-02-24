@@ -10,69 +10,22 @@ jobs:
   vaultwarden-e2e:
     runs-on: ubuntu-latest
     permissions: { contents: read }
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/setup-uv@v7
-
-      - name: Install Bitwarden CLI
-        run: npm install --global @bitwarden/cli@2026.1.0
-
-      - name: Prepare isolated Vaultwarden data
-        run: rm -rf /tmp/vaultwarden-data && cp -a tests/fixtures/vaultwarden-data /tmp/vaultwarden-data
-
-      - name: Start Vaultwarden (TLS)
-        run: >-
-          docker run --rm --detach
-          --name kp2bw-vaultwarden
-          --publish 18443:443
-          --env WEBSOCKET_ENABLED=false
-          --env SIGNUPS_ALLOWED=false
-          --env DOMAIN=https://localhost:18443
-          --env ROCKET_PORT=443
-          --env ROCKET_TLS='{certs="/ssl/cert.pem",key="/ssl/key.pem"}'
-          --volume /tmp/vaultwarden-data:/data
-          --volume "${GITHUB_WORKSPACE}/tests/fixtures/vaultwarden-certs:/ssl:ro"
-          vaultwarden/server:latest
-
-      - name: Wait for Vaultwarden
-        run: |
-          python - <<'PY'
-          import ssl
-          import time
-          import urllib.request
-
-          context = ssl._create_unverified_context()
-          url = "https://localhost:18443/"
-
-          for _ in range(60):
-              try:
-                  with urllib.request.urlopen(url, context=context, timeout=2) as response:
-                      if response.status == 200:
-                          print("vaultwarden ready")
-                          break
-              except Exception:
-                  time.sleep(1)
-          else:
-              raise SystemExit("vaultwarden did not become ready in time")
-          PY
-
-      - name: Sync dependencies
-        run: uv sync --frozen
-
       - name: Run Vaultwarden end-to-end migration test
-        env:
-          BW_SERVER_URL: https://localhost:18443
-          BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
-          BW_TEST_EMAIL: integration@example.com
-          BW_TEST_PASSWORD: TestMasterPassword123!
-          KP_TEST_PASSWORD: KpSnapshotPassword123!
-        run: uv run python tests/e2e_vaultwarden_test.py
+        run: |
+          echo "::group::Build Docker images"
+          docker compose -f tests/docker-compose.yml build
+          echo "::endgroup::"
+          docker compose -f tests/docker-compose.yml up \
+            --abort-on-container-exit --exit-code-from test
 
       - name: Show Vaultwarden logs on failure
-        if: failure()
-        run: docker logs kp2bw-vaultwarden
+        if: failure() || cancelled()
+        run: docker compose -f tests/docker-compose.yml logs vaultwarden
 
-      - name: Stop Vaultwarden
+      - name: Cleanup
         if: always()
-        run: docker stop kp2bw-vaultwarden
+        run: docker compose -f tests/docker-compose.yml down --volumes

@@ -1,6 +1,6 @@
 [project]
 name            = "kp2bw"
-version         = "2.0.0"
+version         = "3.0.0a1"
 description     = "Imports and existing KeePass db with REF fields into Bitwarden"
 readme          = "README.md"
 requires-python = ">=3.14"
@@ -15,7 +15,7 @@ classifiers     = [
   "Topic :: Utilities",
   "Typing :: Typed",
 ]
-dependencies    = ["pykeepass>=4.1.1.post1"]
+dependencies    = ["httpx>=0.28.0", "pykeepass>=4.1.1.post1"]
 
 [[project.authors]]
 name  = "Kaj Kowalski"
@@ -33,6 +33,7 @@ kp2bw = "kp2bw.cli:main"
 dev   = [
   { include-group = "lint" },
   { include-group = "stubs" },
+  { include-group = "test" },
 ]
 lint  = [
   "basedpyright>=1.38.1",
@@ -41,6 +42,11 @@ lint  = [
   "ty>=0.0.18",
 ]
 stubs = ["pykeepass-stubs"]
+test  = [
+  "coverage>=7.13.4",
+  "pytest>=9.0.2",
+  "pytest-cov>=7.0.0",
+]
 
 [build-system]
 requires      = ["uv_build>=0.10.4,<0.11.0"]

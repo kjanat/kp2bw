@@ -1,13 +1,13 @@
 import base64
 import binascii
-import json
 import logging
 from itertools import islice
 from typing import Any
 
 from pykeepass import Attachment, Entry, Group, PyKeePass
 
-from .bitwardenclient import BitwardenClient
+from . import VERBOSE
+from .bw_serve import BitwardenServeClient
 from .exceptions import ConversionError
 
 logger = logging.getLogger(__name__)
@@ -22,10 +22,8 @@ type BwItem = dict[str, Any]
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
 type AttachmentItem = Attachment | tuple[str, str]
 
-# Entry storage: 2-tuple (folder, bw_item) or 3-tuple (folder, bw_item, attachments)
-type EntryValue = (
-    tuple[str | None, BwItem] | tuple[str | None, BwItem, list[AttachmentItem]]
-)
+# Entry storage: (folder, firstlevel, bw_item, attachments)
+type EntryValue = tuple[str | None, str | None, BwItem, list[AttachmentItem]]
 
 # Fido2 credential list type
 type Fido2Credentials = list[dict[str, str | None]]
@@ -64,6 +62,7 @@ class Converter:
         include_recyclebin: bool = False,
         migrate_metadata: bool = True,
     ) -> None:
+        """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._keepass_file_path = keepass_file_path
         self._keepass_password = keepass_password
         self._keepass_keyfile_path = keepass_keyfile_path
@@ -139,10 +138,9 @@ class Converter:
         username: str,
         password: str,
         custom_properties: dict[str, list[Any]],
-        collection_id: str | None,
-        firstlevel: str | None,
         fido2_credentials: Fido2Credentials | None = None,
     ) -> BwItem:
+        """Build a Bitwarden item dict from individual entry fields."""
         login: dict[str, Any] = {
             "uris": [{"match": None, "uri": url}] if url else [],
             "username": username,
@@ -155,8 +153,7 @@ class Converter:
 
         return {
             "organizationId": self._bitwarden_organization_id,
-            "collectionIds": collection_id,
-            "firstlevel": firstlevel,
+            "collectionIds": [],
             "folderId": None,
             "type": 1,
             "name": title,
@@ -174,12 +171,14 @@ class Converter:
         }
 
     def _generate_folder_name(self, entry: Entry) -> str | None:
+        """Return the full group path as a ``/``-joined folder name."""
         group = entry.group
         if group is None or not group.path:
             return None
         return "/".join(p for p in group.path if p is not None)
 
     def _generate_prefix(self, entry: Entry, skip: int) -> str:
+        """Build a display prefix from the group path, skipping the first *skip* segments."""
         group = entry.group
         if group is None or not group.path:
             return ""
@@ -190,6 +189,7 @@ class Converter:
         return out
 
     def _get_folder_firstlevel(self, entry: Entry) -> str | None:
+        """Return the first path segment of the entry's group (top-level folder)."""
         group = entry.group
         if group is None or not group.path:
             return None
@@ -229,6 +229,7 @@ class Converter:
     def _add_bw_entry_to_entries_dict(
         self, entry: Entry, custom_protected: list[str] | None
     ) -> None:
+        """Convert a KeePass entry into a Bitwarden item and store it in ``_entries``."""
         folder = self._generate_folder_name(entry)
         prefix = ""
         if folder and self._path2name:
@@ -265,6 +266,7 @@ class Converter:
             notes = expired_prefix + notes
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
+        firstlevel = self._get_folder_firstlevel(entry)
         bw_item_object = self._create_bw_python_object(
             title=title,
             notes=notes,
@@ -273,8 +275,6 @@ class Converter:
             username=entry.username if entry.username else "",
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
-            collection_id=self._bitwarden_coll_id,
-            firstlevel=self._get_folder_firstlevel(entry),
             fido2_credentials=fido2_credentials,
         )
 
@@ -289,20 +289,18 @@ class Converter:
             attachments.append(("notes", entry.notes))
 
         entry_key: str = str(entry.uuid).replace("-", "").upper()
-        if entry.attachments or attachments:
+        if entry.attachments:
             attachments += entry.attachments
-            self._entries[entry_key] = (
-                folder,
-                bw_item_object,
-                attachments,
-            )
-        else:
-            self._entries[entry_key] = (
-                folder,
-                bw_item_object,
-            )
+
+        self._entries[entry_key] = (
+            folder,
+            firstlevel,
+            bw_item_object,
+            attachments,
+        )
 
     def _parse_kp_ref_string(self, ref_string: str) -> tuple[str, str, str]:
+        """Parse a ``{REF:...}`` string into ``(field, lookup_mode, uuid)``."""
         # {REF:U@I:CFC0141068E83547BCEEAF0C1ADABAE0}
         tokens = ref_string.split(":")
 
@@ -317,6 +315,7 @@ class Converter:
     def _get_referenced_entry(
         self, lookup_mode: str, ref_compare_string: str
     ) -> EntryValue:
+        """Look up a previously parsed entry by UUID or other reference mode."""
         if lookup_mode == "I":
             # KP_ID lookup
             try:
@@ -330,6 +329,7 @@ class Converter:
     def _find_referenced_value(
         self, ref_entry: BwItem, field_referenced: str
     ) -> str | None:
+        """Extract the referenced login field (username/password) from a resolved entry."""
         for member, reference_key in self._member_reference_resolving_dict.items():
             if field_referenced == reference_key:
                 return ref_entry["login"][member]
@@ -337,6 +337,7 @@ class Converter:
         raise ConversionError("Unsupported REF field_referenced")
 
     def _load_keepass_data(self) -> None:
+        """Open the KeePass database and populate ``_entries`` with parsed items."""
         # aggregate entries
         kp = PyKeePass(
             filename=self._keepass_file_path,
@@ -368,7 +369,7 @@ class Converter:
             # Skip expired entries if requested
             if self._skip_expired and entry.expired:
                 skipped_expired += 1
-                logger.debug(f"Skipping expired entry: {entry.title}")
+                logger.log(VERBOSE, f"Skipping expired entry: {entry.title}")
                 continue
 
             # prevent not iterable errors at "in" checks
@@ -409,6 +410,7 @@ class Converter:
         logger.info(f"Parsed {len(self._entries)} entries")
 
     def _resolve_entries_with_references(self) -> None:
+        """Resolve ``{REF:...}`` cross-references and merge or create entries accordingly."""
         ref_entries_length = len(self._kp_ref_entries)
 
         if ref_entries_length == 0:
@@ -428,7 +430,7 @@ class Converter:
                         ref_result = self._get_referenced_entry(
                             lookup_mode, ref_compare_string
                         )
-                        ref_entry = ref_result[1]
+                        _, _, ref_entry, _ = self._unpack_entry(ref_result)
 
                         value = self._find_referenced_value(ref_entry, field_referenced)
                         setattr(kp_entry, member, value)
@@ -462,76 +464,113 @@ class Converter:
                     f"!! Could not resolve entry for {group_path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
                 )
 
-        logger.debug(f"Resolved {ref_entries_length} REF entries")
+        logger.log(VERBOSE, f"Resolved {ref_entries_length} REF entries")
+
+    @staticmethod
+    def _unpack_entry(
+        entry_value: EntryValue,
+    ) -> tuple[str | None, str | None, BwItem, list[AttachmentItem]]:
+        """Destructure an entry value into (folder, firstlevel, item, attachments)."""
+        folder, firstlevel, bw_item = entry_value[0:3]
+        attachments = entry_value[3] if len(entry_value) > 3 else []
+        return folder, firstlevel, bw_item, attachments
+
+    def _resolve_collection(
+        self,
+        bw: BitwardenServeClient,
+        bw_item: BwItem,
+        firstlevel: str | None,
+    ) -> str | None:
+        """Resolve and set collection ID on *bw_item*."""
+        collection_id: str | None = None
+        if self._bitwarden_coll_id == "auto":
+            if firstlevel:
+                logger.info(f"Searching Collection {firstlevel}")
+                collection_id = bw.create_org_collection(firstlevel)
+        elif self._bitwarden_coll_id:
+            collection_id = self._bitwarden_coll_id
+
+        if collection_id is not None:
+            bw_item["collectionIds"] = [collection_id]
+        return collection_id
+
+    @staticmethod
+    def _materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:
+        """Convert an AttachmentItem to a ``(filename, data)`` pair."""
+        if not isinstance(att, Attachment):
+            # Long custom property — (key, value) text tuple
+            name: str = att[0]
+            value: str = att[1]
+            return name + ".txt", value.encode("UTF-8")
+        # Real pykeepass Attachment
+        filename = att.filename if att.filename else "attachment"
+        data: bytes = att.data
+        return filename, data
 
     def _create_bitwarden_items_for_entries(self) -> None:
-        i = 1
-        max_i = len(self._entries)
-
+        """Create entries via ``bw serve`` HTTP API and upload attachments."""
         logger.info("Connecting and reading existing folders and entries")
 
-        bw = BitwardenClient(self._bitwarden_password, self._bitwarden_organization_id)
+        with BitwardenServeClient(
+            self._bitwarden_password,
+            org_id=self._bitwarden_organization_id,
+        ) as bw:
+            # --- Phase 1: Partition entries and resolve collections ----------
+            import_entries: dict[str, tuple[str | None, BwItem]] = {}
+            attachment_map: dict[str, list[AttachmentItem]] = {}
 
-        for entry_value in self._entries.values():
-            if len(entry_value) == 2:
-                folder, bw_item_object = entry_value[0], entry_value[1]
-                attachments: list[AttachmentItem] | None = None
-            else:
-                folder = entry_value[0]
-                bw_item_object = entry_value[1]
-                # entry_value is a 3-tuple here; index 2 is valid
-                attachments = entry_value[2]  # type: ignore[index]
+            for key, entry_value in self._entries.items():
+                folder, firstlevel, bw_item, attachments = self._unpack_entry(
+                    entry_value
+                )
 
-            # collection
-            collection_id: str | None = None
-            coll_info = ""
-            if bw_item_object["firstlevel"]:
-                if self._bitwarden_coll_id == "auto":
-                    logger.info(f"Searching Collection {bw_item_object['firstlevel']}")
-                    collection_id = bw.create_org_get_collection(
-                        bw_item_object["firstlevel"]
-                    )
-                    coll_info = (
-                        " in specified Collection " + bw_item_object["firstlevel"]
-                    )
+                # Resolve collection (mutates bw_item)
+                self._resolve_collection(bw, bw_item, firstlevel)
 
-                elif self._bitwarden_coll_id:
-                    collection_id = self._bitwarden_coll_id
-                    coll_info = " in specified Collection "
-
-            # update object
-            del bw_item_object["firstlevel"]
-            bw_item_object["collectionIds"] = collection_id
-
-            logger.info(
-                f"[{i} of {max_i}] Creating Bitwarden entry in {folder} for {bw_item_object['name']}{coll_info}..."
-            )
-
-            # create entry
-            output = bw.create_entry(folder, bw_item_object)
-            if "error" in output.lower():
-                logger.error(f"!! ERROR: Creation of entry failed: {output} !!")
-                i += 1
-                continue
-            if "skip" in output:
-                i += 1
-                continue
-
-            # upload attachments
-            if attachments:
-                item_id: str = json.loads(output)["id"]
-
-                for attachment in attachments:
+                # Dedup check
+                if bw.entry_exists(folder, bw_item["name"]):
                     logger.info(
-                        f"        - Uploading attachment for item {bw_item_object['name']}..."
+                        f"-- Entry {bw_item['name']} already exists in "
+                        f"folder {folder}. skipping..."
                     )
-                    res = bw.create_attachment(item_id, attachment)
-                    if "failed" in res:
-                        logger.error(f"!! ERROR: Uploading attachment failed: {res}")
+                    continue
 
-            i += 1
+                import_entries[key] = (folder, bw_item)
+                if attachments:
+                    attachment_map[key] = attachments
+
+            if not import_entries:
+                logger.info("No new entries to import")
+                return
+
+            # --- Phase 2: Create items via bw serve HTTP API ----------------
+            logger.info(f"Creating {len(import_entries)} items via bw serve HTTP API")
+            key_to_id = bw.create_items_batch(import_entries)
+            logger.info(f"Created {len(key_to_id)} items")
+
+            if not attachment_map:
+                logger.info("No attachments to upload")
+                return
+
+            # --- Phase 3: Parallel attachment uploads -----------------------
+            upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
+            for key, attachments in attachment_map.items():
+                item_id = key_to_id.get(key)
+                if not item_id:
+                    folder, bw_item = import_entries[key]
+                    logger.warning(
+                        f"Could not find item ID for {bw_item['name']!r} "
+                        f"in folder {folder!r} for attachment upload"
+                    )
+                    continue
+
+                file_pairs = [self._materialise_attachment(att) for att in attachments]
+                upload_items.append((item_id, file_pairs))
+
+            bw.upload_attachments(upload_items)
 
     def convert(self) -> None:
+        """Run the full KeePass-to-Bitwarden migration pipeline."""
         # load keepass data from database
         self._load_keepass_data()
 
