@@ -295,7 +295,7 @@ class Converter:
         # Build FIDO2/passkey credentials from KeePassXC attributes
         fido2_credentials = self._build_fido2_credentials(entry)
         if fido2_credentials:
-            logger.info(f"  Migrating passkey for entry: {entry.title}")
+            logger.log(VERBOSE, f"  Migrating passkey for entry: {entry.title}")
 
         # Build notes, prepending [EXPIRED] marker if applicable
         notes = ""
@@ -606,34 +606,51 @@ class Converter:
                 # Resolve collection (mutates bw_item)
                 self._resolve_collection(bw, bw_item, firstlevel)
 
-                # Collection-aware dedup: skip only if item is already in all
-                # target collections; otherwise add it to the missing ones.
+                # Dedup: skip items already in the vault.
+                #
+                # Fixed-collection mode: the dedup index is scoped to the
+                # target collection, so any hit means the item is already
+                # there.  bw serve returns collectionIds=null on listed items
+                # regardless of actual membership, so we cannot use the
+                # missing-check here — and we don't need to.
+                #
+                # Auto/no-collection mode: item may exist in the org but be
+                # absent from the automatically-resolved target collection;
+                # update its collection membership via PUT.
                 existing = bw.get_existing_item(folder, bw_item["name"])
                 if existing is not None:
-                    target_colls: list[str] = bw_item.get("collectionIds") or []
-                    existing_colls: list[str] = existing.get("collectionIds") or []
-                    missing = [c for c in target_colls if c not in existing_colls]
-                    if missing:
-                        updated_item = copy.copy(existing)
-                        updated_item["collectionIds"] = existing_colls + missing
-                        bw.update_item(existing["id"], updated_item)
-                        # Keep the in-memory cache fresh so a second KeePass
-                        # entry with the same (folder, name) doesn't recompute
-                        # stale `existing_colls` and issue a redundant PUT.
-                        bw.update_dedup_entry(folder, bw_item["name"], updated_item)
-                        logger.log(
-                            VERBOSE,
-                            f"-- Entry {bw_item['name']!r}: added to "
-                            f"{len(missing)} collection(s)",
-                        )
-                        n_collection_update += 1
-                    else:
+                    if fixed_coll_id:
                         logger.log(
                             VERBOSE,
                             f"-- Entry {bw_item['name']!r} already in "
-                            f"folder {folder!r}, skipping",
+                            f"target collection, skipping",
                         )
                         n_skipped += 1
+                    else:
+                        target_colls: list[str] = bw_item.get("collectionIds") or []
+                        existing_colls: list[str] = existing.get("collectionIds") or []
+                        missing = [c for c in target_colls if c not in existing_colls]
+                        if missing:
+                            updated_item = copy.copy(existing)
+                            updated_item["collectionIds"] = existing_colls + missing
+                            bw.update_item(existing["id"], updated_item)
+                            # Keep cache fresh so a second KeePass entry with
+                            # the same (folder, name) doesn't recompute stale
+                            # existing_colls and issue a redundant PUT.
+                            bw.update_dedup_entry(folder, bw_item["name"], updated_item)
+                            logger.log(
+                                VERBOSE,
+                                f"-- Entry {bw_item['name']!r}: added to "
+                                f"{len(missing)} collection(s)",
+                            )
+                            n_collection_update += 1
+                        else:
+                            logger.log(
+                                VERBOSE,
+                                f"-- Entry {bw_item['name']!r} already in "
+                                f"folder {folder!r}, skipping",
+                            )
+                            n_skipped += 1
                     progress.advance(task1)
                     continue
 
