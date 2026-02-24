@@ -57,7 +57,7 @@ def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
 
 def _argparser() -> MyArgParser:
     """Build and return the CLI argument parser with all flags and env-var support."""
-    parser = MyArgParser(description="KeePass 2.x to Bitwarden converter by @jampe")
+    parser = MyArgParser(description="KeePass to Bitwarden converter")
 
     parser.add_argument(
         "-V",
@@ -66,11 +66,14 @@ def _argparser() -> MyArgParser:
         version=f"%(prog)s {__version__}",
     )
 
-    parser.add_argument("keepass_file", help="Path to your KeePass 2.x db.")
+    parser.add_argument(
+        "keepass_file", metavar="FILE", help="Path to your KeePass 2.x db."
+    )
     parser.add_argument(
         "-k",
         "--keepass-password",
         dest="kp_pw",
+        metavar="PASSWORD",
         help="KeePass db password (env: KP2BW_KEEPASS_PASSWORD)",
         default=None,
     )
@@ -78,6 +81,7 @@ def _argparser() -> MyArgParser:
         "-K",
         "--keepass-keyfile",
         dest="kp_keyfile",
+        metavar="FILE",
         help="KeePass db key file (env: KP2BW_KEEPASS_KEYFILE)",
         default=None,
     )
@@ -85,6 +89,7 @@ def _argparser() -> MyArgParser:
         "-b",
         "--bitwarden-password",
         dest="bw_pw",
+        metavar="PASSWORD",
         help="Bitwarden password (env: KP2BW_BITWARDEN_PASSWORD)",
         default=None,
     )
@@ -92,6 +97,7 @@ def _argparser() -> MyArgParser:
         "-o",
         "--bitwarden-org",
         dest="bw_org",
+        metavar="ID",
         help="Bitwarden Organization Id (env: KP2BW_BITWARDEN_ORG)",
         default=None,
     )
@@ -99,6 +105,7 @@ def _argparser() -> MyArgParser:
         "-t",
         "--import-tags",
         dest="import_tags",
+        metavar="TAG",
         help="Only import tagged items (env: KP2BW_IMPORT_TAGS as comma-separated values)",
         nargs="+",
         default=None,
@@ -107,6 +114,7 @@ def _argparser() -> MyArgParser:
         "-c",
         "--bitwarden-collection",
         dest="bw_coll",
+        metavar="ID",
         help="Id of Org-Collection, or 'auto' for top-level folder names (env: KP2BW_BITWARDEN_COLLECTION)",
         default=None,
     )
@@ -120,6 +128,7 @@ def _argparser() -> MyArgParser:
     parser.add_argument(
         "--path-to-name-skip",
         dest="path_to_name_skip",
+        metavar="N",
         help="Skip first N folders for path prefix (default: 1, env: KP2BW_PATH_TO_NAME_SKIP)",
         default=None,
         type=int,
