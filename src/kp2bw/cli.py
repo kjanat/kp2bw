@@ -350,10 +350,11 @@ def main() -> None:
         include_recyclebin=include_recyclebin,
         migrate_metadata=migrate_metadata,
     )
-    c.convert()
-
-    print(" ")
-    print("All done.")
+    try:
+        c.convert()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
+        sys.exit(130)
 
 
 if __name__ == "__main__":
