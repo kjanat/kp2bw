@@ -526,9 +526,18 @@ class Converter:
         """Create entries via ``bw serve`` HTTP API and upload attachments."""
         logger.info("Connecting and reading existing folders and entries")
 
+        # When a fixed collection ID is given, scope the dedup index to that
+        # collection so items that exist in *other* collections are treated as
+        # new and are imported into the target collection rather than skipped.
+        fixed_coll_id = (
+            self._bitwarden_coll_id
+            if self._bitwarden_coll_id and self._bitwarden_coll_id != "auto"
+            else None
+        )
         with BitwardenServeClient(
             self._bitwarden_password,
             org_id=self._bitwarden_organization_id,
+            collection_id=fixed_coll_id,
         ) as bw:
             # --- Phase 1: Partition entries and resolve collections ----------
             import_entries: dict[str, tuple[str | None, BwItemCreate]] = {}

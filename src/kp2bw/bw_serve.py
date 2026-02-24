@@ -79,6 +79,7 @@ class BitwardenServeClient:
     ]  # folder_name → {name → item}
     _collections: dict[str, str] | None  # name → id cache (None if no org)
     _org_id: str | None
+    _collection_id: str | None  # fixed target collection for dedup scoping
     _closed: bool
 
     # ------------------------------------------------------------------
@@ -90,6 +91,7 @@ class BitwardenServeClient:
         password: str,
         *,
         org_id: str | None = None,
+        collection_id: str | None = None,
     ) -> None:
         self._port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{self._port}"
@@ -100,6 +102,7 @@ class BitwardenServeClient:
             timeout=_HTTP_TIMEOUT_S,
         )
         self._org_id = org_id
+        self._collection_id = collection_id
 
         self._folders = {}
         self._existing_entries = {}
@@ -381,13 +384,16 @@ class BitwardenServeClient:
         *,
         folder_id: str | None = None,
         organization_id: str | None = None,
+        collection_id: str | None = None,
     ) -> list[BwItemResponse]:
-        """Return vault items, optionally filtered by folder or organization ID."""
+        """Return vault items, optionally filtered by folder, organization, or collection."""
         params: dict[str, str] = {}
         if folder_id is not None:
             params["folderid"] = folder_id
         if organization_id is not None:
             params["organizationId"] = organization_id
+        if collection_id is not None:
+            params["collectionId"] = collection_id
         data = self._request("GET", "/list/object/items", params=params or None)
         items: list[BwItemResponse] = data.get("data", [])
         return items
@@ -447,23 +453,28 @@ class BitwardenServeClient:
         Stores the full item response so callers can inspect ``collectionIds``
         and call :meth:`update_item` without an extra GET.
 
-        When an organization ID is configured, only items belonging to that
-        organization are indexed so personal-vault entries don't shadow the
-        (empty) org vault during import.
+        Scoping rules (most-specific filter wins):
 
-        .. note::
-            When ``org_id`` is ``None`` (personal vault), no ``organizationId``
-            filter is applied and ``bw serve`` returns *all* items visible to
-            the authenticated user — including org-shared items.  A personal-vault
-            import could therefore falsely mark an entry as "already exists" if its
-            name collides with an org-shared item.  This is a pre-existing
-            limitation; the fix for the org direction is intentionally asymmetric.
+        * **Fixed collection** (``collection_id`` set): only items already in
+          that collection are indexed.  Items in other collections are treated
+          as new, so they are created — not silently skipped — when the user
+          imports into a specific target collection.
+        * **Org-only** (``org_id`` set, no ``collection_id``): items belonging
+          to the organisation are indexed.  Personal-vault entries don't shadow
+          an empty org vault.  Collection membership of existing items can be
+          updated via :meth:`update_item` (collection-aware dedup).
+        * **Personal vault** (both ``None``): all visible items are indexed.
+          Org-shared items visible to the user may produce false positives
+          (pre-existing limitation, intentionally asymmetric).
         """
         id_to_name: dict[str, str] = {
             fid: fname for fname, fid in self._folders.items()
         }
         index: dict[str | None, dict[str, BwItemResponse]] = {}
-        for item in self.list_items(organization_id=self._org_id):
+        for item in self.list_items(
+            organization_id=self._org_id,
+            collection_id=self._collection_id,
+        ):
             folder_id: str | None = item.get("folderId") or None
             folder_name = id_to_name.get(folder_id) if folder_id else None
             name: str = item.get("name", "")
