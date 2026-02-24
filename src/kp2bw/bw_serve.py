@@ -477,7 +477,7 @@ class BitwardenServeClient:
         data = self._request(
             "GET",
             "/list/object/org-collections",
-            params={"organizationid": self._org_id},
+            params={"organizationId": self._org_id},
         )
         colls: list[dict[str, Any]] = data.get("data", [])
         return {c["name"]: c["id"] for c in colls}
