@@ -8,6 +8,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Collection-blind dedup** -- Items already in the org but assigned to a
+  different collection were silently skipped even when `--bitwarden-collection`
+  targeted a new collection. The dedup path now detects this case and issues a
+  `PUT /object/item/{id}` to add the item to the missing collection instead of
+  skipping it.
+
+### Added
+
+- **Strict TypedDict transport layer** -- `bw_types.py` defines `BwItemCreate`,
+  `BwItemResponse`, `BwItemLogin`, `BwUri`, `BwField`, `BwFido2Credential`,
+  `BwFolder`, and `BwCollection`. All `dict[str, Any]` usage is eliminated from
+  `bw_serve.py` and `convert.py`; the generated `_bw_api_types.py` is the
+  canonical source for spec-derived shapes.
+
 ## [3.0.0a2] - 2026-02-24
 
 ### Fixed

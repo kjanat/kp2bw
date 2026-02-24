@@ -1,7 +1,5 @@
 """Bitwarden CLI serve process lifecycle and HTTP transport."""
 
-from __future__ import annotations
-
 import asyncio
 import atexit
 import logging
@@ -17,6 +15,7 @@ from typing import Any, Self
 import httpx
 
 from . import VERBOSE
+from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import BitwardenClientError
 
 logger = logging.getLogger(__name__)
@@ -74,7 +73,9 @@ class BitwardenServeClient:
     _previous_sigterm: Callable[[int, FrameType | None], Any] | int | None
     _previous_sigint: Callable[[int, FrameType | None], Any] | int | None
     _folders: dict[str, str]  # name → id cache
-    _existing_entries: dict[str | None, set[str]]  # folder_name → {item names}
+    _existing_entries: dict[
+        str | None, dict[str, BwItemResponse]
+    ]  # folder_name → {name → item}
     _collections: dict[str, str] | None  # name → id cache (None if no org)
     _org_id: str | None
     _closed: bool
@@ -348,7 +349,7 @@ class BitwardenServeClient:
     def list_folders(self) -> dict[str, str]:
         """Return ``{name: id}`` mapping of all vault folders."""
         data = self._request("GET", "/list/object/folders")
-        folders: list[dict[str, Any]] = data.get("data", [])
+        folders: list[BwFolder] = data.get("data", [])
         return {f["name"]: f["id"] for f in folders}
 
     def create_folder(self, name: str) -> str:
@@ -379,7 +380,7 @@ class BitwardenServeClient:
         *,
         folder_id: str | None = None,
         organization_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[BwItemResponse]:
         """Return vault items, optionally filtered by folder or organization ID."""
         params: dict[str, str] = {}
         if folder_id is not None:
@@ -387,19 +388,28 @@ class BitwardenServeClient:
         if organization_id is not None:
             params["organizationId"] = organization_id
         data = self._request("GET", "/list/object/items", params=params or None)
-        items: list[dict[str, Any]] = data.get("data", [])
+        items: list[BwItemResponse] = data.get("data", [])
         return items
 
-    def create_item(self, item: dict[str, Any]) -> str:
+    def create_item(self, item: BwItemCreate) -> str:
         """Create a single vault item via HTTP and return its ID."""
-        data = self._request("POST", "/object/item", json_body=item)
+        data = self._request("POST", "/object/item", json_body=item)  # type: ignore[arg-type]
         item_id: str = data["id"]
         logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
 
+    def update_item(self, item_id: str, item: BwItemResponse) -> None:
+        """Replace an existing vault item via ``PUT /object/item/{id}``.
+
+        The API requires the full object in the request body — partial updates
+        are not supported.
+        """
+        self._request("PUT", f"/object/item/{item_id}", json_body=item)  # type: ignore[arg-type]
+        logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+
     def create_items_batch(
         self,
-        entries: dict[str, tuple[str | None, dict[str, Any]]],
+        entries: dict[str, tuple[str | None, BwItemCreate]],
     ) -> dict[str, str]:
         """Create folders and items via HTTP, returning ``{key: item_id}``.
 
@@ -415,12 +425,11 @@ class BitwardenServeClient:
         key_to_id: dict[str, str] = {}
         total = len(entries)
         for idx, (key, (folder_name, bw_item)) in enumerate(entries.items(), 1):
-            # Bind folder ID.
-            item = dict(bw_item)  # shallow copy
-            if folder_name:
-                item["folderId"] = self._folders.get(folder_name)
-            else:
-                item["folderId"] = None
+            # Bind folder ID — create a new typed dict rather than mutating.
+            item: BwItemCreate = {
+                **bw_item,
+                "folderId": self._folders.get(folder_name) if folder_name else None,
+            }
             item_id = self.create_item(item)
             key_to_id[key] = item_id
 
@@ -433,8 +442,11 @@ class BitwardenServeClient:
     # Deduplication
     # ------------------------------------------------------------------
 
-    def _build_dedup_index(self) -> dict[str | None, set[str]]:
-        """Build a ``{folder_name: {item_names}}`` index for O(1) dedup.
+    def _build_dedup_index(self) -> dict[str | None, dict[str, BwItemResponse]]:
+        """Build a ``{folder_name: {item_name: item}}`` index for O(1) dedup.
+
+        Stores the full item response so callers can inspect ``collectionIds``
+        and call :meth:`update_item` without an extra GET.
 
         When an organization ID is configured, only items belonging to that
         organization are indexed so personal-vault entries don't shadow the
@@ -443,23 +455,23 @@ class BitwardenServeClient:
         id_to_name: dict[str, str] = {
             fid: fname for fname, fid in self._folders.items()
         }
-        items = self.list_items(organization_id=self._org_id)
-        index: dict[str | None, set[str]] = {}
-        for item in items:
+        index: dict[str | None, dict[str, BwItemResponse]] = {}
+        for item in self.list_items(organization_id=self._org_id):
             folder_id: str | None = item.get("folderId") or None
-            folder_name = id_to_name.get(folder_id, None) if folder_id else None
-            name = item.get("name")
-            if not isinstance(name, str) or not name:
+            folder_name = id_to_name.get(folder_id) if folder_id else None
+            name: str = item.get("name", "")
+            if not name:
                 continue
-            index.setdefault(folder_name, set()).add(name)
+            index.setdefault(folder_name, {})[name] = item
         return index
 
     def entry_exists(self, folder: str | None, name: str) -> bool:
         """Check whether an entry with *name* already exists in *folder*."""
-        names = self._existing_entries.get(folder)
-        if names is None:
-            return False
-        return name in names
+        return name in self._existing_entries.get(folder, {})
+
+    def get_existing_item(self, folder: str | None, name: str) -> BwItemResponse | None:
+        """Return the cached item response for *name* in *folder*, or ``None``."""
+        return self._existing_entries.get(folder, {}).get(name)
 
     def refresh_dedup_index(self) -> None:
         """Re-query the vault and rebuild the dedup index."""
@@ -479,7 +491,7 @@ class BitwardenServeClient:
             "/list/object/org-collections",
             params={"organizationId": self._org_id},
         )
-        colls: list[dict[str, Any]] = data.get("data", [])
+        colls: list[BwCollection] = data.get("data", [])
         return {c["name"]: c["id"] for c in colls}
 
     def create_org_collection(self, name: str) -> str | None:

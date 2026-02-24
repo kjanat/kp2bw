@@ -1,0 +1,3275 @@
+{
+	"openapi": "3.0.0",
+	"info": {
+		"description": "This schema documents the endpoints available to the Vault Management API, accessible from the Bitwarden CLI using the `bw serve` command ([learn more](https://bitwarden.com/help/cli/)). If you're looking for the **Organization Management** API, refer instead to [this document](https://bitwarden.com/help/api/).",
+		"version": "latest",
+		"title": "Vault Management API"
+	},
+	"paths": {
+		"/lock": {
+			"post": {
+				"tags": [
+					"Lock & Unlock"
+				],
+				"summary": "Lock your vault.",
+				"description": "Lock your vault. This action will destroy the session key required to authorize requests to most endpoints.",
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that your vault is locked.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/lockunlock.success"
+								},
+								"example": {
+									"success": true,
+									"data": {
+										"noColor": false,
+										"object": "message",
+										"title": "Your vault is locked.",
+										"message": null
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/unlock": {
+			"post": {
+				"tags": [
+					"Lock & Unlock"
+				],
+				"summary": "Unlock your vault.",
+				"description": "Unlock your vault. This action will create the session key required to authorize requests to most endpoints.",
+				"requestBody": {
+					"description": "The request body must contain an object containing your master password.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"password": {
+										"type": "string"
+									}
+								}
+							},
+							"example": {
+								"password": "myp@$$w0rd"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success will return confirmation that your vault is unlocked and a session key. You **do not** need to do anything with the session key to proceed.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/lockunlock.success"
+								},
+								"example": {
+									"success": true,
+									"data": {
+										"noColor": false,
+										"object": "message",
+										"title": "Your vault is now unlocked!",
+										"message": "To unlock your vault, set your session key to the `BW_SESSION` environment variable. ex:$ export BW_SESSION=\\\"vdXQ7mRYtcFXueH/Ml+ZgvK//V+0cTJpuAVddMwttNEvVHU6d6xaaRdYokv/9Jqw1uofMq82/B3y/MpV2Yh3Qg==\\\" or > $env:BW_SESSION=\\\"vdXQ7mRYtcFXueH/Ml+ZgvK//V+0cTJpuAVddMwttNEvVHU6d6xaaRdYokv/9Jqw1uofMq82/B3y/MpV2Yh3Qg==\\\". You can also pass the session key to any command with the `--session` option. ex:$ bw list items --session vdXQ7mRYtcFXueH/Ml+ZgvK//V+0cTJpuAVddMwttNEvVHU6d6xaaRdYokv/9Jqw1uofMq82/B3y/MpV2Yh3Qg==\"",
+										"raw": "vdXQ7mRYtcFXueH/Ml+ZgvK//V+0cTJpuAVddMwttNEvVHU6d6xaaRdYokv/9Jqw1uofMq82/B3y/MpV2Yh3Qg=="
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/item": {
+			"post": {
+				"tags": [
+					"Vault Items"
+				],
+				"summary": "Add a new item to your vault.",
+				"description": "Add a new login, card, secure note, or identity to your vault.",
+				"requestBody": {
+					"description": "The request body must contain an object representing the item to add to your Vault. Indicate [item type](https://bitwarden.com/help/cli/#item-types) with `\"type\":` and only provide data in the appropriate type's object (e.g. `\"login\":{}` or `\"identity\":{}`). See the **Examples** for help.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/item.template"
+							},
+							"examples": {
+								"login": {
+									"value": {
+										"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+										"collectionIds": [
+											"c4e31257-f3e1-4b13-895a-ae2700f9884e",
+											"fcdd8536-539a-422f-8507-af0001348815"
+										],
+										"folderId": null,
+										"type": 1,
+										"name": "Shared Twitter Account",
+										"notes": null,
+										"favorite": false,
+										"fields": [
+											{
+												"name": "Security Question",
+												"value": "Bitwarden Rules",
+												"type": 0
+											}
+										],
+										"login": {
+											"uris": [
+												{
+													"match": 0,
+													"uri": "https://twitter.com/login"
+												},
+												{
+													"match": 1,
+													"uri": "https://twitter.co.uk/login"
+												}
+											],
+											"username": "twitter@acmecorp.com",
+											"password": "b@dP@$$word",
+											"totp": null
+										},
+										"reprompt": 0
+									}
+								},
+								"secureNote": {
+									"value": {
+										"organizationId": null,
+										"collectionIds": null,
+										"folderId": "1f8c544a-a33b-46d9-af7c-ae2800f4a9c8",
+										"type": 2,
+										"name": "Steps to World Domination",
+										"notes": "1) Use Bitwarden, 2) Profit",
+										"favorite": false,
+										"fields": [],
+										"secureNote": {
+											"type": 0
+										},
+										"reprompt": 0
+									}
+								},
+								"card": {
+									"value": {
+										"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+										"collectionIds": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+										"folderId": null,
+										"type": 3,
+										"name": "Company Credit Card",
+										"notes": null,
+										"favorite": true,
+										"fields": [],
+										"card": {
+											"cardholderName": "John Doe",
+											"brand": "visa",
+											"number": "4242424242424242",
+											"expMonth": "04",
+											"expYear": "2023",
+											"code": "123"
+										},
+										"reprompt": 0
+									}
+								},
+								"identity": {
+									"value": {
+										"organizationId": null,
+										"collectionIds": null,
+										"folderId": "1f8c544a-a33b-46d9-af7c-ae2800f4a9c8",
+										"type": 4,
+										"name": "My Mailing Address",
+										"notes": "Please don't send me mail.",
+										"favorite": false,
+										"fields": [],
+										"identity": {
+											"title": "Mr",
+											"firstName": "John",
+											"middleName": "William",
+											"lastName": "Doe",
+											"address1": "123 Any St",
+											"address2": "Apt 123",
+											"address3": null,
+											"city": "New York",
+											"state": "NY",
+											"postalCode": "10001",
+											"country": "US",
+											"company": "Acme Inc.",
+											"email": "john@company.com",
+											"phone": "5555551234",
+											"ssn": "000-123-4567",
+											"username": "jdoe",
+											"passportNumber": "US-123456789",
+											"licenseNumber": "D123-12-123-12333"
+										},
+										"reprompt": 0
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the created item in the `\"data\":{}` property.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": [],
+									"revisionDate": "2022-03-07T20:13:51.536Z",
+									"deleteDate": null
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/item/{id}": {
+			"put": {
+				"tags": [
+					"Vault Items"
+				],
+				"summary": "Edit an item in your Vault.",
+				"description": "Edit an existing login, card, secure note, or identity in your Vault by specifying a unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path and the new object contents in the request body.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to edit.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"requestBody": {
+					"description": "The request body must contain an object representing the edits to make to the item.<br><br>**Include the full object in the request body**, not just the properties to edit, as the new object will replace the pre-existing object.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/item.template"
+							},
+							"examples": {
+								"login": {
+									"value": {
+										"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+										"collectionIds": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+										"folderId": null,
+										"type": 1,
+										"name": "Shared Twitter Account",
+										"notes": null,
+										"favorite": false,
+										"fields": [
+											{
+												"name": "Security Question",
+												"value": "Bitwarden Rules",
+												"type": 0
+											}
+										],
+										"login": {
+											"uris": [
+												{
+													"match": 0,
+													"uri": "https://twitter.com/login"
+												}
+											],
+											"username": "twitter@acmecorp.com",
+											"password": "b@dP@$$word",
+											"totp": null
+										},
+										"reprompt": 0
+									}
+								},
+								"secureNote": {
+									"value": {
+										"organizationId": null,
+										"collectionIds": null,
+										"folderId": "1f8c544a-a33b-46d9-af7c-ae2800f4a9c8",
+										"type": 2,
+										"name": "Steps to World Domination",
+										"notes": "1) Use Bitwarden, 2) Profit",
+										"favorite": false,
+										"fields": [],
+										"secureNote": {
+											"type": 0
+										},
+										"reprompt": 0
+									}
+								},
+								"card": {
+									"value": {
+										"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+										"collectionIds": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+										"folderId": null,
+										"type": 3,
+										"name": "Company Credit Card",
+										"notes": null,
+										"favorite": true,
+										"fields": [],
+										"card": {
+											"cardholderName": "John Doe",
+											"brand": "visa",
+											"number": "4242424242424242",
+											"expMonth": "04",
+											"expYear": "2023",
+											"code": "123"
+										},
+										"reprompt": 1
+									}
+								},
+								"identity": {
+									"value": {
+										"organizationId": null,
+										"collectionIds": null,
+										"folderId": "1f8c544a-a33b-46d9-af7c-ae2800f4a9c8",
+										"type": 4,
+										"name": "My Mailing Address",
+										"notes": "Please don't send me mail.",
+										"favorite": false,
+										"fields": [],
+										"identity": {
+											"title": "Mr",
+											"firstName": "John",
+											"middleName": "William",
+											"lastName": "Doe",
+											"address1": "123 Any St",
+											"address2": "Apt 123",
+											"address3": null,
+											"city": "New York",
+											"state": "NY",
+											"postalCode": "10001",
+											"country": "US",
+											"company": "Acme Inc.",
+											"email": "john@company.com",
+											"phone": "5555551234",
+											"ssn": "000-123-4567",
+											"username": "jdoe",
+											"passportNumber": "US-123456789",
+											"licenseNumber": "D123-12-123-12333"
+										},
+										"reprompt": 0
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the edited item in the `\"data\":{}` property.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": [],
+									"revisionDate": "2022-03-07T20:13:51.536Z",
+									"deleteDate": null
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			},
+			"get": {
+				"tags": [
+					"Vault Items"
+				],
+				"summary": "Retrieve an item from your vault.",
+				"description": "Retrieve an existing item from your vault by specifying a unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to retrieve.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the retrieved item in the `\"data\":{}` property.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": [],
+									"revisionDate": "2022-03-07T20:13:51.536Z",
+									"deleteDate": null
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			},
+			"delete": {
+				"tags": [
+					"Vault Items"
+				],
+				"summary": "Delete an item from your vault.",
+				"description": "Delete an existing item from your vault by specifying the unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to delete.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that the item was sent to the trash.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/restore/item/{id}": {
+			"post": {
+				"tags": [
+					"Vault Items"
+				],
+				"summary": "Restore a deleted item.",
+				"description": "Restore an item that was sent to the trash by specifying the unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to restore.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that the item was restored.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/list/object/items": {
+			"get": {
+				"tags": [
+					"Vault Items"
+				],
+				"summary": "Retrieve a list of items in your vault.",
+				"description": "Retrieve a list of existing items in your vault. By default, this will return a list of all existing items in your vault, however you can specify filters or search terms as query parameters to narrow list results.<br><br>Using multiple filters will perform a logical `OR` operation. Using filters **and** search terms will perform a logical `AND` operation.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "query",
+						"description": "List all items with this unique Organization identifier.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "collectionId",
+						"in": "query",
+						"description": "List all items with this unique collection identifier.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "folderid",
+						"in": "query",
+						"description": "List all items with this unique folder identifier.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "url",
+						"in": "query",
+						"description": "List all items with this URL/URI value.",
+						"schema": {
+							"type": "string",
+							"format": "url"
+						}
+					},
+					{
+						"name": "trash",
+						"in": "query",
+						"description": "List all items in the trash. This query parameter is not a true boolean, in that `?trash`, `?trash=true`, and `?trash=false` will all be interpretted as a request to list items in the trash.",
+						"schema": {
+							"type": "boolean"
+						}
+					},
+					{
+						"name": "search",
+						"in": "query",
+						"description": "List all items that contain this search term in its name, username, or URI.",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an array (in `\"data\":[]`) of matching vault items as objects. If no items are found, an empty array is returned.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "list",
+										"data": []
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/attachment": {
+			"post": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Attach a file to an existing vault item.",
+				"description": "Attach a file to an existing vault item by specifying a the vault item's identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) as a query parameter and the file in the request body.",
+				"parameters": [
+					{
+						"name": "itemid",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the item to attach a file to.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"description": "The request body must contain the file to attach as form-data.",
+					"content": {
+						"multipart/form-data": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"file": {
+										"type": "string",
+										"format": "binary"
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns the item object with new objects in an `\"attachments\":[]` array.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "item",
+										"id": "ba624b21-1c8a-43b3-a713-ae0000eabdec",
+										"organizationId": null,
+										"folderId": null,
+										"type": 2,
+										"reprompt": 0,
+										"name": "My Secure Note",
+										"notes": "My Secret Information",
+										"favorite": false,
+										"secureNote": {
+											"type": 0
+										},
+										"collectionIdss": [],
+										"attachments": [
+											{
+												"id": "o4lrz575u84koanvu9f5gqv9a9ab92gf",
+												"fileName": "my_file.pdf",
+												"size": "150193",
+												"sizeName": "146.67 KB",
+												"url": "https://cdn.bitwarden.net/attachments/ba624b21-1c8a-43b3-a713-ae0000eabdec/o4lrz575u84koanvu9f5gqv9a9ab92gf"
+											}
+										],
+										"revisionDate": "2021-12-16T14:14:40.138Z",
+										"deletedDate": null
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/attachment/{id}": {
+			"get": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Retrieve an attachment.",
+				"description": "Retreive an attachment by specifying the attachment id (e.g. `o4lrz575u84koanvu9f5gqv9a9ab92gf`) in the path and item id (e.g. `ba624b21-1c8a-43b3-a713-ae0000eabdec`) as a query parameter.<br><br>If you're retrieving any file type other than plaintext, we recommend posting the request through a browser window for immediate download.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the attachment.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "itemid",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the item the file is attached to.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns the attached file."
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			},
+			"delete": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Delete an attachment.",
+				"description": "Delete an attachment by specifying the attachment id (e.g. `o4lrz575u84koanvu9f5gqv9a9ab92gf`) in the path and item id (e.g. `ba624b21-1c8a-43b3-a713-ae0000eabdec`) as a query parameter.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the attachment.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "itemid",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the item the file is attached to.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that the attachment was deleted.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/username/{id}": {
+			"get": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Retrieve the username of a login item.",
+				"description": "Retrieve the username of a login item by specifying the item's unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing username of the item.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "my_username"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/password/{id}": {
+			"get": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Retrieve the password of a login item.",
+				"description": "Retrieve the password of a login item by specifying the item's unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing password of the item.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "p@$$w0rD"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/uri/{id}": {
+			"get": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Retrieve the URI of a login item.",
+				"description": "Retrieve the URI of a login item by specifying the item's unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the first URI for the item.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "https://google.com"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/totp/{id}": {
+			"get": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Retrieve the TOTP code of a login item.",
+				"description": "Retrieve the TOTP code of a login item by specifying the item's unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the current TOTP code for the item.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "836471"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/notes/{id}": {
+			"get": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Retrieve the notes of an item.",
+				"description": "Retrieve the notes of an item by specifying the item's unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the notes for the item.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "This is note text."
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/exposed/{id}": {
+			"get": {
+				"tags": [
+					"Attachments & Fields"
+				],
+				"summary": "Retrieve the number of times a password has been exposed for a login item.",
+				"description": "Retrieve the number of times a password has been exposed for a login item by specifying the item's unique object identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the number of times the item's password has been exposed.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "12"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/folder": {
+			"post": {
+				"tags": [
+					"Folders"
+				],
+				"summary": "Add a folder to your vault.",
+				"description": "Add a folder to your vault.",
+				"requestBody": {
+					"description": "The request body must contain an object representing the name for the folder to add.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/folder"
+							},
+							"example": {
+								"name": "My Folder of Items"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing a generated folder `\"id\":` and its `\"name\":`.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "folder",
+										"id": "a0663107-6e57-401f-9e22-ae51015bb2cf",
+										"name": "My Folder"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/folder/{id}": {
+			"put": {
+				"tags": [
+					"Folders"
+				],
+				"summary": "Edit a folder in your vault.",
+				"description": "Edit an existing folder in your vault by specifying the unique folder identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path and the new folder `\"name\":` in the request body.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to edit.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/folder"
+							},
+							"example": {
+								"name": "My Folder's New Name"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the folder's pre-existing `\"id\":` and its new `\"name\":`.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "folder",
+										"id": "3a84be8d-12e7-4223-98cd-ae0000eabdec",
+										"name": "My Folder's New Name"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			},
+			"get": {
+				"tags": [
+					"Folders"
+				],
+				"summary": "Retrieve a folder from your vault.",
+				"description": "Retrieve an existing folder from your vault by specifying the unique folder identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to retrieve.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the folder's `\"id\":` and `\"name\":`.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "folder",
+										"id": "3a84be8d-12e7-4223-98cd-ae0000eabdec",
+										"name": "My Folder"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			},
+			"delete": {
+				"tags": [
+					"Folders"
+				],
+				"summary": "Delete a folder from your vault.",
+				"description": "Delete an existing folder from your vault by specifying the unique folder identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path.<br><br>Deleting a folder **will not** delete the items in it.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to retrieve.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that the folder was deleted.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/list/object/folders": {
+			"get": {
+				"tags": [
+					"Folders"
+				],
+				"summary": "Retrieve a list of folders in your vault.",
+				"description": "Retrieve a list of folders in your vault. By default, this will return a list of all folders, however you can specify search terms as query parameters to narrow list results.",
+				"parameters": [
+					{
+						"name": "search",
+						"in": "query",
+						"description": "List all folders that contain this search term.",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an array (in `\"data\":[]`) of matching folders as objects. If no folders are found, an empty array is returned.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "list",
+										"data": []
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/send": {
+			"post": {
+				"tags": [
+					"Send"
+				],
+				"summary": "Create a Send.",
+				"description": "Create a Send.<br><br>**Only Text Sends are supported.**",
+				"requestBody": {
+					"description": "The request body must contain an object representing the Send to create. Use `\"type\":0` to indicate text and provide the `\"text\":{}` object.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/send.template"
+							},
+							"example": {
+								"name": "My Text Send",
+								"notes": "Notes for the text send.",
+								"type": 0,
+								"text": {
+									"text": "Secret Information",
+									"hidden": true
+								},
+								"file": null,
+								"maxAccessCount": 3,
+								"deletionDate": "2022-03-21T19:06:53.810Z",
+								"expirationDate": "2022-03-21T19:06:53.810Z",
+								"password": "P@ssw0Rd",
+								"disabled": false,
+								"hideEmail": true
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the created Send in the `\"data\":{}` property.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "send",
+										"id": "5613b070-aac5-45ac-89fe-ae52010750f6",
+										"accessId": "cLATVsWqrEWJ_q5SAQdQ9g",
+										"accessUrl": "https://vault.bitwarden.com/#/send/cLATVsWqrEWJ_q5SAQdQ9g/VNFbJhZVRtLsfVL2pTOr-A",
+										"name": "My Text Send",
+										"notes": "Notes for this send.",
+										"key": "VNFbJhZVRtLsfVL2pTOr+A==",
+										"type": 1,
+										"maxAccessCount": 3,
+										"accessCount": 0,
+										"revisionDate": "2022-03-08T15:58:42.136Z",
+										"deletionDate": "2022-03-21T19:06:53.810Z",
+										"expirationDate": "2022-03-21T19:06:53.810Z",
+										"passwordSet": true,
+										"disabled": false,
+										"hideEmail": true,
+										"text": {
+											"text": "Secret Information",
+											"hidden": true
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/send/{id}": {
+			"put": {
+				"tags": [
+					"Send"
+				],
+				"summary": "Edit a Send.",
+				"description": "Edit an existing Send by specifying the unique object identifier (e.g. `e813e187-70e3-4feb-950a-ae52010c4b56`) in the path and the new object contents in the request body.<br><br> **Only Text Sends are supported.**",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Send to edit.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"requestBody": {
+					"description": "The request body must contain an object representing the edits to make to the Send.<br><br>**Include the full object in the request body**, not just the properties to edit, as the new object will replace the pre-existing Send object.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/send.template"
+							},
+							"example": {
+								"name": "My Text Send",
+								"notes": "Notes for the text send.",
+								"type": 0,
+								"text": {
+									"text": "Secret Information",
+									"hidden": true
+								},
+								"file": null,
+								"maxAccessCount": 3,
+								"deletionDate": "2022-03-21T19:06:53.810Z",
+								"expirationDate": "2022-03-21T19:06:53.810Z",
+								"password": "P@ssw0Rd",
+								"disabled": false,
+								"hideEmail": true
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the edited Send in the `\"data\":{}` property.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "send",
+										"id": "5613b070-aac5-45ac-89fe-ae52010750f6",
+										"accessId": "cLATVsWqrEWJ_q5SAQdQ9g",
+										"accessUrl": "https://vault.bitwarden.com/#/send/cLATVsWqrEWJ_q5SAQdQ9g/VNFbJhZVRtLsfVL2pTOr-A",
+										"name": "My Text Send",
+										"notes": "Notes for this send.",
+										"key": "VNFbJhZVRtLsfVL2pTOr+A==",
+										"type": 1,
+										"maxAccessCount": 3,
+										"accessCount": 0,
+										"revisionDate": "2022-03-08T15:58:42.136Z",
+										"deletionDate": "2022-03-21T19:06:53.810Z",
+										"expirationDate": "2022-03-21T19:06:53.810Z",
+										"passwordSet": true,
+										"disabled": false,
+										"hideEmail": true,
+										"text": {
+											"text": "Secret Information",
+											"hidden": true
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			},
+			"get": {
+				"tags": [
+					"Send"
+				],
+				"summary": "Retrieve a Send.",
+				"description": "Retrieve a Send by specifying the unique object identifier (e.g. `e813e187-70e3-4feb-950a-ae52010c4b56`) in the path.<br><br>**Only Text Sends are supported.**",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Send to retrieve.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the retrieved Send in the `\"data\":{}` property.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "send",
+										"id": "5613b070-aac5-45ac-89fe-ae52010750f6",
+										"accessId": "cLATVsWqrEWJ_q5SAQdQ9g",
+										"accessUrl": "https://vault.bitwarden.com/#/send/cLATVsWqrEWJ_q5SAQdQ9g/VNFbJhZVRtLsfVL2pTOr-A",
+										"name": "My Text Send",
+										"notes": "Notes for this send.",
+										"key": "VNFbJhZVRtLsfVL2pTOr+A==",
+										"type": 1,
+										"maxAccessCount": 3,
+										"accessCount": 0,
+										"revisionDate": "2022-03-08T15:58:42.136Z",
+										"deletionDate": "2022-03-21T19:06:53.810Z",
+										"expirationDate": "2022-03-21T19:06:53.810Z",
+										"passwordSet": true,
+										"disabled": false,
+										"hideEmail": true,
+										"text": {
+											"text": "Secret Information",
+											"hidden": true
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			},
+			"delete": {
+				"tags": [
+					"Send"
+				],
+				"summary": "Delete a Send.",
+				"description": "Delete an existing Send by specifying the unique object identifier (e.g. `e813e187-70e3-4feb-950a-ae52010c4b56`) in the path.<br><br>**Only Text Sends are supported.**",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Send to delete.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that the Send was deleted.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/list/object/send": {
+			"get": {
+				"tags": [
+					"Send"
+				],
+				"summary": "Retrieve a list of Sends.",
+				"description": "Retrieve a list of Sends. By default, this will return a list of all Send objects, however you can specify search terms as query parameters to narrow list results.<br><br>**Only Text Sends are supported.**",
+				"parameters": [
+					{
+						"name": "search",
+						"in": "query",
+						"description": "List all Sends that contain this search term.",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an array (in `\"data\":[]`) of matching Sends as objects. If no Sends are found, an empty array is returned.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "list",
+										"data": []
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/send/{id}/remove-password": {
+			"post": {
+				"tags": [
+					"Send"
+				],
+				"summary": "Remove the password from a Send.",
+				"description": "Remove the password from a Send.<br><br>**Only Text Sends are supported.**",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Send.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the Send with `\"passwordSet\":\"false\"` inside the object.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "send",
+										"id": "5613b070-aac5-45ac-89fe-ae52010750f6",
+										"accessId": "cLATVsWqrEWJ_q5SAQdQ9g",
+										"accessUrl": "https://vault.bitwarden.com/#/send/cLATVsWqrEWJ_q5SAQdQ9g/VNFbJhZVRtLsfVL2pTOr-A",
+										"name": "My Text Send",
+										"notes": "Notes for this send.",
+										"key": "VNFbJhZVRtLsfVL2pTOr+A==",
+										"type": 1,
+										"maxAccessCount": 3,
+										"accessCount": 0,
+										"revisionDate": "2022-03-08T15:58:42.136Z",
+										"deletionDate": "2022-03-21T19:06:53.810Z",
+										"expirationDate": "2022-03-21T19:06:53.810Z",
+										"passwordSet": false,
+										"disabled": false,
+										"hideEmail": true,
+										"text": {
+											"text": "Secret Information",
+											"hidden": true
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/move/{itemid}/{organizationId}": {
+			"post": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "Move an item to a Collection.",
+				"description": "Move an item to a Collection by specifying an `itemid` and `organizationId` in the path, and specifying one or more Collection identifiers in the request body.",
+				"parameters": [
+					{
+						"name": "itemid",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the item to move.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "organizationId",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Organization to move the item to.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"requestBody": {
+					"description": "The request body must contain an array of one or more Collection identifiers.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"properties": {
+									"array": {
+										"type": "array"
+									}
+								}
+							},
+							"example": [
+								"75bb2724-abed-4f1f-aa4a-ae530106c958",
+								"b64d6e40-adf2-4f46-b4d2-acd40147548a"
+							]
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the moved item with the specified Collections added to `\"collectionIdss\":[]`.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "item",
+										"id": "88aed7f0-0378-4c68-b415-ae5101519054",
+										"organizationId": "1f1d79f5-992f-42b1-abfd-acd40147547a",
+										"folderId": null,
+										"type": 1,
+										"reprompt": 0,
+										"name": "My Shared Login",
+										"notes": null,
+										"favorite": false,
+										"login": {
+											"uris": [],
+											"username": "my_username",
+											"password": "my_password",
+											"totp": null,
+											"passwordRevisionDate": "2022-03-07T20:36:30.103Z"
+										},
+										"collectionIdss": [
+											"75bb2724-abed-4f1f-aa4a-ae530106c958",
+											"b64d6e40-adf2-4f46-b4d2-acd40147548a"
+										],
+										"revisionDate": "2022-03-09T17:02:29.853Z",
+										"deletedDate": null,
+										"passwordHistory": [
+											{
+												"lastUsedDate": "2022-03-07T20.36.30.103Z",
+												"password": "my_password"
+											}
+										]
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/org-collection": {
+			"post": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "Create a Collection for a specified Organization.",
+				"description": "Create a collection for a specified Organization by specifying a unique Organization identifier as a query parameter and Collection information in the request body, including its `\"name\":` and an array of `\"groups\":` to add it to.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"requestBody": {
+					"description": "The request body must contain an object representing the Collection to add. Specifying `\"groups\":` is optional.",
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/collection"
+							},
+							"example": {
+								"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+								"name": "Shared Logins",
+								"externalid": null,
+								"groups": [
+									{
+										"id": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+										"readOnly": false,
+										"hidePasswords": false
+									}
+								]
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the created Collection.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "org-collection",
+										"id": "da245883-ae20-41c6-b719-ae520141c840",
+										"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+										"name": "Shared Logins",
+										"externalId": null,
+										"groups": [
+											{
+												"id": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+												"readOnly": false,
+												"hidePasswords": false
+											}
+										]
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/org-collection/{id}": {
+			"put": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "Edit a Collection in a specified Organization.",
+				"description": "Edit an existing Collection in a specified Organization by specifying the unique collection identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path, an Organization identifier as a query parameter, and Collection information in the request body.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Collection.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "organizationId",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"requestBody": {
+					"description": "The request body must contain an object representing the Collection to edit. Specifying `\"groups\":` is optional.",
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/collection"
+							},
+							"example": {
+								"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+								"name": "Shared Logins",
+								"externalid": null,
+								"groups": [
+									{
+										"id": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+										"readOnly": false,
+										"hidePasswords": false
+									}
+								]
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success returns an object representing the edited Collection.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "org-collection",
+										"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+										"name": "Shared Credentials",
+										"externalId": null,
+										"groups": [
+											{
+												"id": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+												"readOnly": false,
+												"hidePasswords": false
+											}
+										]
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Request."
+					}
+				}
+			},
+			"get": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "Retrieve a Collection from a specified Organization.",
+				"description": "Retrieve an existing collection from a specified Organization by specifying the unique Collection identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path and an Organization identifier as a query parameter .",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Collection.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "organizationId",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns a JSON object representing the retrieved Collection in the `\"data\":` property.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "org-collection",
+										"organizationId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+										"name": "Shared Credentials",
+										"externalId": null,
+										"groups": [
+											{
+												"id": "c4e31257-f3e1-4b13-895a-ae2700f9884e",
+												"readOnly": false,
+												"hidePasswords": false
+											}
+										]
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Request."
+					}
+				}
+			},
+			"delete": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "Delete a Collection from a specified Organization.",
+				"description": "Delete an existing Collection from a specified Organization by specifying the unique Collection identifier (e.g. `3a84be8d-12e7-4223-98cd-ae0000eabdec`) in the path and an Organization identifier as a query parameter.<br><br>Deleting a Collection **will not** delete the items in it.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "Unique identifier of the Collection.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "organizationId",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that the Collection was deleted.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/list/object/org-collections": {
+			"get": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "List Collections from a specified Organization.",
+				"description": "List existing Collections from a specified Organization by specifying an Organization idenfitier as a query parameter. Collections you do not have access to will not be listed.<br><br>By default, this will return a list of all Collections, however you can specify search terms as additional query parameters to narrow list results.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "search",
+						"in": "query",
+						"description": "List only Collections that contain this search term.",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an array (in `\"data\":`) of matching Collections as objects. If no Collections are found, an empty array is returned.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "list",
+										"data": []
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/list/object/collections": {
+			"get": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "List Collections from all member Organizations.",
+				"description": "List Collections from all Organizations of which you are a member. Collections you do not have access to will not be listed.<br><br>By default, this will return a list of all Collections, however you can specify search terms as query parameters to narrow list results.",
+				"parameters": [
+					{
+						"name": "search",
+						"in": "query",
+						"description": "List only Collections that contain this search term.",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an array (in `\"data\":`) of Collections as objects. If no Collections are found, an empty array is returned.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "list",
+										"data": []
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/list/object/organizations": {
+			"get": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "List Organizations of which you are a member.",
+				"description": "List Organizations of which you are a member. By default, this will return a list of all Organizations, however you can specify search terms as query parameters to narrow list results.",
+				"parameters": [
+					{
+						"name": "search",
+						"in": "query",
+						"description": "List only Organizations that contain this search term.",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an array (in `\"data\":`) of Organizations as objects. If no Collections are found, an empty array is returned.",
+						"content": {
+							"applcation/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "list",
+										"data": []
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/list/object/org-members": {
+			"get": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "List members of a specified Organization.",
+				"description": "List members of a specified Organization by specifying an Organization identifier as a query parameter.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "query",
+						"required": true,
+						"description": "Unique identifier of the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an array of users that are members of the specified Organization. If no users are found, an empty array is returned.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "list",
+										"data": [
+											{
+												"object": "org-member",
+												"email": "user@email.com",
+												"name": "John Doe",
+												"id": "94833c6a-9078-4516-ba3c-acd40147547c",
+												"status": 2,
+												"type": 0,
+												"twoFactorEnabled": true
+											},
+											[]
+										]
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/confirm/org-member/{id}": {
+			"post": {
+				"tags": [
+					"Collections & Organizations"
+				],
+				"summary": "Confirm a member to a specified Organization.",
+				"description": "Confirm a member to a specified Organization by specifying a user identifier (e.g. `6b39c966-c776-4ba9-9489-ae320149af01`) in the path and the Organization identifier (e.g. `b64d6e40-adf2-4f46-b4d2-acd40147548a`) as a query parameter.",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the user to confirm.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "organizationId",
+						"in": "query",
+						"required": true,
+						"description": "A unique identifier for the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns confirmation that the user is confirmed to the Organization.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/device-approval/{organizationId}": {
+			"get": {
+				"tags": [
+					"Trusted Device Approval"
+				],
+				"summary": "Retrieve a list of pending device approval requests.",
+				"description": "Retrieve a list of pending device approval requests by specifying an `organizationId` in the path.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success lists pending device approval requests.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/deviceapprovallist"
+								},
+								"example": {
+									"id": "ba624b21-1c8a-43b3-a713-ae0000eabdec",
+									"userId": "3a84be8d-12e7-4223-98cd-ae0000eabdec",
+									"organizationUserId": "3c89a31d-f1cc-4673-8d5a-ae2700f9860d",
+									"email": "orguser@bitwarden.com",
+									"requestDeviceIdentifier": "75bb2724-abed-4f1f-aa4a-ae530106c958",
+									"requestDeviceType": "Chrome",
+									"requestIpAddress": "130.6.255.219",
+									"creationDate": "2024-06-09T17:52:10.775Z"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/device-approval/{organizationId}/approve/{request-id}}": {
+			"post": {
+				"tags": [
+					"Trusted Device Approval"
+				],
+				"summary": "Approve a specific device approval request.",
+				"description": "Approve a specific device approval request ([learn more](https://bitwarden.com/help/approve-a-trusted-device/)) by specifying an `organizationId` and specific `request-id` in the path.<br><br>Request identifiers can be retrieved using `GET /device-approval/{organizationId}`.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "request-id",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the device approval request.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/device-approval/{organizationId}/approve-all": {
+			"post": {
+				"tags": [
+					"Trusted Device Approval"
+				],
+				"summary": "Approve all pending device approval requests.",
+				"description": "Approve all pending device approval requests ([learn more](https://bitwarden.com/help/approve-a-trusted-device/)) by specifying an `organizationId` in the path.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/device-approval/{organizationId}/deny/{request-id}": {
+			"post": {
+				"tags": [
+					"Trusted Device Approval"
+				],
+				"summary": "Deny a specific device approval request.",
+				"description": "Deny a specific device approval request [learn more](https://bitwarden.com/help/approve-a-trusted-device/)) by specifying an `organizationId` and specific `request-id` in the path.<br><br>Request identifiers can be retrieved using `GET /device-approval/{organizationId}`.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					{
+						"name": "request-id",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the device approval request.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/device-approval/{organizationId}/deny-all": {
+			"post": {
+				"tags": [
+					"Trusted Device Approval"
+				],
+				"summary": "Deny all pending device approval requests.",
+				"description": "Deny all pending device approval requests ([learn more](https://bitwarden.com/help/approve-a-trusted-device/)) by specifying an `organizationId` in the path.",
+				"parameters": [
+					{
+						"name": "organizationId",
+						"in": "path",
+						"required": true,
+						"description": "A unique identifier for the Organization.",
+						"schema": {
+							"type": "string",
+							"format": "uuid"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/sync": {
+			"post": {
+				"tags": [
+					"Miscellaneous"
+				],
+				"summary": "Sync your vault.",
+				"description": "Sync your vault.",
+				"responses": {
+					"200": {
+						"description": "Success returns an object confirming successful sync.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"noColor": false,
+										"object": "message",
+										"title": "Syncing complete.",
+										"message": null
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/status": {
+			"get": {
+				"tags": [
+					"Miscellaneous"
+				],
+				"summary": "Get the status of the Bitwarden CLI.",
+				"description": "Get the current `serverURL`, `lastSync`, `userEmail`, `userID`, and `status` of your Bitwarden CLI client.",
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing status information about your Bitwarden CLI client.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/status"
+								},
+								"example": {
+									"success": true,
+									"data": {
+										"object": "template",
+										"template": {
+											"serverUrl": "https://vault.bitwarden.com",
+											"lastSync": "2022-03-09T17:52:10.775Z",
+											"userEmail": "user@bitwarden.com",
+											"userId": "b6a7d36a-3550-4ed9-865a-ade300f0d066",
+											"status": "unlocked"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/generate": {
+			"get": {
+				"tags": [
+					"Miscellaneous"
+				],
+				"summary": "Generate a password or passphrase.",
+				"description": "Generate a password or passphrase. By default, `/generate` will generate a 14-character password with uppercase characters, lowercase characters, and numbers.",
+				"parameters": [
+					{
+						"name": "length",
+						"in": "query",
+						"description": "Number of characters in the **password**.",
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "uppercase",
+						"in": "query",
+						"description": "Include uppercase characters in the **password**.",
+						"schema": {
+							"type": "boolean"
+						}
+					},
+					{
+						"name": "lowercase",
+						"in": "query",
+						"description": "Include lowercase characters in the **password**.",
+						"schema": {
+							"type": "boolean"
+						}
+					},
+					{
+						"name": "number",
+						"in": "query",
+						"description": "Include numbers in the **password**.",
+						"schema": {
+							"type": "boolean"
+						}
+					},
+					{
+						"name": "special",
+						"in": "query",
+						"description": "Include special characters in the **password**.",
+						"schema": {
+							"type": "boolean"
+						}
+					},
+					{
+						"name": "passphrase",
+						"in": "query",
+						"description": "Generate passphrase (by default, `/generate` will generate a password).",
+						"schema": {
+							"type": "boolean"
+						}
+					},
+					{
+						"name": "words",
+						"in": "query",
+						"description": "Number of words in the **passphrase**.",
+						"schema": {
+							"type": "integer"
+						}
+					},
+					{
+						"name": "separator",
+						"in": "query",
+						"description": "Separator character in the **passphrase**.",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "capitalize",
+						"in": "query",
+						"description": "Title-case the **passphrase**.",
+						"schema": {
+							"type": "boolean"
+						}
+					},
+					{
+						"name": "includeNumber",
+						"in": "query",
+						"description": "Include numbers in the **passphrase**.",
+						"schema": {
+							"type": "boolean"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the generated password or passphrase.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "tJCxG4TABk3P9M"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/template/{type}": {
+			"get": {
+				"tags": [
+					"Miscellaneous"
+				],
+				"summary": "Retrieve a JSON template for any object.",
+				"description": "Retreive a JSON template for any object, including vault items, sends, folders, and more. Templates can be used to guide you in creation of new objects.",
+				"parameters": [
+					{
+						"name": "type",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"enum": [
+								"item",
+								"item.field",
+								"item.login",
+								"item.login.uri",
+								"item.card",
+								"item.identity",
+								"item.securenote",
+								"folder",
+								"collection",
+								"item-collections",
+								"org-collection"
+							]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing the template for the specified type.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "template",
+										"template": {
+											"uris": [],
+											"username": "jdoe",
+											"password": "myp@ssword123",
+											"totp": "JBSWY3DPEHPK3PXP"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		},
+		"/object/fingerprint/me": {
+			"get": {
+				"tags": [
+					"Miscellaneous"
+				],
+				"summary": "Retrieve your fingerprint phrase.",
+				"description": "Retrieve your fingerprint phrase.",
+				"responses": {
+					"200": {
+						"description": "Success returns an object containing your account fingerprint phrase.",
+						"content": {
+							"application/json": {
+								"example": {
+									"success": true,
+									"data": {
+										"object": "string",
+										"data": "magician-fruit-justify-tactfulness-cornflake"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request."
+					},
+					"404": {
+						"description": "Not Found."
+					},
+					"500": {
+						"description": "Internal Server Error."
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"item.template": {
+				"properties": {
+					"organizationId": {
+						"type": "string",
+						"format": "uuid"
+					},
+					"collectionIds": {
+						"type": "array",
+						"items": {
+							"type": "string",
+							"format": "uuid"
+						}
+					},
+					"folderId": {
+						"type": "string",
+						"format": "uuid"
+					},
+					"type": {
+						"type": "integer",
+						"enum": [
+							1,
+							2,
+							3,
+							4
+						]
+					},
+					"name": {
+						"type": "string"
+					},
+					"notes": {
+						"type": "string"
+					},
+					"favorite": {
+						"type": "boolean"
+					},
+					"fields": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/field"
+						}
+					},
+					"login": {
+						"$ref": "#/components/schemas/item.login"
+					},
+					"secureNote": {
+						"$ref": "#/components/schemas/item.secureNote"
+					},
+					"card": {
+						"$ref": "#/components/schemas/item.card"
+					},
+					"identity": {
+						"$ref": "#/components/schemas/item.identity"
+					},
+					"reprompt": {
+						"type": "integer",
+						"enum": [
+							0,
+							1
+						]
+					}
+				}
+			},
+			"item.login": {
+				"properties": {
+					"uris": {
+						"$ref": "#/components/schemas/uris"
+					},
+					"username": {
+						"type": "string"
+					},
+					"password": {
+						"type": "string"
+					},
+					"totp": {
+						"type": "string"
+					}
+				}
+			},
+			"item.secureNote": {
+				"properties": {
+					"type": {
+						"type": "integer",
+						"enum": [
+							0
+						]
+					}
+				}
+			},
+			"item.card": {
+				"properties": {
+					"cardholderName": {
+						"type": "string"
+					},
+					"brand": {
+						"type": "string",
+						"enum": [
+							"visa"
+						]
+					},
+					"number": {
+						"type": "string"
+					},
+					"expMonth": {
+						"type": "string"
+					},
+					"expYear": {
+						"type": "string"
+					},
+					"code": {
+						"type": "string"
+					}
+				}
+			},
+			"item.identity": {
+				"properties": {
+					"title": {
+						"type": "string"
+					},
+					"firstName": {
+						"type": "string"
+					},
+					"middleName": {
+						"type": "string"
+					},
+					"lastName": {
+						"type": "string"
+					},
+					"address1": {
+						"type": "string"
+					},
+					"address2": {
+						"type": "string"
+					},
+					"address3": {
+						"type": "string"
+					},
+					"city": {
+						"type": "string"
+					},
+					"state": {
+						"type": "string"
+					},
+					"postalCode": {
+						"type": "string"
+					},
+					"country": {
+						"type": "string"
+					},
+					"company": {
+						"type": "string"
+					},
+					"email": {
+						"type": "string"
+					},
+					"phone": {
+						"type": "string"
+					},
+					"ssn": {
+						"type": "string"
+					},
+					"username": {
+						"type": "string"
+					},
+					"passportNumber": {
+						"type": "string"
+					},
+					"licenseNumber": {
+						"type": "string"
+					}
+				}
+			},
+			"uris": {
+				"properties": {
+					"match": {
+						"type": "integer",
+						"enum": [
+							0,
+							1,
+							2,
+							3,
+							4,
+							5
+						]
+					},
+					"uri": {
+						"type": "string"
+					}
+				}
+			},
+			"field": {
+				"properties": {
+					"name": {
+						"type": "string"
+					},
+					"value": {
+						"type": "string"
+					},
+					"type": {
+						"type": "string",
+						"enum": [
+							0,
+							1,
+							2,
+							3
+						]
+					}
+				}
+			},
+			"folder": {
+				"properties": {
+					"name": {
+						"type": "string"
+					}
+				}
+			},
+			"send.template": {
+				"properties": {
+					"name": {
+						"type": "string"
+					},
+					"notes": {
+						"type": "string"
+					},
+					"type": {
+						"type": "integer",
+						"enum": [
+							0,
+							1
+						]
+					},
+					"text": {
+						"$ref": "#/components/schemas/send.text"
+					},
+					"file": {
+						"type": "string"
+					},
+					"maxAccessCount": {
+						"type": "integer"
+					},
+					"deletionDate": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"expirationDate": {
+						"type": "string",
+						"format": "date-time"
+					},
+					"password": {
+						"type": "string"
+					},
+					"disabled": {
+						"type": "boolean"
+					},
+					"hideEmail": {
+						"type": "boolean"
+					}
+				}
+			},
+			"send.text": {
+				"properties": {
+					"text": {
+						"type": "string"
+					},
+					"hidden": {
+						"type": "boolean"
+					}
+				}
+			},
+			"collection": {
+				"properties": {
+					"organizationId": {
+						"type": "string",
+						"format": "uuid"
+					},
+					"name": {
+						"type": "string"
+					},
+					"externalId": {
+						"type": "string"
+					},
+					"groups": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/group"
+						}
+					}
+				}
+			},
+			"group": {
+				"properties": {
+					"id": {
+						"type": "string",
+						"format": "uuid"
+					},
+					"readOnly": {
+						"type": "boolean"
+					},
+					"hidePasswords": {
+						"type": "boolean"
+					}
+				}
+			},
+			"status": {
+				"properties": {
+					"success": {
+						"type": "boolean"
+					},
+					"data": {
+						"type": "object",
+						"properties": {
+							"object": {
+								"type": "string",
+								"enum": [
+									"template"
+								]
+							},
+							"template": {
+								"type": "object",
+								"properties": {
+									"serverUrl": {
+										"type": "string",
+										"format": "hostname"
+									},
+									"lastSync": {
+										"type": "string",
+										"format": "date-time"
+									},
+									"userEmail": {
+										"type": "string",
+										"format": "email"
+									},
+									"userID": {
+										"type": "string",
+										"format": "uuid"
+									},
+									"status": {
+										"type": "string",
+										"enum": [
+											"locked",
+											"unlocked",
+											"unauthenticated"
+										]
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"lockunlock.success": {
+				"properties": {
+					"success": {
+						"type": "boolean"
+					},
+					"data": {
+						"type": "object",
+						"properties": {
+							"noColor": {
+								"type": "boolean"
+							},
+							"object": {
+								"type": "string"
+							},
+							"title": {
+								"type": "string"
+							},
+							"message": {
+								"type": "string"
+							}
+						}
+					}
+				}
+			},
+			"deviceapprovallist": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/deviceapprovalproperties"
+				}
+			},
+			"deviceapprovalproperties": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"userId": {
+						"type": "string"
+					},
+					"email": {
+						"type": "string"
+					},
+					"requestDeviceIdentifier": {
+						"type": "string"
+					},
+					"requestDeviceType": {
+						"type": "string"
+					},
+					"requestIpAddress": {
+						"type": "string"
+					},
+					"creationDate": {
+						"type": "string"
+					}
+				}
+			}
+		}
+	}
+}

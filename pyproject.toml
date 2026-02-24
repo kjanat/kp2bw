@@ -30,19 +30,21 @@ Repository = "https://github.com/kjanat/kp2bw"
 kp2bw = "kp2bw.cli:main"
 
 [dependency-groups]
-dev   = [
+dev     = [
+  { include-group = "codegen" },
   { include-group = "lint" },
   { include-group = "stubs" },
   { include-group = "test" },
 ]
-lint  = [
+codegen = ["datamodel-code-generator[ruff]>=0.31"]
+lint    = [
   "basedpyright>=1.38.1",
   "ruff>=0.15.2",
   "tombi>=0.7.32",
   "ty>=0.0.18",
 ]
-stubs = ["pykeepass-stubs"]
-test  = [
+stubs   = ["pykeepass-stubs"]
+test    = [
   "coverage>=7.13.4",
   "pytest>=9.0.2",
   "pytest-cov>=7.0.0",
