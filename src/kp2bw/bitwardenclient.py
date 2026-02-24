@@ -16,7 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 class BitwardenClient:
-    """Legacy Bitwarden CLI wrapper using one subprocess per operation."""
+    """Legacy Bitwarden CLI wrapper using one subprocess per operation.
+
+    .. deprecated::
+        Retained for reference only.  New code should use
+        :class:`~kp2bw.bw_serve.BWServeClient` which communicates via
+        ``bw serve`` HTTP API and avoids ``shell=True`` invocations.
+
+    Security note
+    -------------
+    ``_exec`` passes commands through the system shell (``shell=True``).
+    This is acceptable only because all inputs are developer-controlled
+    literals; **never** interpolate untrusted user data into the command
+    strings.
+    """
 
     TEMPORARY_ATTACHMENT_FOLDER: str = "attachment-temp"
 
@@ -88,7 +101,10 @@ class BitwardenClient:
             shutil.rmtree(self.TEMPORARY_ATTACHMENT_FOLDER)
 
     def _exec(self, command: str) -> str:
-        """Execute a ``bw`` CLI command via shell and return its decoded output."""
+        """Execute a ``bw`` CLI command via shell and return its decoded output.
+
+        Uses ``shell=True`` — see class-level security note.
+        """
         output: bytes
         try:
             logger.debug("-- Executing Bitwarden CLI command")

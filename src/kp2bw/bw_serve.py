@@ -174,11 +174,17 @@ class BitwardenServeClient:
         return session or None
 
     def _start_serve(self, session: str | None = None) -> None:
-        """Spawn ``bw serve --port <port> --hostname localhost``."""
+        """Spawn ``bw serve --port <port> --hostname localhost``.
+
+        Always passes an explicit *env* dict so a stale ``BW_SESSION`` in
+        the parent process environment is never leaked to the child.
+        """
         cmd = ["bw", "serve", "--port", str(self._port), "--hostname", "127.0.0.1"]
-        env: dict[str, str] | None = None
+        env = {**os.environ}
         if session:
-            env = {**os.environ, "BW_SESSION": session}
+            env["BW_SESSION"] = session
+        else:
+            env.pop("BW_SESSION", None)
         logger.log(
             VERBOSE,
             f"Starting bw serve on port {self._port} "
