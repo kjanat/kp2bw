@@ -2,11 +2,22 @@ import base64
 import binascii
 import copy
 import logging
+import time
 from itertools import islice
 
 from pykeepass import Attachment, Entry, Group, PyKeePass
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 from . import VERBOSE
+from ._console import console
 from .bw_serve import BitwardenServeClient
 from .bw_types import (
     BwFido2Credential,
@@ -31,6 +42,29 @@ type EntryValue = tuple[str | None, str | None, BwItemCreate, list[AttachmentIte
 
 # Custom field spec: (value, type_int)  e.g. ("secret", 1)
 type FieldSpec = tuple[str | None, int]
+
+
+def _print_summary(
+    elapsed: float,
+    n_created: int,
+    n_skipped: int,
+    n_collection_update: int,
+    n_attachments: int,
+) -> None:
+    """Print a final migration summary to the shared rich console."""
+    m, s = divmod(int(elapsed), 60)
+    duration = f"{m}m {s:02d}s" if m else f"{s}s"
+    console.print(f"\nDone in [bold]{duration}[/bold]")
+    w = len(str(max(n_created, n_skipped, n_collection_update, n_attachments, 1)))
+    console.print(f"  [green]{n_created:{w}d}[/green] created")
+    if n_skipped:
+        console.print(f"  [dim]{n_skipped:{w}d}[/dim] skipped (already in target)")
+    if n_collection_update:
+        console.print(
+            f"  [yellow]{n_collection_update:{w}d}[/yellow] added to collection"
+        )
+    if n_attachments:
+        console.print(f"  [cyan]{n_attachments:{w}d}[/cyan] attachments uploaded")
 
 
 class Converter:
@@ -534,15 +568,36 @@ class Converter:
             if self._bitwarden_coll_id and self._bitwarden_coll_id != "auto"
             else None
         )
-        with BitwardenServeClient(
-            self._bitwarden_password,
-            org_id=self._bitwarden_organization_id,
-            collection_id=fixed_coll_id,
-        ) as bw:
+
+        n_skipped = 0
+        n_collection_update = 0
+        n_created = 0
+        n_attachments = 0
+        t_start = time.monotonic()
+
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        )
+
+        with (
+            progress,
+            BitwardenServeClient(
+                self._bitwarden_password,
+                org_id=self._bitwarden_organization_id,
+                collection_id=fixed_coll_id,
+            ) as bw,
+        ):
             # --- Phase 1: Partition entries and resolve collections ----------
             import_entries: dict[str, tuple[str | None, BwItemCreate]] = {}
             attachment_map: dict[str, list[AttachmentItem]] = {}
 
+            task1 = progress.add_task("Processing entries", total=len(self._entries))
             for key, entry_value in self._entries.items():
                 folder, firstlevel, bw_item, attachments = self._unpack_entry(
                     entry_value
@@ -566,50 +621,71 @@ class Converter:
                         # entry with the same (folder, name) doesn't recompute
                         # stale `existing_colls` and issue a redundant PUT.
                         bw.update_dedup_entry(folder, bw_item["name"], updated_item)
-                        logger.info(
+                        logger.log(
+                            VERBOSE,
                             f"-- Entry {bw_item['name']!r}: added to "
-                            f"{len(missing)} collection(s)"
+                            f"{len(missing)} collection(s)",
                         )
+                        n_collection_update += 1
                     else:
-                        logger.info(
+                        logger.log(
+                            VERBOSE,
                             f"-- Entry {bw_item['name']!r} already in "
-                            f"folder {folder!r}, skipping"
+                            f"folder {folder!r}, skipping",
                         )
+                        n_skipped += 1
+                    progress.advance(task1)
                     continue
 
                 import_entries[key] = (folder, bw_item)
                 if attachments:
                     attachment_map[key] = attachments
-
-            if not import_entries:
-                logger.info("No new entries to import")
-                return
+                progress.advance(task1)
 
             # --- Phase 2: Create items via bw serve HTTP API ----------------
-            logger.info(f"Creating {len(import_entries)} items via bw serve HTTP API")
-            key_to_id = bw.create_items_batch(import_entries)
-            logger.info(f"Created {len(key_to_id)} items")
+            if import_entries:
+                task2 = progress.add_task("Creating items", total=len(import_entries))
 
-            if not attachment_map:
-                logger.info("No attachments to upload")
-                return
+                def _on_created() -> None:
+                    nonlocal n_created
+                    n_created += 1
+                    progress.advance(task2)
+
+                key_to_id = bw.create_items_batch(
+                    import_entries, on_item_created=_on_created
+                )
+            else:
+                key_to_id = {}
 
             # --- Phase 3: Parallel attachment uploads -----------------------
-            upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
-            for key, attachments in attachment_map.items():
-                item_id = key_to_id.get(key)
-                if not item_id:
-                    folder, bw_item = import_entries[key]
-                    logger.warning(
-                        f"Could not find item ID for {bw_item['name']!r} "
-                        f"in folder {folder!r} for attachment upload"
-                    )
-                    continue
+            if attachment_map:
+                upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
+                for key, attachments in attachment_map.items():
+                    item_id = key_to_id.get(key)
+                    if not item_id:
+                        _folder, bw_item = import_entries[key]
+                        logger.warning(
+                            f"Could not find item ID for {bw_item['name']!r} "
+                            f"in folder {_folder!r} for attachment upload"
+                        )
+                        continue
 
-                file_pairs = [self._materialise_attachment(att) for att in attachments]
-                upload_items.append((item_id, file_pairs))
+                    file_pairs = [
+                        self._materialise_attachment(att) for att in attachments
+                    ]
+                    upload_items.append((item_id, file_pairs))
 
-            bw.upload_attachments(upload_items)
+                n_attachments = sum(len(fps) for _, fps in upload_items)
+                task3 = progress.add_task(
+                    "Uploading attachments", total=len(upload_items)
+                )
+                bw.upload_attachments(upload_items)
+                progress.update(task3, completed=len(upload_items))
+
+        elapsed = time.monotonic() - t_start
+        _print_summary(
+            elapsed, n_created, n_skipped, n_collection_update, n_attachments
+        )
 
     def convert(self) -> None:
         """Run the full KeePass-to-Bitwarden migration pipeline."""

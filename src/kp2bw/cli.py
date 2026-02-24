@@ -5,7 +5,10 @@ import sys
 from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from typing import NoReturn
 
+from rich.logging import RichHandler
+
 from . import VERBOSE, __version__
+from ._console import console
 from .convert import Converter
 
 
@@ -289,18 +292,23 @@ def main() -> None:
         sys.exit(2)
 
     # logging
-    #   default : INFO  (progress messages)
-    #   -v      : VERBOSE for kp2bw (operational detail)
-    #   -d      : DEBUG  for everything (incl. pykeepass, httpx, …)
+    #   default : INFO via RichHandler  — httpx silenced, progress bar active
+    #   -v      : VERBOSE for kp2bw     — httpx silenced, per-entry detail shown
+    #   -d      : DEBUG for everything  — raw format, httpx included
     if debug:
         logging.basicConfig(
             format="%(levelname)s: %(name)s: %(message)s", level=logging.DEBUG
         )
-    elif verbose:
-        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
-        logging.getLogger("kp2bw").setLevel(VERBOSE)
     else:
-        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(message)s",
+            datefmt="[%X]",
+            handlers=[RichHandler(console=console, show_path=False, markup=False)],
+        )
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        if verbose:
+            logging.getLogger("kp2bw").setLevel(VERBOSE)
 
     # bw confirmation
     if not skip_confirm:

@@ -417,12 +417,18 @@ class BitwardenServeClient:
     def create_items_batch(
         self,
         entries: dict[str, tuple[str | None, BwItemCreate]],
+        *,
+        on_item_created: Callable[[], None] | None = None,
     ) -> dict[str, str]:
         """Create folders and items via HTTP, returning ``{key: item_id}``.
 
         *entries* maps arbitrary keys to ``(folder_name, bw_item_dict)`` tuples.
         Folders are created/resolved first, then items are created sequentially
         with the correct ``folderId`` bound.
+
+        *on_item_created* is called after each successful item creation; callers
+        use it to advance a progress bar without creating a direct dependency on
+        the UI library.
         """
         # Ensure all required folders exist.
         folder_names = {fname for fname, _ in entries.values() if fname}
@@ -430,16 +436,14 @@ class BitwardenServeClient:
             self.create_folder(fname)
 
         key_to_id: dict[str, str] = {}
-        total = len(entries)
-        for idx, (key, (folder_name, bw_item)) in enumerate(entries.items(), 1):
+        for key, (folder_name, bw_item) in entries.items():
             # Bind folder ID — shallow-copy rather than mutating the shared dict.
             item = copy.copy(bw_item)
             item["folderId"] = self._folders.get(folder_name) if folder_name else None
             item_id = self.create_item(item)
             key_to_id[key] = item_id
-
-            if idx % 25 == 0 or idx == total:
-                logger.info(f"  Created {idx}/{total} items")
+            if on_item_created is not None:
+                on_item_created()
 
         return key_to_id
 
