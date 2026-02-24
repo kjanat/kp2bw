@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-02-23 Commit: `7146526` Branch: `performance-bw-serve-transport`
+Generated: 2026-02-24 Commit: `04afa2a` Branch: `master`
 
 ## OVERVIEW
 
@@ -20,6 +20,7 @@ kp2bw/
 ├── scripts/                     # Release/version checks for github-script
 │   └── AGENTS.md
 └── .github/workflows/           # CI orchestration (release + integration)
+    └── AGENTS.md
 ```
 
 ## WHERE TO LOOK
@@ -29,6 +30,7 @@ kp2bw/
 | CLI flags, prompts, envs | `src/kp2bw/cli.py`                    | Entrypoint `kp2bw.cli:main` and `python -m kp2bw` handoff          |
 | Conversion orchestration | `src/kp2bw/convert.py`                | 3-phase top-level flow; item+attachment migration logic            |
 | Bitwarden HTTP transport | `src/kp2bw/bw_serve.py`               | `bw serve` lifecycle, dedup index, batch create, attachment upload |
+| Workflow policy details  | `.github/workflows/AGENTS.md`         | Trigger matrix, cross-workflow dependencies, output contracts      |
 | Release version gating   | `scripts/version-check-shared.mjs`    | Normalizes release/tag prefixes; drives workflow gates             |
 | Main package publishing  | `.github/workflows/publish.yml`       | Triggered by GitHub Release events, not tag push                   |
 | Stubs publishing         | `.github/workflows/publish-stubs.yml` | Triggered by `stubs-v*` tags                                       |
@@ -43,6 +45,7 @@ kp2bw/
 - Tests are executable scripts (`main()` + assertions), not pytest collection.
 - `tests/test_script_adapters.py` provides pytest wrappers so `pytest` collects tests; script files remain the source-of-truth.
 - Heavy adapters are opt-in: set `KP2BW_RUN_PACKAGING_TESTS=1` and/or `KP2BW_RUN_E2E_TESTS=1`.
+- Workflow check jobs call `scripts/*.mjs` via `actions/github-script`; script output keys are workflow contracts.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
@@ -51,6 +54,7 @@ kp2bw/
 - Never use bare `Exception`; use project exceptions (`BitwardenClientError`, `ConversionError`).
 - Do not rewrite valid Python 3.14 comma-form `except X, Y:` syntax to tuple form.
 - Do not assume publish-on-tag for main package; main publish is release-event driven.
+- Do not change `scripts/version-check-shared.mjs` output shape (`name`, `version`, `pypi_url`) without workflow updates.
 
 ## UNIQUE STYLES
 
@@ -58,6 +62,7 @@ kp2bw/
 - Release workflows smoke-test built artifacts (`uv run --isolated --no-project --with dist/...`).
 - E2E fixture storage uses allowlist `.gitignore` to keep required DB/cert artifacts tracked.
 - Dedup/idempotency is treated as an invariant (convert flow + e2e re-run assertion).
+- Main publish `workflow_dispatch.dry` exists but does not currently gate publish step; stubs workflow does gate.
 
 ## COMMANDS
 
@@ -94,3 +99,4 @@ uv version --package pykeepass-stubs --bump stable [--dry-run]
 - Ignore transient dirs in analysis (`.venv/`, `.ruff_cache/`, `node_modules/`, `__pycache__/`).
 - If changing release/version behavior, update both workflows and `scripts/*.mjs` together.
 - For full `uv version` bump matrix/examples, use global skill `uv-versioning`.
+- Keep domain detail in child AGENTS files (`src/kp2bw`, `tests`, `scripts`, `packages/pykeepass-stubs`, `.github/workflows`).
