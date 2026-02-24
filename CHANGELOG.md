@@ -8,13 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Fixed
-
-- **Collection-blind dedup** -- Items already in the org but assigned to a
-  different collection were silently skipped even when `--bitwarden-collection`
-  targeted a new collection. The dedup path now detects this case and issues a
-  `PUT /object/item/{id}` to add the item to the missing collection instead of
-  skipping it.
+## [3.0.0a2] - 2026-02-24
 
 ### Added
 
@@ -24,10 +18,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `bw_serve.py` and `convert.py`; the generated `_bw_api_types.py` is the
   canonical source for spec-derived shapes.
 
-## [3.0.0a2] - 2026-02-24
-
 ### Fixed
 
+- **Collection-blind dedup** -- Items already in the org but assigned to a
+  different collection were silently skipped even when `--bitwarden-collection`
+  targeted a new collection. The dedup path now detects this case and issues a
+  `PUT /object/item/{id}` to add the item to the missing collection instead of
+  skipping it.
 - **Org import dedup matched personal vault** -- `_build_dedup_index()` fetched
   all vault items regardless of `--bitwarden-org`, causing personal-vault entries
   to shadow the (empty) org vault and skip every import. Now passes
