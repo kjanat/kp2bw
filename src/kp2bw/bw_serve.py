@@ -2,13 +2,14 @@
 
 import asyncio
 import atexit
+import copy
 import logging
 import os
 import signal
 import socket
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from types import FrameType, TracebackType
 from typing import Any, Self
 
@@ -291,7 +292,7 @@ class BitwardenServeClient:
         method: str,
         path: str,
         *,
-        json_body: dict[str, Any] | None = None,
+        json_body: Mapping[str, Any] | None = None,
         params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Send an HTTP request and return the parsed ``data`` payload.
@@ -393,7 +394,7 @@ class BitwardenServeClient:
 
     def create_item(self, item: BwItemCreate) -> str:
         """Create a single vault item via HTTP and return its ID."""
-        data = self._request("POST", "/object/item", json_body=item)  # type: ignore[arg-type]
+        data = self._request("POST", "/object/item", json_body=item)
         item_id: str = data["id"]
         logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
@@ -404,7 +405,7 @@ class BitwardenServeClient:
         The API requires the full object in the request body — partial updates
         are not supported.
         """
-        self._request("PUT", f"/object/item/{item_id}", json_body=item)  # type: ignore[arg-type]
+        self._request("PUT", f"/object/item/{item_id}", json_body=item)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
 
     def create_items_batch(
@@ -425,11 +426,9 @@ class BitwardenServeClient:
         key_to_id: dict[str, str] = {}
         total = len(entries)
         for idx, (key, (folder_name, bw_item)) in enumerate(entries.items(), 1):
-            # Bind folder ID — create a new typed dict rather than mutating.
-            item: BwItemCreate = {
-                **bw_item,
-                "folderId": self._folders.get(folder_name) if folder_name else None,
-            }
+            # Bind folder ID — shallow-copy rather than mutating the shared dict.
+            item = copy.copy(bw_item)
+            item["folderId"] = self._folders.get(folder_name) if folder_name else None
             item_id = self.create_item(item)
             key_to_id[key] = item_id
 
@@ -451,6 +450,14 @@ class BitwardenServeClient:
         When an organization ID is configured, only items belonging to that
         organization are indexed so personal-vault entries don't shadow the
         (empty) org vault during import.
+
+        .. note::
+            When ``org_id`` is ``None`` (personal vault), no ``organizationId``
+            filter is applied and ``bw serve`` returns *all* items visible to
+            the authenticated user — including org-shared items.  A personal-vault
+            import could therefore falsely mark an entry as "already exists" if its
+            name collides with an org-shared item.  This is a pre-existing
+            limitation; the fix for the org direction is intentionally asymmetric.
         """
         id_to_name: dict[str, str] = {
             fid: fname for fname, fid in self._folders.items()
@@ -477,6 +484,18 @@ class BitwardenServeClient:
         """Re-query the vault and rebuild the dedup index."""
         self._folders = self.list_folders()
         self._existing_entries = self._build_dedup_index()
+
+    def update_dedup_entry(
+        self, folder: str | None, name: str, item: BwItemResponse
+    ) -> None:
+        """Update a single cached entry after an in-place :meth:`update_item` call.
+
+        Avoids a full :meth:`refresh_dedup_index` round-trip when only one
+        item's metadata (e.g. ``collectionIds``) has changed.  Must be called
+        after every :meth:`update_item` so subsequent ``get_existing_item``
+        lookups on the same ``(folder, name)`` key return fresh data.
+        """
+        self._existing_entries.setdefault(folder, {})[name] = item
 
     # ------------------------------------------------------------------
     # CRUD — org collections

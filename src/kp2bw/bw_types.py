@@ -119,38 +119,56 @@ class BwItemLogin(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class _BwItemBase(TypedDict):
-    """Fields present on both the create payload and every API response."""
+class _BwItemCommon(TypedDict):
+    """Fields shared across both the create payload and every API response.
+
+    ``notes`` and ``collectionIds`` are typed nullable because ``bw serve``
+    returns ``null`` for both on personal-vault items (secure notes without
+    notes text, items not in a collection), despite the OpenAPI schema marking
+    them ``NotRequired`` rather than nullable.
+
+    ``login`` is intentionally absent from this base: ``BwItemCreate`` declares
+    it required (kp2bw only migrates login-type entries) and ``BwItemResponse``
+    declares it ``NotRequired`` (the API omits it on cards, secure notes, and
+    identities).  Keeping both declarations in their respective subclasses avoids
+    a TypedDict field override, which type checkers cannot represent.
+    """
 
     organizationId: str | None
-    collectionIds: list[str]
+    collectionIds: list[str] | None
     folderId: str | None
     type: int
     name: str
-    notes: str
+    notes: str | None
     favorite: bool
     fields: list[BwField]
-    login: BwItemLogin
     secureNote: ItemSecureNote | None
     card: ItemCard | None
     identity: ItemIdentity | None
 
 
-class BwItemCreate(_BwItemBase):
-    """Payload for ``POST /object/item`` and ``PUT /object/item/{id}``."""
+class BwItemCreate(_BwItemCommon):
+    """Payload for ``POST /object/item`` and ``PUT /object/item/{id}``.
+
+    kp2bw exclusively migrates login-type entries, so ``login`` is required.
+    """
+
+    login: BwItemLogin
 
 
-class BwItemResponse(_BwItemBase):
+class BwItemResponse(_BwItemCommon):
     """Item returned by ``GET /list/object/items`` and ``POST /object/item``.
 
     Server appends ``id``, ``object``, ``revisionDate`` to the template shape.
-    ``deletedDate`` is absent on live items.
+    ``deletedDate`` is absent on live items.  ``login`` is ``NotRequired``
+    because non-login items (cards, secure notes, identities) lack it.
     """
 
     id: str
     object: str
     revisionDate: str
     deletedDate: NotRequired[str | None]
+    login: NotRequired[BwItemLogin]  # absent on non-login vault items
 
 
 # ---------------------------------------------------------------------------

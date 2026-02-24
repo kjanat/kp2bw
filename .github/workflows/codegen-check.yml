@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Codegen drift check
+on:
+  pull_request: { paths: [src/kp2bw/_bw_api_types.py, specs/vault-management-api.json] }
+  push: { branches: [master], paths: [src/kp2bw/_bw_api_types.py, specs/vault-management-api.json] }
+jobs:
+  check-bw-api-types:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Regenerate _bw_api_types.py from spec
+        run: bash scripts/generate-bw-types.sh
+
+      - name: Fail if generated file has drifted from spec
+        run: |
+          if ! git diff --exit-code src/kp2bw/_bw_api_types.py; then
+            echo "::error file=src/kp2bw/_bw_api_types.py::Generated file is out of sync with specs/vault-management-api.json. Run 'bash scripts/generate-bw-types.sh' and commit the result."
+            exit 1
+          fi

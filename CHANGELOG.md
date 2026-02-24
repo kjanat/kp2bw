@@ -8,6 +8,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when
+  `_bw_api_types.py` drifts from `specs/vault-management-api.json`.
+
+### Fixed
+
+- **Dedup cache stale after collection PUT** -- `update_dedup_entry()` keeps the
+  in-memory index fresh after an `update_item()` call, preventing redundant PUTs
+  when multiple KeePass entries share the same `(folder, name)` key.
+- **`_request()` type: ignore on TypedDict arg** -- `json_body` widened from
+  `dict[str, Any]` to `Mapping[str, Any]` so `BwItemCreate` passes without
+  suppression.
+- **`BwItemResponse` nullable fields** -- `notes`, `collectionIds`, and `login`
+  now reflect actual `bw serve` response shapes (nullable / not-required).
+- **`_unpack_entry_value` tuple destructuring** -- replaced index-based access
+  with direct unpacking; `EntryValue` is always a 4-tuple after prior
+  normalization.
+
 ## [3.0.0a2] - 2026-02-24
 
 ### Added

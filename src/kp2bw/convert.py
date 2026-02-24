@@ -1,5 +1,6 @@
 import base64
 import binascii
+import copy
 import logging
 from itertools import islice
 
@@ -12,7 +13,6 @@ from .bw_types import (
     BwField,
     BwItemCreate,
     BwItemLogin,
-    BwItemResponse,
     BwUri,
 )
 from .exceptions import ConversionError
@@ -337,10 +337,15 @@ class Converter:
     ) -> str | None:
         """Extract the referenced login field (username/password) from a resolved entry."""
         login = ref_entry["login"]
+        # Build an explicit member→value mapping so we can look up by member name
+        # without a dynamic TypedDict key access (which type checkers can't verify).
+        field_values: dict[str, str | None] = {
+            "username": login["username"],
+            "password": login["password"],
+        }
         for member, reference_key in self._member_reference_resolving_dict.items():
             if field_referenced == reference_key:
-                value = login.get(member)  # type: ignore[literal-required]
-                return value if isinstance(value, str) else None
+                return field_values.get(member)
 
         raise ConversionError("Unsupported REF field_referenced")
 
@@ -479,10 +484,7 @@ class Converter:
         entry_value: EntryValue,
     ) -> tuple[str | None, str | None, BwItemCreate, list[AttachmentItem]]:
         """Destructure an entry value into (folder, firstlevel, item, attachments)."""
-        folder, firstlevel, bw_item = entry_value[0], entry_value[1], entry_value[2]
-        attachments: list[AttachmentItem] = (
-            entry_value[3] if len(entry_value) > 3 else []
-        )
+        folder, firstlevel, bw_item, attachments = entry_value
         return folder, firstlevel, bw_item, attachments
 
     def _resolve_collection(
@@ -495,12 +497,15 @@ class Converter:
         collection_id: str | None = None
         if self._bitwarden_coll_id == "auto":
             if firstlevel:
-                logger.info(f"Searching Collection {firstlevel}")
+                logger.log(VERBOSE, f"Searching Collection {firstlevel}")
                 collection_id = bw.create_org_collection(firstlevel)
         elif self._bitwarden_coll_id:
             collection_id = self._bitwarden_coll_id
 
         if collection_id is not None:
+            # Intentional in-place mutation: _entries is reset by
+            # _load_keepass_data() before each convert() run, so mutating
+            # bw_item here is safe for the current single-pass architecture.
             bw_item["collectionIds"] = [collection_id]
         return collection_id
 
@@ -545,11 +550,13 @@ class Converter:
                     existing_colls: list[str] = existing.get("collectionIds") or []
                     missing = [c for c in target_colls if c not in existing_colls]
                     if missing:
-                        updated_item: BwItemResponse = {
-                            **existing,
-                            "collectionIds": existing_colls + missing,
-                        }
+                        updated_item = copy.copy(existing)
+                        updated_item["collectionIds"] = existing_colls + missing
                         bw.update_item(existing["id"], updated_item)
+                        # Keep the in-memory cache fresh so a second KeePass
+                        # entry with the same (folder, name) doesn't recompute
+                        # stale `existing_colls` and issue a redundant PUT.
+                        bw.update_dedup_entry(folder, bw_item["name"], updated_item)
                         logger.info(
                             f"-- Entry {bw_item['name']!r}: added to "
                             f"{len(missing)} collection(s)"
