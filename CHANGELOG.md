@@ -30,6 +30,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to shadow the (empty) org vault and skip every import. Now passes
   `organizationId` to `bw serve`'s `/list/object/items` so only org-scoped items
   are checked when importing to an organization.
+- **`organizationId` casing on collection list** -- The query param sent to
+  `/list/object/org-collections` was lowercase (`organizationid`), which the API
+  silently ignored, returning all collections regardless of org. Now matches the
+  camelCase form required by the spec.
+- **CLI help metavars** -- Auto-derived dest-based metavars (`KP_PW`, `BW_ORG`,
+  etc.) replaced with type-descriptive names (`PASSWORD`, `FILE`, `ID`, `TAG`,
+  `N`) to match README and improve `--help` readability.
 
 ## [3.0.0a1] - 2026-02-24
 
