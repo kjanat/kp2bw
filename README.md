@@ -65,12 +65,12 @@ bw login <user>
 ## Usage
 
 ```console
-kp2bw [-h] [-k KEEPASS_PASSWORD] [-K KEEPASS_KEYFILE] [-b BITWARDEN_PASSWORD]
-       [-o BITWARDEN_ORG] [-c BITWARDEN_COLLECTION] [-t TAG [TAG ...]]
-       [--path-to-name | --no-path-to-name] [--path-to-name-skip N]
-       [--skip-expired | --no-skip-expired]
+kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
+       [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
+       [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
-       [--metadata | --no-metadata] [-y] [-v] [-d] [-V | --version] keepass_file
+       [--metadata | --no-metadata] [-y] [-v] [-d]
+       FILE
 ```
 
 | Flag                                   | Description                                                    | Env var                               |
@@ -101,6 +101,22 @@ Configuration precedence is always: CLI flag > environment variable > built-in d
 If your password contains special shell characters (`?`, `>`, `&`, etc.), wrap
 it in double quotes when prompted. See jampe/kp2bw#10 and
 libkeepass/pykeepass#254 for details.
+
+### `bw serve` startup timeout
+
+kp2bw starts `bw serve` on a random localhost port. If it times out after 60s:
+
+- Check that `bw` is installed and on your `PATH`
+- Run `bw login` once if you haven't already
+- Ensure no firewall rules block localhost connections
+- Try `bw serve --port 8087 --hostname 127.0.0.1` manually to see if it starts
+
+### Items skipped unexpectedly during org import
+
+When importing with `--bitwarden-org`, items already present in the
+organization vault are skipped. If you're importing into a specific collection
+(`--bitwarden-collection`), only items already in *that* collection are
+considered duplicates — items in other collections will be created or updated.
 
 [jampe/kp2bw]: https://github.com/jampe/kp2bw
 [Bitwarden CLI]: https://bitwarden.com/help/cli/

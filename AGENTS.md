@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-02-24 Commit: `04afa2a` Branch: `master`
+Generated: 2026-02-26 Commit: `59ba3c2` Branch: `master`
 
 ## OVERVIEW
 
@@ -11,15 +11,17 @@ Core flow migrates entries/folders/attachments/passkeys with `bw serve` as prima
 
 ```tree
 kp2bw/
-├── src/kp2bw/                   # Runtime package (CLI + conversion + bw transport)
+├── src/kp2bw/                   # Runtime package (CLI + conversion + bw transport + types)
 │   └── AGENTS.md
+├── specs/                       # OpenAPI spec for Bitwarden vault management API
+│   └── vault-management-api.json
 ├── tests/                       # Script-style smoke + docker e2e + fixture contract
 │   └── AGENTS.md
 ├── packages/pykeepass-stubs/    # Separate stubs release stream
 │   └── AGENTS.md
-├── scripts/                     # Release/version checks for github-script
+├── scripts/                     # Release/version checks + codegen for github-script
 │   └── AGENTS.md
-└── .github/workflows/           # CI orchestration (release + integration)
+└── .github/workflows/           # CI orchestration (release + integration + codegen drift)
     └── AGENTS.md
 ```
 
@@ -34,6 +36,8 @@ kp2bw/
 | Release version gating   | `scripts/version-check-shared.mjs`    | Normalizes release/tag prefixes; drives workflow gates             |
 | Main package publishing  | `.github/workflows/publish.yml`       | Triggered by GitHub Release events, not tag push                   |
 | Stubs publishing         | `.github/workflows/publish-stubs.yml` | Triggered by `stubs-v*` tags                                       |
+| Codegen drift check      | `.github/workflows/codegen-check.yml` | Fails PRs when `_bw_api_types.py` drifts from spec                |
+| Regenerate API types     | `scripts/generate-bw-types.sh`        | Run after editing `specs/vault-management-api.json`                |
 | E2E migration behavior   | `tests/e2e_vaultwarden_test.py`       | Seeded Vaultwarden fixture + idempotency assertions                |
 
 ## CONVENTIONS
