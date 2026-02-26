@@ -8,25 +8,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
-
-- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when
-  `_bw_api_types.py` drifts from `specs/vault-management-api.json`.
-
-### Fixed
-
-- **Dedup cache stale after collection PUT** -- `update_dedup_entry()` keeps the
-  in-memory index fresh after an `update_item()` call, preventing redundant PUTs
-  when multiple KeePass entries share the same `(folder, name)` key.
-- **`_request()` type: ignore on TypedDict arg** -- `json_body` widened from
-  `dict[str, Any]` to `Mapping[str, Any]` so `BwItemCreate` passes without
-  suppression.
-- **`BwItemResponse` nullable fields** -- `notes`, `collectionIds`, and `login`
-  now reflect actual `bw serve` response shapes (nullable / not-required).
-- **`_unpack_entry_value` tuple destructuring** -- replaced index-based access
-  with direct unpacking; `EntryValue` is always a 4-tuple after prior
-  normalization.
-
 ## [3.0.0a2] - 2026-02-24
 
 ### Added
@@ -36,6 +17,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `BwFolder`, and `BwCollection`. All `dict[str, Any]` usage is eliminated from
   `bw_serve.py` and `convert.py`; the generated `_bw_api_types.py` is the
   canonical source for spec-derived shapes.
+- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when
+  `_bw_api_types.py` drifts from `specs/vault-management-api.json`.
+- **Rich progress bars and summary** -- Migration phases (processing, creating,
+  uploading) show live progress bars via Rich. Final summary prints counts and
+  elapsed time.
 
 ### Fixed
 
@@ -56,6 +42,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **CLI help metavars** -- Auto-derived dest-based metavars (`KP_PW`, `BW_ORG`,
   etc.) replaced with type-descriptive names (`PASSWORD`, `FILE`, `ID`, `TAG`,
   `N`) to match README and improve `--help` readability.
+- **Dedup cache stale after collection PUT** -- `update_dedup_entry()` keeps the
+  in-memory index fresh after an `update_item()` call, preventing redundant PUTs
+  when multiple KeePass entries share the same `(folder, name)` key.
+- **`_request()` type safety** -- `json_body` widened from `dict[str, Any]` to
+  `Mapping[str, Any]` so `BwItemCreate` passes without type suppression.
+- **`BwItemResponse` nullable fields** -- `notes`, `collectionIds`, and `login`
+  now reflect actual `bw serve` response shapes (nullable / not-required).
+- **`_unpack_entry` tuple destructuring** -- replaced index-based access with
+  direct unpacking; `EntryValue` is always a 4-tuple.
 
 ## [3.0.0a1] - 2026-02-24
 

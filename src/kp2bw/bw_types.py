@@ -68,7 +68,7 @@ class BwField(TypedDict):
 
     name: str
     value: str
-    type: int  # 0=text, 1=hidden, 2=boolean, 3=linked
+    type: Literal[0, 1, 2, 3]  # text, hidden, boolean, linked
 
 
 # ---------------------------------------------------------------------------

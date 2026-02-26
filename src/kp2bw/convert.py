@@ -4,6 +4,7 @@ import copy
 import logging
 import time
 from itertools import islice
+from typing import Literal
 
 from pykeepass import Attachment, Entry, Group, PyKeePass
 from rich.progress import (
@@ -41,7 +42,8 @@ type AttachmentItem = Attachment | tuple[str, str]
 type EntryValue = tuple[str | None, str | None, BwItemCreate, list[AttachmentItem]]
 
 # Custom field spec: (value, type_int)  e.g. ("secret", 1)
-type FieldSpec = tuple[str | None, int]
+# Field types: 0=text, 1=hidden, 2=boolean, 3=linked
+type FieldSpec = tuple[str | None, Literal[0, 1, 2, 3]]
 
 
 def _print_summary(
