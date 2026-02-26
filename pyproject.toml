@@ -1,6 +1,6 @@
 [project]
 name            = "kp2bw"
-version         = "3.0.0a2"
+version         = "3.0.0"
 description     = "Imports and existing KeePass db with REF fields into Bitwarden"
 readme          = "README.md"
 requires-python = ">=3.14"
