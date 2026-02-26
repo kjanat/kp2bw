@@ -16,6 +16,7 @@ uvx --from "datamodel-code-generator[ruff]" datamodel-codegen \
 	--no-treat-dot-as-module \
 	--collapse-root-models \
 	--reuse-model \
+	--disable-timestamp \
 	--formatters ruff-format ruff-check \
 	>"${REPO_ROOT}/src/kp2bw/_bw_api_types.py"
 
