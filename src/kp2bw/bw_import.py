@@ -1,7 +1,5 @@
 """Build Bitwarden JSON import files and execute ``bw import``."""
 
-from __future__ import annotations
-
 import json
 import logging
 import subprocess

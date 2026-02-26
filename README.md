@@ -70,7 +70,7 @@ kp2bw [-h] [-k KEEPASS_PASSWORD] [-K KEEPASS_KEYFILE] [-b BITWARDEN_PASSWORD]
        [--path-to-name | --no-path-to-name] [--path-to-name-skip N]
        [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
-       [--metadata | --no-metadata] [-y] [-v] [-V | --version] keepass_file
+       [--metadata | --no-metadata] [-y] [-v] [-d] [-V | --version] keepass_file
 ```
 
 | Flag                                   | Description                                                    | Env var                               |
@@ -89,6 +89,7 @@ kp2bw [-h] [-k KEEPASS_PASSWORD] [-K KEEPASS_KEYFILE] [-b BITWARDEN_PASSWORD]
 | `--metadata` / `--no-metadata`         | Toggle KeePass metadata as custom fields (default: on)         | `KP2BW_MIGRATE_METADATA`              |
 | `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt               | `KP2BW_YES`                           |
 | `-v, --verbose`                        | Verbose output                                                 | `KP2BW_VERBOSE`                       |
+| `-d, --debug`                          | Debug output — includes third-party library logs               | `KP2BW_DEBUG`                         |
 | `-V, --version`                        | Print the installed `kp2bw` version and exit                   | -                                     |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.

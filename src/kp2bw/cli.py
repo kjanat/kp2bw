@@ -5,7 +5,10 @@ import sys
 from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from typing import NoReturn
 
+from rich.logging import RichHandler
+
 from . import VERBOSE, __version__
+from ._console import console
 from .convert import Converter
 
 
@@ -57,7 +60,7 @@ def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
 
 def _argparser() -> MyArgParser:
     """Build and return the CLI argument parser with all flags and env-var support."""
-    parser = MyArgParser(description="KeePass 2.x to Bitwarden converter by @jampe")
+    parser = MyArgParser(description="KeePass to Bitwarden converter")
 
     parser.add_argument(
         "-V",
@@ -66,11 +69,14 @@ def _argparser() -> MyArgParser:
         version=f"%(prog)s {__version__}",
     )
 
-    parser.add_argument("keepass_file", help="Path to your KeePass 2.x db.")
+    parser.add_argument(
+        "keepass_file", metavar="FILE", help="Path to your KeePass 2.x db."
+    )
     parser.add_argument(
         "-k",
         "--keepass-password",
         dest="kp_pw",
+        metavar="PASSWORD",
         help="KeePass db password (env: KP2BW_KEEPASS_PASSWORD)",
         default=None,
     )
@@ -78,6 +84,7 @@ def _argparser() -> MyArgParser:
         "-K",
         "--keepass-keyfile",
         dest="kp_keyfile",
+        metavar="FILE",
         help="KeePass db key file (env: KP2BW_KEEPASS_KEYFILE)",
         default=None,
     )
@@ -85,6 +92,7 @@ def _argparser() -> MyArgParser:
         "-b",
         "--bitwarden-password",
         dest="bw_pw",
+        metavar="PASSWORD",
         help="Bitwarden password (env: KP2BW_BITWARDEN_PASSWORD)",
         default=None,
     )
@@ -92,6 +100,7 @@ def _argparser() -> MyArgParser:
         "-o",
         "--bitwarden-org",
         dest="bw_org",
+        metavar="ID",
         help="Bitwarden Organization Id (env: KP2BW_BITWARDEN_ORG)",
         default=None,
     )
@@ -99,6 +108,7 @@ def _argparser() -> MyArgParser:
         "-t",
         "--import-tags",
         dest="import_tags",
+        metavar="TAG",
         help="Only import tagged items (env: KP2BW_IMPORT_TAGS as comma-separated values)",
         nargs="+",
         default=None,
@@ -107,6 +117,7 @@ def _argparser() -> MyArgParser:
         "-c",
         "--bitwarden-collection",
         dest="bw_coll",
+        metavar="ID",
         help="Id of Org-Collection, or 'auto' for top-level folder names (env: KP2BW_BITWARDEN_COLLECTION)",
         default=None,
     )
@@ -120,6 +131,7 @@ def _argparser() -> MyArgParser:
     parser.add_argument(
         "--path-to-name-skip",
         dest="path_to_name_skip",
+        metavar="N",
         help="Skip first N folders for path prefix (default: 1, env: KP2BW_PATH_TO_NAME_SKIP)",
         default=None,
         type=int,
@@ -280,18 +292,23 @@ def main() -> None:
         sys.exit(2)
 
     # logging
-    #   default : INFO  (progress messages)
-    #   -v      : VERBOSE for kp2bw (operational detail)
-    #   -d      : DEBUG  for everything (incl. pykeepass, httpx, …)
+    #   default : INFO via RichHandler  — httpx silenced, progress bar active
+    #   -v      : VERBOSE for kp2bw     — httpx silenced, per-entry detail shown
+    #   -d      : DEBUG for everything  — raw format, httpx included
     if debug:
         logging.basicConfig(
             format="%(levelname)s: %(name)s: %(message)s", level=logging.DEBUG
         )
-    elif verbose:
-        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
-        logging.getLogger("kp2bw").setLevel(VERBOSE)
     else:
-        logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(message)s",
+            datefmt="[%X]",
+            handlers=[RichHandler(console=console, show_path=False, markup=False)],
+        )
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        if verbose:
+            logging.getLogger("kp2bw").setLevel(VERBOSE)
 
     # bw confirmation
     if not skip_confirm:
@@ -333,10 +350,11 @@ def main() -> None:
         include_recyclebin=include_recyclebin,
         migrate_metadata=migrate_metadata,
     )
-    c.convert()
-
-    print(" ")
-    print("All done.")
+    try:
+        c.convert()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
+        sys.exit(130)
 
 
 if __name__ == "__main__":

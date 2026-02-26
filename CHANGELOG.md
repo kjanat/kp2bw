@@ -8,6 +8,50 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.0.0a2] - 2026-02-24
+
+### Added
+
+- **Strict TypedDict transport layer** -- `bw_types.py` defines `BwItemCreate`,
+  `BwItemResponse`, `BwItemLogin`, `BwUri`, `BwField`, `BwFido2Credential`,
+  `BwFolder`, and `BwCollection`. All `dict[str, Any]` usage is eliminated from
+  `bw_serve.py` and `convert.py`; the generated `_bw_api_types.py` is the
+  canonical source for spec-derived shapes.
+- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when
+  `_bw_api_types.py` drifts from `specs/vault-management-api.json`.
+- **Rich progress bars and summary** -- Migration phases (processing, creating,
+  uploading) show live progress bars via Rich. Final summary prints counts and
+  elapsed time.
+
+### Fixed
+
+- **Collection-blind dedup** -- Items already in the org but assigned to a
+  different collection were silently skipped even when `--bitwarden-collection`
+  targeted a new collection. The dedup path now detects this case and issues a
+  `PUT /object/item/{id}` to add the item to the missing collection instead of
+  skipping it.
+- **Org import dedup matched personal vault** -- `_build_dedup_index()` fetched
+  all vault items regardless of `--bitwarden-org`, causing personal-vault entries
+  to shadow the (empty) org vault and skip every import. Now passes
+  `organizationId` to `bw serve`'s `/list/object/items` so only org-scoped items
+  are checked when importing to an organization.
+- **`organizationId` casing on collection list** -- The query param sent to
+  `/list/object/org-collections` was lowercase (`organizationid`), which the API
+  silently ignored, returning all collections regardless of org. Now matches the
+  camelCase form required by the spec.
+- **CLI help metavars** -- Auto-derived dest-based metavars (`KP_PW`, `BW_ORG`,
+  etc.) replaced with type-descriptive names (`PASSWORD`, `FILE`, `ID`, `TAG`,
+  `N`) to match README and improve `--help` readability.
+- **Dedup cache stale after collection PUT** -- `update_dedup_entry()` keeps the
+  in-memory index fresh after an `update_item()` call, preventing redundant PUTs
+  when multiple KeePass entries share the same `(folder, name)` key.
+- **`_request()` type safety** -- `json_body` widened from `dict[str, Any]` to
+  `Mapping[str, Any]` so `BwItemCreate` passes without type suppression.
+- **`BwItemResponse` nullable fields** -- `notes`, `collectionIds`, and `login`
+  now reflect actual `bw serve` response shapes (nullable / not-required).
+- **`_unpack_entry` tuple destructuring** -- replaced index-based access with
+  direct unpacking; `EntryValue` is always a 4-tuple.
+
 ## [3.0.0a1] - 2026-02-24
 
 ### Added
@@ -311,7 +355,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.0.0a1...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.0.0a2...HEAD
+[3.0.0a2]: https://github.com/kjanat/kp2bw/compare/v3.0.0a1...v3.0.0a2
 [3.0.0a1]: https://github.com/kjanat/kp2bw/compare/v2.0.0...v3.0.0a1
 [2.0.0]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc3...v2.0.0
 [2.0.0rc3]: https://github.com/kjanat/kp2bw/compare/v2.0.0rc2...v2.0.0rc3

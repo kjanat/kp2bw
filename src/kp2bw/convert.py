@@ -1,13 +1,32 @@
 import base64
 import binascii
+import copy
 import logging
+import time
 from itertools import islice
-from typing import Any
+from typing import Literal
 
 from pykeepass import Attachment, Entry, Group, PyKeePass
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 
 from . import VERBOSE
+from ._console import console
 from .bw_serve import BitwardenServeClient
+from .bw_types import (
+    BwFido2Credential,
+    BwField,
+    BwItemCreate,
+    BwItemLogin,
+    BwUri,
+)
 from .exceptions import ConversionError
 
 logger = logging.getLogger(__name__)
@@ -16,17 +35,38 @@ KP_REF_IDENTIFIER: str = "{REF:"
 MAX_BW_ITEM_LENGTH: int = 10 * 1000
 KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
 
-# Bitwarden item dict type
-type BwItem = dict[str, Any]
-
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
 type AttachmentItem = Attachment | tuple[str, str]
 
 # Entry storage: (folder, firstlevel, bw_item, attachments)
-type EntryValue = tuple[str | None, str | None, BwItem, list[AttachmentItem]]
+type EntryValue = tuple[str | None, str | None, BwItemCreate, list[AttachmentItem]]
 
-# Fido2 credential list type
-type Fido2Credentials = list[dict[str, str | None]]
+# Custom field spec: (value, type_int)  e.g. ("secret", 1)
+# Field types: 0=text, 1=hidden, 2=boolean, 3=linked
+type FieldSpec = tuple[str | None, Literal[0, 1, 2, 3]]
+
+
+def _print_summary(
+    elapsed: float,
+    n_created: int,
+    n_skipped: int,
+    n_collection_update: int,
+    n_attachments: int,
+) -> None:
+    """Print a final migration summary to the shared rich console."""
+    m, s = divmod(int(elapsed), 60)
+    duration = f"{m}m {s:02d}s" if m else f"{s}s"
+    console.print(f"\nDone in [bold]{duration}[/bold]")
+    w = len(str(max(n_created, n_skipped, n_collection_update, n_attachments, 1)))
+    console.print(f"  [green]{n_created:{w}d}[/green] created")
+    if n_skipped:
+        console.print(f"  [dim]{n_skipped:{w}d}[/dim] skipped (already in target)")
+    if n_collection_update:
+        console.print(
+            f"  [yellow]{n_collection_update:{w}d}[/yellow] added to collection"
+        )
+    if n_attachments:
+        console.print(f"  [cyan]{n_attachments:{w}d}[/cyan] attachments uploaded")
 
 
 class Converter:
@@ -89,7 +129,7 @@ class Converter:
         raw_bytes = base64.b64decode(b64_data)
         return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode()
 
-    def _build_fido2_credentials(self, entry: Entry) -> Fido2Credentials | None:
+    def _build_fido2_credentials(self, entry: Entry) -> list[BwFido2Credential] | None:
         """Extract KeePassXC passkey attributes and convert to Bitwarden fido2Credentials format."""
         props: dict[str, str | None] = entry.custom_properties
 
@@ -109,25 +149,24 @@ class Converter:
 
         creation_date: str | None = entry.ctime.isoformat() if entry.ctime else None
 
-        return [
-            {
-                "credentialId": credential_id,
-                "keyType": "public-key",
-                "keyAlgorithm": "ECDSA",
-                "keyCurve": "P-256",
-                "keyValue": key_value,
-                "rpId": props.get("KPEX_PASSKEY_RELYING_PARTY", ""),
-                "rpName": props.get("KPEX_PASSKEY_RELYING_PARTY", ""),
-                "userHandle": props.get("KPEX_PASSKEY_USER_HANDLE", ""),
-                "userName": props.get("KPEX_PASSKEY_USERNAME", entry.username or ""),
-                "userDisplayName": props.get(
-                    "KPEX_PASSKEY_USERNAME", entry.username or ""
-                ),
-                "counter": "0",
-                "discoverable": "true",
-                "creationDate": creation_date,
-            }
-        ]
+        cred: BwFido2Credential = {
+            "credentialId": credential_id,
+            "keyType": "public-key",
+            "keyAlgorithm": "ECDSA",
+            "keyCurve": "P-256",
+            "keyValue": key_value,
+            "rpId": props.get("KPEX_PASSKEY_RELYING_PARTY") or "",
+            "rpName": props.get("KPEX_PASSKEY_RELYING_PARTY") or "",
+            "userHandle": props.get("KPEX_PASSKEY_USER_HANDLE") or "",
+            "userName": props.get("KPEX_PASSKEY_USERNAME") or entry.username or "",
+            "userDisplayName": props.get("KPEX_PASSKEY_USERNAME")
+            or entry.username
+            or "",
+            "counter": "0",
+            "discoverable": "true",
+            "creationDate": creation_date,
+        }
+        return [cred]
 
     def _create_bw_python_object(
         self,
@@ -137,38 +176,41 @@ class Converter:
         totp: str,
         username: str,
         password: str,
-        custom_properties: dict[str, list[Any]],
-        fido2_credentials: Fido2Credentials | None = None,
-    ) -> BwItem:
+        custom_properties: dict[str, FieldSpec],
+        fido2_credentials: list[BwFido2Credential] | None = None,
+    ) -> BwItemCreate:
         """Build a Bitwarden item dict from individual entry fields."""
-        login: dict[str, Any] = {
-            "uris": [{"match": None, "uri": url}] if url else [],
-            "username": username,
-            "password": password,
-            "totp": totp,
-            "passwordRevisionDate": None,
-        }
+        uris: list[BwUri] = [BwUri(uri=url, match=None)] if url else []
+        login: BwItemLogin = BwItemLogin(
+            uris=uris,
+            username=username,
+            password=password,
+            totp=totp or None,
+            passwordRevisionDate=None,
+        )
         if fido2_credentials:
             login["fido2Credentials"] = fido2_credentials
 
-        return {
-            "organizationId": self._bitwarden_organization_id,
-            "collectionIds": [],
-            "folderId": None,
-            "type": 1,
-            "name": title,
-            "notes": notes,
-            "favorite": False,
-            "fields": [
-                {"name": key, "value": value[0], "type": value[1]}
-                for key, value in custom_properties.items()
-                if value[0] is not None and len(value[0]) <= MAX_BW_ITEM_LENGTH
-            ],
-            "login": login,
-            "secureNote": None,
-            "card": None,
-            "identity": None,
-        }
+        fields: list[BwField] = [
+            BwField(name=key, value=value, type=ftype)
+            for key, (value, ftype) in custom_properties.items()
+            if value is not None and len(value) <= MAX_BW_ITEM_LENGTH
+        ]
+
+        return BwItemCreate(
+            organizationId=self._bitwarden_organization_id,
+            collectionIds=[],
+            folderId=None,
+            type=1,
+            name=title,
+            notes=notes,
+            favorite=False,
+            fields=fields,
+            login=login,
+            secureNote=None,
+            card=None,
+            identity=None,
+        )
 
     def _generate_folder_name(self, entry: Entry) -> str | None:
         """Return the full group path as a ``/``-joined folder name."""
@@ -206,23 +248,23 @@ class Converter:
             group = group.parentgroup
         return False
 
-    def _build_metadata_fields(self, entry: Entry) -> dict[str, list[Any]]:
+    def _build_metadata_fields(self, entry: Entry) -> dict[str, FieldSpec]:
         """Build extra custom fields for KeePass metadata (tags, expiry, timestamps)."""
-        fields: dict[str, list[Any]] = {}
+        fields: dict[str, FieldSpec] = {}
 
         # Tags
         if entry.tags:
-            fields["KeePass Tags"] = [", ".join(entry.tags), 0]
+            fields["KeePass Tags"] = (", ".join(entry.tags), 0)
 
         # Expiry
         if entry.expires and entry.expiry_time:
-            fields["Expires"] = [entry.expiry_time.isoformat(), 0]
+            fields["Expires"] = (entry.expiry_time.isoformat(), 0)
 
         # Timestamps
         if entry.ctime:
-            fields["Created"] = [entry.ctime.isoformat(), 0]
+            fields["Created"] = (entry.ctime.isoformat(), 0)
         if entry.mtime:
-            fields["Modified"] = [entry.mtime.isoformat(), 0]
+            fields["Modified"] = (entry.mtime.isoformat(), 0)
 
         return fields
 
@@ -238,15 +280,15 @@ class Converter:
         if custom_protected is None:
             custom_protected = []
 
-        custom_properties: dict[str, list[Any]] = {}
+        custom_properties: dict[str, FieldSpec] = {}
         for key, value in entry.custom_properties.items():
             # Skip KeePassXC passkey attributes -- handled separately
             if key.startswith(KPEX_PASSKEY_PREFIX):
                 continue
             if key in custom_protected:
-                custom_properties[key] = [value, 1]
+                custom_properties[key] = (value, 1)
             else:
-                custom_properties[key] = [value, 0]
+                custom_properties[key] = (value, 0)
 
         # Add metadata fields (tags, expiry, timestamps) if enabled
         if self._migrate_metadata:
@@ -255,7 +297,7 @@ class Converter:
         # Build FIDO2/passkey credentials from KeePassXC attributes
         fido2_credentials = self._build_fido2_credentials(entry)
         if fido2_credentials:
-            logger.info(f"  Migrating passkey for entry: {entry.title}")
+            logger.log(VERBOSE, f"  Migrating passkey for entry: {entry.title}")
 
         # Build notes, prepending [EXPIRED] marker if applicable
         notes = ""
@@ -327,12 +369,19 @@ class Converter:
             raise ConversionError("Unsupported REF lookup_mode")
 
     def _find_referenced_value(
-        self, ref_entry: BwItem, field_referenced: str
+        self, ref_entry: BwItemCreate, field_referenced: str
     ) -> str | None:
         """Extract the referenced login field (username/password) from a resolved entry."""
+        login = ref_entry["login"]
+        # Build an explicit member→value mapping so we can look up by member name
+        # without a dynamic TypedDict key access (which type checkers can't verify).
+        field_values: dict[str, str | None] = {
+            "username": login["username"],
+            "password": login["password"],
+        }
         for member, reference_key in self._member_reference_resolving_dict.items():
             if field_referenced == reference_key:
-                return ref_entry["login"][member]
+                return field_values.get(member)
 
         raise ConversionError("Unsupported REF field_referenced")
 
@@ -420,8 +469,8 @@ class Converter:
         for kp_entry in self._kp_ref_entries:
             try:
                 # replace values
-                replaced_entries: list[BwItem] = []
-                ref_entry: BwItem | None = None
+                replaced_entries: list[BwItemCreate] = []
+                ref_entry: BwItemCreate | None = None
                 for member in self._member_reference_resolving_dict:
                     if KP_REF_IDENTIFIER in getattr(kp_entry, member):
                         field_referenced, lookup_mode, ref_compare_string = (
@@ -449,10 +498,10 @@ class Converter:
 
                 if username_and_password_match and ref_entry is not None:
                     # => add url to bw_item => username / pw identical
-                    ref_entry["login"]["uris"].append({
-                        "match": None,
-                        "uri": kp_entry.url,
-                    })
+                    if kp_entry.url:
+                        ref_entry["login"]["uris"].append(
+                            BwUri(uri=kp_entry.url, match=None)
+                        )
                 else:
                     # => create new bitwarden item
                     self._add_bw_entry_to_entries_dict(kp_entry, None)
@@ -469,28 +518,30 @@ class Converter:
     @staticmethod
     def _unpack_entry(
         entry_value: EntryValue,
-    ) -> tuple[str | None, str | None, BwItem, list[AttachmentItem]]:
+    ) -> tuple[str | None, str | None, BwItemCreate, list[AttachmentItem]]:
         """Destructure an entry value into (folder, firstlevel, item, attachments)."""
-        folder, firstlevel, bw_item = entry_value[0:3]
-        attachments = entry_value[3] if len(entry_value) > 3 else []
+        folder, firstlevel, bw_item, attachments = entry_value
         return folder, firstlevel, bw_item, attachments
 
     def _resolve_collection(
         self,
         bw: BitwardenServeClient,
-        bw_item: BwItem,
+        bw_item: BwItemCreate,
         firstlevel: str | None,
     ) -> str | None:
         """Resolve and set collection ID on *bw_item*."""
         collection_id: str | None = None
         if self._bitwarden_coll_id == "auto":
             if firstlevel:
-                logger.info(f"Searching Collection {firstlevel}")
+                logger.log(VERBOSE, f"Searching Collection {firstlevel}")
                 collection_id = bw.create_org_collection(firstlevel)
         elif self._bitwarden_coll_id:
             collection_id = self._bitwarden_coll_id
 
         if collection_id is not None:
+            # Intentional in-place mutation: _entries is reset by
+            # _load_keepass_data() before each convert() run, so mutating
+            # bw_item here is safe for the current single-pass architecture.
             bw_item["collectionIds"] = [collection_id]
         return collection_id
 
@@ -511,14 +562,44 @@ class Converter:
         """Create entries via ``bw serve`` HTTP API and upload attachments."""
         logger.info("Connecting and reading existing folders and entries")
 
-        with BitwardenServeClient(
-            self._bitwarden_password,
-            org_id=self._bitwarden_organization_id,
-        ) as bw:
+        # When a fixed collection ID is given, scope the dedup index to that
+        # collection so items that exist in *other* collections are treated as
+        # new and are imported into the target collection rather than skipped.
+        fixed_coll_id = (
+            self._bitwarden_coll_id
+            if self._bitwarden_coll_id and self._bitwarden_coll_id != "auto"
+            else None
+        )
+
+        n_skipped = 0
+        n_collection_update = 0
+        n_created = 0
+        n_attachments = 0
+        t_start = time.monotonic()
+
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        )
+
+        with (
+            progress,
+            BitwardenServeClient(
+                self._bitwarden_password,
+                org_id=self._bitwarden_organization_id,
+                collection_id=fixed_coll_id,
+            ) as bw,
+        ):
             # --- Phase 1: Partition entries and resolve collections ----------
-            import_entries: dict[str, tuple[str | None, BwItem]] = {}
+            import_entries: dict[str, tuple[str | None, BwItemCreate]] = {}
             attachment_map: dict[str, list[AttachmentItem]] = {}
 
+            task1 = progress.add_task("Processing entries", total=len(self._entries))
             for key, entry_value in self._entries.items():
                 folder, firstlevel, bw_item, attachments = self._unpack_entry(
                     entry_value
@@ -527,47 +608,103 @@ class Converter:
                 # Resolve collection (mutates bw_item)
                 self._resolve_collection(bw, bw_item, firstlevel)
 
-                # Dedup check
-                if bw.entry_exists(folder, bw_item["name"]):
-                    logger.info(
-                        f"-- Entry {bw_item['name']} already exists in "
-                        f"folder {folder}. skipping..."
-                    )
+                # Dedup: skip items already in the vault.
+                #
+                # Fixed-collection mode: the dedup index is scoped to the
+                # target collection, so any hit means the item is already
+                # there.  bw serve returns collectionIds=null on listed items
+                # regardless of actual membership, so we cannot use the
+                # missing-check here — and we don't need to.
+                #
+                # Auto/no-collection mode: item may exist in the org but be
+                # absent from the automatically-resolved target collection;
+                # update its collection membership via PUT.
+                existing = bw.get_existing_item(folder, bw_item["name"])
+                if existing is not None:
+                    if fixed_coll_id:
+                        logger.log(
+                            VERBOSE,
+                            f"-- Entry {bw_item['name']!r} already in "
+                            f"target collection, skipping",
+                        )
+                        n_skipped += 1
+                    else:
+                        target_colls: list[str] = bw_item.get("collectionIds") or []
+                        existing_colls: list[str] = existing.get("collectionIds") or []
+                        missing = [c for c in target_colls if c not in existing_colls]
+                        if missing:
+                            updated_item = copy.copy(existing)
+                            updated_item["collectionIds"] = existing_colls + missing
+                            bw.update_item(existing["id"], updated_item)
+                            # Keep cache fresh so a second KeePass entry with
+                            # the same (folder, name) doesn't recompute stale
+                            # existing_colls and issue a redundant PUT.
+                            bw.update_dedup_entry(folder, bw_item["name"], updated_item)
+                            logger.log(
+                                VERBOSE,
+                                f"-- Entry {bw_item['name']!r}: added to "
+                                f"{len(missing)} collection(s)",
+                            )
+                            n_collection_update += 1
+                        else:
+                            logger.log(
+                                VERBOSE,
+                                f"-- Entry {bw_item['name']!r} already in "
+                                f"folder {folder!r}, skipping",
+                            )
+                            n_skipped += 1
+                    progress.advance(task1)
                     continue
 
                 import_entries[key] = (folder, bw_item)
                 if attachments:
                     attachment_map[key] = attachments
-
-            if not import_entries:
-                logger.info("No new entries to import")
-                return
+                progress.advance(task1)
 
             # --- Phase 2: Create items via bw serve HTTP API ----------------
-            logger.info(f"Creating {len(import_entries)} items via bw serve HTTP API")
-            key_to_id = bw.create_items_batch(import_entries)
-            logger.info(f"Created {len(key_to_id)} items")
+            if import_entries:
+                task2 = progress.add_task("Creating items", total=len(import_entries))
 
-            if not attachment_map:
-                logger.info("No attachments to upload")
-                return
+                def _on_created() -> None:
+                    nonlocal n_created
+                    n_created += 1
+                    progress.advance(task2)
+
+                key_to_id = bw.create_items_batch(
+                    import_entries, on_item_created=_on_created
+                )
+            else:
+                key_to_id = {}
 
             # --- Phase 3: Parallel attachment uploads -----------------------
-            upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
-            for key, attachments in attachment_map.items():
-                item_id = key_to_id.get(key)
-                if not item_id:
-                    folder, bw_item = import_entries[key]
-                    logger.warning(
-                        f"Could not find item ID for {bw_item['name']!r} "
-                        f"in folder {folder!r} for attachment upload"
-                    )
-                    continue
+            if attachment_map:
+                upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
+                for key, attachments in attachment_map.items():
+                    item_id = key_to_id.get(key)
+                    if not item_id:
+                        _folder, bw_item = import_entries[key]
+                        logger.warning(
+                            f"Could not find item ID for {bw_item['name']!r} "
+                            f"in folder {_folder!r} for attachment upload"
+                        )
+                        continue
 
-                file_pairs = [self._materialise_attachment(att) for att in attachments]
-                upload_items.append((item_id, file_pairs))
+                    file_pairs = [
+                        self._materialise_attachment(att) for att in attachments
+                    ]
+                    upload_items.append((item_id, file_pairs))
 
-            bw.upload_attachments(upload_items)
+                n_attachments = sum(len(fps) for _, fps in upload_items)
+                task3 = progress.add_task(
+                    "Uploading attachments", total=len(upload_items)
+                )
+                bw.upload_attachments(upload_items)
+                progress.update(task3, completed=len(upload_items))
+
+        elapsed = time.monotonic() - t_start
+        _print_summary(
+            elapsed, n_created, n_skipped, n_collection_update, n_attachments
+        )
 
     def convert(self) -> None:
         """Run the full KeePass-to-Bitwarden migration pipeline."""

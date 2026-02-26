@@ -1,0 +1,3 @@
+specs/vault-management-api.json linguist-vendored -diff
+src/kp2bw/_bw_api_types.py linguist-generated
+uv.lock -diff
