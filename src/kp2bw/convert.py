@@ -472,9 +472,11 @@ class Converter:
                 replaced_entries: list[BwItemCreate] = []
                 ref_entry: BwItemCreate | None = None
                 for member in self._member_reference_resolving_dict:
-                    if KP_REF_IDENTIFIER in getattr(kp_entry, member):
+                    val = getattr(kp_entry, member)
+                    # Use AI-generated fix by Junie (avoid TypeError if val is None)
+                    if val and KP_REF_IDENTIFIER in val:
                         field_referenced, lookup_mode, ref_compare_string = (
-                            self._parse_kp_ref_string(getattr(kp_entry, member))
+                            self._parse_kp_ref_string(val)
                         )
                         ref_result = self._get_referenced_entry(
                             lookup_mode, ref_compare_string
