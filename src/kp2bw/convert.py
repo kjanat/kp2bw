@@ -282,8 +282,8 @@ class Converter:
 
         custom_properties: dict[str, FieldSpec] = {}
         for key, value in entry.custom_properties.items():
-            # Skip KeePassXC passkey attributes -- handled separately
-            if key.startswith(KPEX_PASSKEY_PREFIX):
+            # Skip KeePassXC passkey attributes and TOTP secret -- handled separately
+            if key.startswith(KPEX_PASSKEY_PREFIX) or key == "TimeOtp-Secret-Base32":
                 continue
             if key in custom_protected:
                 custom_properties[key] = (value, 1)
@@ -312,8 +312,10 @@ class Converter:
 
         # Use entry.otp if set; otherwise fall back to TimeOtp-Secret-Base32
         # (KeePassXC stores TOTP secrets as this custom property)
-        totp: str = entry.otp if entry.otp else (
-            custom_properties.get("TimeOtp-Secret-Base32", (None, 0))[0] or ""
+        totp: str = (
+            entry.otp
+            if entry.otp
+            else entry.custom_properties.get("TimeOtp-Secret-Base32") or ""
         )
 
         bw_item_object = self._create_bw_python_object(
