@@ -309,11 +309,18 @@ class Converter:
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
         firstlevel = self._get_folder_firstlevel(entry)
+
+        # Use entry.otp if set; otherwise fall back to TimeOtp-Secret-Base32
+        # (KeePassXC stores TOTP secrets as this custom property)
+        totp: str = entry.otp if entry.otp else (
+            custom_properties.get("TimeOtp-Secret-Base32", (None, 0))[0] or ""
+        )
+
         bw_item_object = self._create_bw_python_object(
             title=title,
             notes=notes,
             url=entry.url if entry.url else "",
-            totp=entry.otp if entry.otp else "",
+            totp=totp,
             username=entry.username if entry.username else "",
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
