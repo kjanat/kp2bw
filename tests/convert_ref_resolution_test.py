@@ -159,6 +159,9 @@ def assert_resolves_none_fields_with_references() -> None:
             f"Caught unexpected exception: {type(e).__name__}: {e}"
         ) from e
 
+    if entry.password != "resolved_value":
+        raise AssertionError("REF password was not resolved to referenced value")
+
     if converter.duplicate_creates != 0:
         raise AssertionError(
             "Resolved REF entry should merge URI, not create duplicate"
