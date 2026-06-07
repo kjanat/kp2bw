@@ -5,8 +5,13 @@ from pykeepass import Entry, Group
 from kp2bw.bw_types import BwItemCreate
 from kp2bw.convert import Converter, EntryValue
 
+REFERENCE_ENTRY_UUID = UUID("12345678-1234-5678-1234-567812345678")
+REFERENCE_ENTRY_UUID_REF = REFERENCE_ENTRY_UUID.hex.upper()
+
 
 class ReferenceEntry(Entry):
+    """Minimal Entry double; real Entry init needs a PyKeePass backing store."""
+
     _test_password: str | None
     _test_title: str | None
     _test_url: str | None
@@ -25,7 +30,7 @@ class ReferenceEntry(Entry):
         self._test_username = username
         self._test_password = password
         self._test_url = url
-        self._test_uuid = UUID("12345678-1234-5678-1234-567812345678")
+        self._test_uuid = REFERENCE_ENTRY_UUID
 
     @property
     def title(self) -> str | None:
@@ -145,7 +150,7 @@ def assert_resolves_none_fields_with_references() -> None:
     entry = ReferenceEntry(
         title="Test Entry",
         username=None,
-        password="{REF:P@I:B4C9}",
+        password=f"{{REF:P@I:{REFERENCE_ENTRY_UUID_REF}}}",
         url="https://example.com",
     )
 
