@@ -36,7 +36,7 @@ kp2bw/
 | Release version gating   | `scripts/version-check-shared.mjs`    | Normalizes release/tag prefixes; drives workflow gates             |
 | Main package publishing  | `.github/workflows/publish.yml`       | Triggered by GitHub Release events, not tag push                   |
 | Stubs publishing         | `.github/workflows/publish-stubs.yml` | Triggered by `stubs-v*` tags                                       |
-| Codegen drift check      | `.github/workflows/codegen-check.yml` | Fails PRs when `_bw_api_types.py` drifts from spec                |
+| Codegen drift check      | `.github/workflows/codegen-check.yml` | Fails PRs when `_bw_api_types.py` drifts from spec                 |
 | Regenerate API types     | `scripts/generate-bw-types.sh`        | Run after editing `specs/vault-management-api.json`                |
 | E2E migration behavior   | `tests/e2e_vaultwarden_test.py`       | Seeded Vaultwarden fixture + idempotency assertions                |
 
@@ -86,7 +86,7 @@ KP2BW_RUN_E2E_TESTS=1 uv run pytest -q tests/test_script_adapters.py -k e2e
 uv run python tests/e2e_vaultwarden_test.py
 
 # When touching scripts/
-bun --cwd=scripts typecheck
+bun run typecheck
 
 # Version bumping (multiple --bump flags allowed; order matters)
 uv version --bump major --bump alpha [--dry-run]

@@ -1,0 +1,29 @@
+{
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"basedpyright": "uv run basedpyright",
+		"dprint:update": "dprint config update --yes --recursive",
+		"fmt": "dprint fmt",
+		"fmt:ci": "run fmt --allow-no-files --diff --excludes '.github'",
+		"ruff": "uv run ruff",
+		"ruff:check": "run ruff check",
+		"ruff:check:fix": "run ruff check --fix",
+		"ruff:format": "run ruff format",
+		"ty": "uv run ty",
+		"ty:check": "run ty check",
+		"typecheck": "run -p --kill-on-fail typecheck:tsc typecheck:tsgo",
+		"typecheck:tsc": "tsc --noEmit",
+		"typecheck:tsgo": "tsgo --noEmit"
+	},
+	"devDependencies": {
+		"@actions/github-script": "github:actions/github-script",
+		"@types/bun": "^1.3.14",
+		"@typescript/native-preview": "^7.0.0-dev.20260607.1",
+		"dprint": "^0.54.0",
+		"runner-run": "^0.12.1",
+		"tombi": "^1.1.2",
+		"typescript": "^6.0.3"
+	},
+	"packageManager": "bun@1.3.14"
+}
