@@ -207,6 +207,30 @@ def assert_undecodable_secret_preserved() -> None:
         raise AssertionError(f"expected a decode warning, got {result.warnings}")
 
 
+def assert_empty_decoded_secret_preserved() -> None:
+    # Values that decode to zero bytes without raising (only separators) must be
+    # treated as decode failures: not migrated, kept hidden, warned.
+    for key, value in (
+        (KP_TOTP_SECRET_HEX_KEY, "---"),
+        (KP_TOTP_SECRET_BASE32_KEY, "===="),
+    ):
+        result = resolve_otp(None, {key: value}, entry_label="x")
+        if result.totp is not None:
+            raise AssertionError(
+                f"{key}={value!r} decodes to empty; must not migrate, got {result.totp!r}"
+            )
+        if result.consumed_keys:
+            raise AssertionError(
+                f"nothing should be consumed, got {result.consumed_keys}"
+            )
+        if result.hidden_keys != frozenset({key}):
+            raise AssertionError(
+                f"empty secret must be hidden, got {result.hidden_keys}"
+            )
+        if not any("decode" in w.lower() for w in result.warnings):
+            raise AssertionError(f"expected a decode warning, got {result.warnings}")
+
+
 def assert_messy_base32_nondefault() -> None:
     # Lowercase + spaces + non-default period must still decode correctly.
     props: Mapping[str, str | None] = {
@@ -447,6 +471,7 @@ def main() -> None:
     assert_hotp_warned_not_dropped()
     assert_hotp_alongside_totp()
     assert_undecodable_secret_preserved()
+    assert_empty_decoded_secret_preserved()
     assert_messy_base32_nondefault()
     assert_none_value_is_absent()
     assert_unknown_algorithm_defaults_with_warning()

@@ -357,6 +357,21 @@ def resolve_otp(
             warnings=tuple(warnings),
         )
 
+    # A value that decodes to no bytes (e.g. a field of only separators) yields
+    # no usable secret -- treat it as a decode failure rather than emitting an
+    # empty otpauth secret or silently dropping the field.
+    if not raw_bytes:
+        warnings.append(
+            f"Could not decode TOTP secret field {secret_key!r}; "
+            "kept as a hidden custom field."
+        )
+        return OtpMigration(
+            totp=None,
+            consumed_keys=frozenset(),
+            hidden_keys=_present_secret_keys(custom_properties, _ALL_SECRET_KEYS),
+            warnings=tuple(warnings),
+        )
+
     config, config_warnings = _parse_config(custom_properties)
     warnings.extend(config_warnings)
 
