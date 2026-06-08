@@ -5,23 +5,28 @@
  * points `uvx` commands at the PR head repo/ref so fork PRs remain testable.
  */
 
-const DEFAULT_ACCEPTED_PERMISSIONS = 'issues=write; pull_requests=write';
+import { env } from 'node:process';
+
 const FENCE = '```';
+const DEFAULT_ACCEPTED_PERMISSIONS = 'issues=write; pull_requests=write';
 const COMMENTABLE_FILE_STATUSES = new Set(['added', 'modified', 'renamed', 'removed']);
 
 /** @param {CommentConfig} config @param {string} sourceGitUrl @param {string} ref @returns {string} */
 function examplesSection(config, sourceGitUrl, ref) {
 	if (!config.cliExamples.trim()) return '';
 
-	const baseCmd = `uvx ${config.pyFlag}--from ${sourceGitUrl}@${ref} ${config.cliName}`;
+	const baseCmd = `uvx ${config.pyFlag}--from ${quotedFromValue(sourceGitUrl, ref)} ${config.cliName}`;
 	const examples = config.cliExamples.replace(/\{cmd\}/g, baseCmd).trim();
 	return `
 
-📋 Example usage
+<details>
+<summary>📋 Example usage</summary>
 
 ${FENCE}bash
 ${examples}
-${FENCE}`;
+${FENCE}
+
+</details>`;
 }
 
 /** @param {ActiveBodyOptions} options @returns {string} */
@@ -29,23 +34,25 @@ function activeBody({ marker, config, headGitUrl, headRef, headSha, shortSha }) 
 	return `${marker}\n
 ## 🧪 Test this PR
 
-You can test this PR directly using \`uvx\`:
+You can test this PR directly using [\`uvx\`]:
 
 **From branch:**
 
 ${FENCE}bash
-uvx ${config.pyFlag}--from ${headGitUrl}@${headRef} ${config.cliName} --help
+uvx ${config.pyFlag}--from ${quotedFromValue(headGitUrl, headRef)} ${config.cliName} --help
 ${FENCE}
 
 **From specific commit (\`${shortSha}\`):**
 
 ${FENCE}bash
-uvx ${config.pyFlag}--from ${headGitUrl}@${headSha} ${config.cliName} --help
+uvx ${config.pyFlag}--from ${quotedFromValue(headGitUrl, headSha)} ${config.cliName} --help
 ${FENCE}${examplesSection(config, headGitUrl, headRef)}
 
 ---
 
 🤖 Auto-updated on push • Commit: ${shortSha}
+
+[\`uvx\`]: https://docs.astral.sh/uv/getting-started/installation/
 `;
 }
 
@@ -71,7 +78,7 @@ function archivedBody({
 This PR has been ${isMerged ? 'merged' : 'closed'}. You can still test the final state:
 
 ${FENCE}bash
-uvx ${config.pyFlag}--from ${archivedGitUrl}@${archivedRef} ${config.cliName} --help
+uvx ${config.pyFlag}--from ${quotedFromValue(archivedGitUrl, archivedRef)} ${config.cliName} --help
 ${FENCE}
 
 📋 PR Details
@@ -97,8 +104,8 @@ export default async ({ core, context, github }) => {
 	const config = readConfig(repo);
 	const marker = `<!-- ${repo}-pr-test-comment -->`;
 	const shortSha = pullRequest.head.sha.substring(0, 7);
-	const baseGitUrl = `git+https://github.com/${owner}/${repo}`;
-	const headGitUrl = `git+https://github.com/${pullRequest.head.repo.full_name}`;
+	const baseGitUrl = `git+${context.serverUrl}/${owner}/${repo}`;
+	const headGitUrl = `git+${context.serverUrl}/${pullRequest.head.repo.full_name}`;
 
 	const comments = await github.paginate(
 		github.rest.issues.listComments,
@@ -256,11 +263,11 @@ function splitRepository(fullName) {
 
 /** @param {string} defaultCliName @returns {CommentConfig} */
 function readConfig(defaultCliName) {
-	const pythonVersion = process.env.PYTHON_VERSION;
+	const pythonVersion = env.PYTHON_VERSION;
 	return {
-		cliName: process.env.CLI_NAME || defaultCliName,
+		cliName: env.CLI_NAME || defaultCliName,
 		pyFlag: pythonVersion ? `-p${pythonVersion} ` : '',
-		cliExamples: process.env.CLI_EXAMPLES || '',
+		cliExamples: env.CLI_EXAMPLES || '',
 	};
 }
 
@@ -337,4 +344,14 @@ function errorDetails(error) {
 	}
 
 	return String(error);
+}
+
+/** @param {string} value @returns {string} */
+function shellQuote(value) {
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/** @param {string} sourceGitUrl @param {string} ref @returns {string} */
+function quotedFromValue(sourceGitUrl, ref) {
+	return shellQuote(`${sourceGitUrl}@${ref}`);
 }
