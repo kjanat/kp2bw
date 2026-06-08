@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Windows bw .cmd
+on:
+  workflow_call:
+  pull_request:
+  push: { branches: [master] }
+  workflow_dispatch:
+jobs:
+  npm-cmd-shim:
+    runs-on: windows-latest
+    permissions: { contents: read }
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with: { persist-credentials: false }
+      - uses: astral-sh/setup-uv@v8.2.0
+      - run: uv sync
+
+      # windows-latest ships Node + npm preinstalled, so no setup-node action is
+      # needed. npm global installs ship bw.cmd + bw.ps1 (no bw.exe).
+      - name: Install Bitwarden CLI via npm
+        run: npm install -g @bitwarden/cli
+
+      # Diagnostic only: PowerShell's Get-Command prefers bw.ps1, but kp2bw uses
+      # Python's shutil.which (PATHEXT-aware), which resolves bw.cmd. The smoke
+      # test below is the actual gate via resolve_bw_command.
+      - name: Diagnose how bw resolves
+        shell: pwsh
+        run: |
+          Write-Host "PATHEXT = $env:PATHEXT"
+          Get-Command bw -All | Format-Table CommandType, Name, Source -AutoSize
+          uv run python -c "import shutil; print('shutil.which(bw) =', shutil.which('bw'))"
+
+      - name: Run Windows bw .cmd smoke test
+        env: { KP2BW_RUN_WIN_CMD_SMOKE: "1" }
+        run: uv run python tests/windows_bw_cmd_smoke.py

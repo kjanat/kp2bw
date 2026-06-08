@@ -6,15 +6,17 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 
 ## WHERE TO LOOK
 
-| Task                      | Location                        | Notes                                                    |
-| ------------------------- | ------------------------------- | -------------------------------------------------------- |
-| Package smoke validation  | `tests/smoke_test.py`           | Verifies built artifact behavior, metadata, entry points |
-| Stubs package validation  | `tests/stubs_smoke_test.py`     | Verifies `partial` marker + type-check consumption       |
-| Full migration e2e        | `tests/e2e_vaultwarden_test.py` | Runs conversion twice and asserts idempotency            |
-| Integration infra         | `tests/docker-compose.yml`      | Vaultwarden + test container orchestration               |
-| Vaultwarden image seeding | `tests/Dockerfile.vaultwarden`  | Loads DB/key fixtures into image                         |
-| Test runner image         | `tests/Dockerfile.test`         | Installs uv + bw CLI + test deps                         |
-| Fixture retention rules   | `tests/fixtures/.gitignore`     | Allowlist keeps required DB/certs tracked                |
+| Task                      | Location                         | Notes                                                    |
+| ------------------------- | -------------------------------- | -------------------------------------------------------- |
+| bw command resolution     | `tests/bw_serve_command_test.py` | Cross-platform argv wrapping + process teardown logic    |
+| Windows bw.cmd live smoke | `tests/windows_bw_cmd_smoke.py`  | Gated by `KP2BW_RUN_WIN_CMD_SMOKE=1`; Windows CI only    |
+| Package smoke validation  | `tests/smoke_test.py`            | Verifies built artifact behavior, metadata, entry points |
+| Stubs package validation  | `tests/stubs_smoke_test.py`      | Verifies `partial` marker + type-check consumption       |
+| Full migration e2e        | `tests/e2e_vaultwarden_test.py`  | Runs conversion twice and asserts idempotency            |
+| Integration infra         | `tests/docker-compose.yml`       | Vaultwarden + test container orchestration               |
+| Vaultwarden image seeding | `tests/Dockerfile.vaultwarden`   | Loads DB/key fixtures into image                         |
+| Test runner image         | `tests/Dockerfile.test`          | Installs uv + bw CLI + test deps                         |
+| Fixture retention rules   | `tests/fixtures/.gitignore`      | Allowlist keeps required DB/certs tracked                |
 
 ## CONVENTIONS
 

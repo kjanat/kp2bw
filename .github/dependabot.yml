@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://www.schemastore.org/dependabot-2.0.json
+# Dependabot version updates.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+---
+version: 2
+updates:
+  # Python runtime + stubs (root pyproject.toml + uv.lock workspace)
+  - package-ecosystem: uv
+    directory: /
+    schedule: { interval: monthly }
+    commit-message: { prefix: chore, prefix-development: chore, include: scope }
+    cooldown: { default-days: 7 }
+    groups:
+      uv:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # JS tooling (root package.json + bun.lock)
+  - package-ecosystem: bun
+    directory: /
+    schedule: { interval: monthly }
+    commit-message: { prefix: chore, include: scope }
+    cooldown: { default-days: 7 }
+    groups:
+      bun:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # GitHub Actions used by workflows under .github/workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    commit-message: { prefix: ci, include: scope }
+    cooldown: { default-days: 7 }
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Test images (tests/Dockerfile.test, tests/Dockerfile.vaultwarden)
+  - package-ecosystem: docker
+    directory: /tests
+    schedule: { interval: monthly }
+    commit-message: { prefix: chore, include: scope }
+    cooldown: { default-days: 7 }
+    groups:
+      docker:
+        patterns: ["*"]
+
+  # Test orchestration (tests/docker-compose.yml)
+  - package-ecosystem: docker-compose
+    directory: /tests
+    schedule: { interval: monthly }
+    commit-message: { prefix: chore, include: scope }
+    cooldown: { default-days: 7 }
+    groups:
+      docker-compose:
+        patterns: ["*"]
