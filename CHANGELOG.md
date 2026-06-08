@@ -24,7 +24,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   notes (e.g. pasting in new recovery keys) without touching credentials left
   the existing Bitwarden item unchanged, forcing a full vault purge to
   re-import. Existing items are now updated in place on re-run.
-- **Long notes not attached to (or refreshed on) already-imported entries**
+- **Long notes not attached to (or refreshed on) previously imported entries**
   (#11) -- notes over 10k chars migrate to a `notes.txt` attachment, but
   previously imported (skipped) entries never received it, and an edited
   attachment that kept the same filename was never updated. Re-runs now upload
