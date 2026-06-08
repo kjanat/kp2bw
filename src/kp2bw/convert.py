@@ -237,7 +237,7 @@ class Converter:
             organizationId=self._bitwarden_organization_id,
             collectionIds=[],
             folderId=None,
-            type=1,
+            type=BW_ITEM_TYPE_LOGIN,
             name=title,
             notes=notes,
             favorite=False,
@@ -874,9 +874,10 @@ class Converter:
             # Existing items needing only missing attachments uploaded:
             # (item_id, [attachments]).
             existing_uploads: list[tuple[str, list[AttachmentItem]]] = []
-            # Vault items already reconciled this run, so two KeePass entries
-            # sharing one (folder, name) don't double-PUT or double-upload.
-            reconciled_ids: set[str] = set()
+            # (item_id, filename) pairs already queued this run, so two KeePass
+            # entries sharing one (folder, name) can't upload the same file
+            # twice while each entry's *unique* attachments are still uploaded.
+            queued_atts: set[tuple[str, str]] = set()
 
             task1 = progress.add_task("Processing entries", total=len(self._entries))
             for key, entry_value in self._entries.items():
@@ -892,15 +893,7 @@ class Converter:
                 # missing attachments) instead of blindly skipping it.
                 existing = bw.get_existing_item(folder, bw_item["name"])
                 if existing is not None:
-                    # Two KeePass entries can map to the same vault item (same
-                    # folder + title); reconcile it once to avoid a redundant
-                    # PUT and a duplicate attachment upload.
-                    if existing["id"] in reconciled_ids:
-                        n_skipped += 1
-                        progress.advance(task1)
-                        continue
-                    reconciled_ids.add(existing["id"])
-
+                    item_id = existing["id"]
                     outcome, missing_atts = self._reconcile_existing_item(
                         bw,
                         existing,
@@ -918,8 +911,17 @@ class Converter:
                     else:  # "skipped" — content unchanged (attachments, if any,
                         # are reported separately via the attachment counters).
                         n_skipped += 1
-                    if missing_atts:
-                        existing_uploads.append((existing["id"], missing_atts))
+                    # Queue each missing file once per item, so two KeePass
+                    # entries collapsing to the same vault item don't upload a
+                    # shared file twice yet still contribute their unique files.
+                    unique_atts: list[AttachmentItem] = []
+                    for att in missing_atts:
+                        pair = (item_id, self._attachment_filename(att))
+                        if pair not in queued_atts:
+                            queued_atts.add(pair)
+                            unique_atts.append(att)
+                    if unique_atts:
+                        existing_uploads.append((item_id, unique_atts))
                     progress.advance(task1)
                     continue
 
