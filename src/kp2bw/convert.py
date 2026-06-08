@@ -788,14 +788,17 @@ class Converter:
         return payload
 
     @staticmethod
-    def _existing_attachment_names(
+    def _existing_attachments(
         bw: BitwardenServeClient, item_id: str
-    ) -> set[str] | None:
-        """Return filenames already attached to *item_id*, or ``None`` on error.
+    ) -> dict[str, str] | None:
+        """Return ``{fileName: attachment_id}`` for *item_id*, or ``None`` on error.
 
-        Fetched authoritatively via GET so upload-if-missing never duplicates a
-        file.  ``None`` signals "could not determine" so the caller skips the
-        upload rather than risk a duplicate.
+        Fetched authoritatively via GET so reconciliation never duplicates a
+        file and can address an existing attachment by id when its content needs
+        refreshing.  ``None`` signals "could not determine" so the caller skips
+        the sync rather than risk a duplicate or a destructive delete.  When a
+        filename is somehow present more than once (a state kp2bw never creates),
+        the last id wins; the extra copy is harmless and collapses on a re-run.
         """
         try:
             item = bw.get_item(item_id)
@@ -806,10 +809,37 @@ class Converter:
             )
             return None
         return {
-            a.get("fileName", "")
+            name: att_id
             for a in (item.get("attachments") or [])
-            if a.get("fileName")
+            if (name := a.get("fileName", "")) and (att_id := a.get("id", ""))
         }
+
+    @staticmethod
+    def _attachment_content_differs(
+        bw: BitwardenServeClient,
+        item_id: str,
+        attachment_id: str,
+        att: AttachmentItem,
+    ) -> bool:
+        """True if the vault attachment's bytes differ from the KeePass source.
+
+        Lets an edited attachment that keeps the same filename (a refreshed
+        ``notes.txt`` recovery key, a swapped ``secret.jpg``) be replaced on a
+        re-run instead of going stale, while an unchanged file stays untouched
+        so the run remains idempotent.  If the existing bytes cannot be read the
+        attachment is treated as unchanged: that is the safe choice, since
+        re-uploading-and-deleting on an unreadable file risks losing it.
+        """
+        _name, desired = Converter._materialise_attachment(att)
+        try:
+            current = bw.get_attachment(item_id, attachment_id)
+        except BitwardenClientError:
+            logger.warning(
+                f"Could not read attachment {attachment_id!r} on item {item_id}; "
+                f"leaving it unchanged"
+            )
+            return False
+        return current != desired
 
     def _reconcile_existing_item(
         self,
@@ -821,15 +851,19 @@ class Converter:
         *,
         fixed_coll_id: str | None,
     ) -> tuple[
-        Literal["updated", "collection", "skipped", "failed"], list[AttachmentItem]
+        Literal["updated", "collection", "skipped", "failed"],
+        list[AttachmentItem],
+        dict[str, str],
     ]:
         """Sync KeePass changes onto an item that already exists in the vault.
 
-        Returns ``(outcome, missing_attachments)`` where *outcome* is one of
-        ``"updated"`` (content PUT), ``"collection"`` (membership-only PUT),
-        ``"skipped"`` (no change) or ``"failed"`` (the PUT was rejected), and
-        *missing_attachments* are the files the item does not yet have and that
-        should be uploaded.
+        Returns ``(outcome, upload_attachments, stale_by_name)`` where *outcome*
+        is one of ``"updated"`` (content PUT), ``"collection"`` (membership-only
+        PUT), ``"skipped"`` (no change) or ``"failed"`` (the PUT was rejected);
+        *upload_attachments* are the files to (re-)upload -- those the item does
+        not have yet plus those whose content changed; and *stale_by_name* maps
+        a changed file's name to the id of the stale copy to delete once its
+        replacement has been uploaded.
         """
         name = bw_item["name"]
         item_id = existing["id"]
@@ -843,7 +877,7 @@ class Converter:
                 VERBOSE,
                 f"-- Entry {name!r}: matched a non-login item, skipping",
             )
-            return outcome, []
+            return outcome, [], {}
 
         # Content/collection sync. A rejected PUT here is non-fatal: one
         # problematic entry must not abort the whole re-run and strand every
@@ -885,26 +919,34 @@ class Converter:
             )
             outcome = "failed"
 
-        # Attachment sync: upload only files the item is missing, so a
+        # Attachment sync: upload files the item is missing (so a
         # previously-skipped entry finally gets its notes.txt / long-field / file
-        # attachments without ever duplicating ones already present.
-        missing_atts: list[AttachmentItem] = []
+        # attachments) *and* refresh files whose content changed but kept the
+        # same name, never duplicating an identical one already present.
+        upload_atts: list[AttachmentItem] = []
+        stale_by_name: dict[str, str] = {}
         if self._update_existing and attachments:
-            existing_names = self._existing_attachment_names(bw, item_id)
-            if existing_names is not None:
-                missing_atts = [
-                    att
-                    for att in attachments
-                    if self._attachment_filename(att) not in existing_names
-                ]
+            existing_atts = self._existing_attachments(bw, item_id)
+            if existing_atts is not None:
+                for att in attachments:
+                    fname = self._attachment_filename(att)
+                    old_id = existing_atts.get(fname)
+                    if old_id is None:
+                        # Item doesn't have this file yet -- upload it.
+                        upload_atts.append(att)
+                    elif self._attachment_content_differs(bw, item_id, old_id, att):
+                        # Same name, changed bytes -- re-upload the new content
+                        # and mark the stale copy for deletion afterwards.
+                        upload_atts.append(att)
+                        stale_by_name[fname] = old_id
 
-        if outcome == "skipped" and not missing_atts:
+        if outcome == "skipped" and not upload_atts:
             logger.log(
                 VERBOSE,
                 f"-- Entry {name!r} unchanged in folder {folder!r}, skipping",
             )
 
-        return outcome, missing_atts
+        return outcome, upload_atts, stale_by_name
 
     def _create_bitwarden_items_for_entries(self) -> int:
         """Create entries via ``bw serve`` HTTP API and upload attachments.
@@ -959,6 +1001,10 @@ class Converter:
             # entries sharing one (folder, name) can't upload the same file
             # twice while each entry's *unique* attachments are still uploaded.
             queued_atts: set[tuple[str, str]] = set()
+            # Stale copies to remove after their replacement uploads, as
+            # (item_id, attachment_id, filename); the delete only fires once the
+            # matching (item_id, filename) upload has succeeded.
+            pending_deletes: list[tuple[str, str, str]] = []
 
             task1 = progress.add_task("Processing entries", total=len(self._entries))
             for key, entry_value in self._entries.items():
@@ -975,7 +1021,7 @@ class Converter:
                 existing = bw.get_existing_item(folder, bw_item["name"])
                 if existing is not None:
                     item_id = existing["id"]
-                    outcome, missing_atts = self._reconcile_existing_item(
+                    outcome, upload_atts, stale_by_name = self._reconcile_existing_item(
                         bw,
                         existing,
                         folder,
@@ -992,15 +1038,21 @@ class Converter:
                     else:  # "skipped" — content unchanged (attachments, if any,
                         # are reported separately via the attachment counters).
                         n_skipped += 1
-                    # Queue each missing file once per item, so two KeePass
-                    # entries collapsing to the same vault item don't upload a
-                    # shared file twice yet still contribute their unique files.
+                    # Queue each file once per item, so two KeePass entries
+                    # collapsing to the same vault item don't upload a shared
+                    # file twice yet still contribute their unique files. A
+                    # changed file's stale copy is scheduled for deletion only
+                    # alongside the queued replacement upload.
                     unique_atts: list[AttachmentItem] = []
-                    for att in missing_atts:
-                        pair = (item_id, self._attachment_filename(att))
+                    for att in upload_atts:
+                        fname = self._attachment_filename(att)
+                        pair = (item_id, fname)
                         if pair not in queued_atts:
                             queued_atts.add(pair)
                             unique_atts.append(att)
+                            old_id = stale_by_name.get(fname)
+                            if old_id is not None:
+                                pending_deletes.append((item_id, old_id, fname))
                     if unique_atts:
                         existing_uploads.append((item_id, unique_atts))
                     progress.advance(task1)
@@ -1058,6 +1110,25 @@ class Converter:
                 n_attach_failed = len(failed)
                 n_attachments = total_files - n_attach_failed
                 progress.update(task3, completed=len(upload_items))
+
+                # --- Phase 4: remove stale copies of refreshed attachments --
+                # Upload-then-delete: only drop the old copy once its
+                # replacement landed, so a failed re-upload never loses data. A
+                # failed delete is non-fatal (it just leaves a harmless extra
+                # copy that collapses on the next run).
+                if pending_deletes:
+                    failed_uploads = set(failed)
+                    for item_id, old_id, fname in pending_deletes:
+                        if (item_id, fname) in failed_uploads:
+                            continue
+                        try:
+                            bw.delete_attachment(item_id, old_id)
+                        except BitwardenClientError as exc:
+                            logger.warning(
+                                f"Could not remove the stale copy of {fname!r} "
+                                f"on item {item_id} (a duplicate may remain): "
+                                f"{exc}"
+                            )
 
         elapsed = time.monotonic() - t_start
         _print_summary(

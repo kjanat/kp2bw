@@ -57,7 +57,7 @@ class UpdateTestConverter(Converter):
         attachments: list[AttachmentItem],
         *,
         fixed_coll_id: str | None,
-    ) -> tuple[str, list[AttachmentItem]]:
+    ) -> tuple[str, list[AttachmentItem], dict[str, str]]:
         """Public shim for existing-item reconciliation."""
         return self._reconcile_existing_item(
             bw, existing, folder, bw_item, attachments, fixed_coll_id=fixed_coll_id
@@ -126,14 +126,19 @@ class FakeBw:
         self,
         *,
         existing_attachments: list[dict[str, str]] | None = None,
+        attachment_bytes: dict[str, bytes] | None = None,
         fail_get: bool = False,
         fail_update: bool = False,
+        fail_get_attachment: bool = False,
     ) -> None:
         self.updates: list[tuple[str, BwItemResponse]] = []
         self.dedup_updates: list[tuple[str | None, str]] = []
+        self.deletes: list[tuple[str, str]] = []
         self._attachments = existing_attachments or []
+        self._attachment_bytes = attachment_bytes or {}
         self._fail_get = fail_get
         self._fail_update = fail_update
+        self._fail_get_attachment = fail_get_attachment
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
         if self._fail_update:
@@ -149,6 +154,14 @@ class FakeBw:
         if self._fail_get:
             raise BitwardenClientError("simulated GET failure")
         return cast(BwItemResponse, {"id": item_id, "attachments": self._attachments})
+
+    def get_attachment(self, item_id: str, attachment_id: str) -> bytes:
+        if self._fail_get_attachment:
+            raise BitwardenClientError("simulated attachment download failure")
+        return self._attachment_bytes.get(attachment_id, b"")
+
+    def delete_attachment(self, item_id: str, attachment_id: str) -> None:
+        self.deletes.append((item_id, attachment_id))
 
 
 def _as_bw(fake: FakeBw) -> BitwardenServeClient:
@@ -271,7 +284,7 @@ def assert_update_payload_preserves_existing_passkey() -> None:
 def assert_unchanged_entry_is_skipped() -> None:
     conv = UpdateTestConverter()
     bw = FakeBw()
-    outcome, missing = conv.reconcile(
+    outcome, missing, _ = conv.reconcile(
         _as_bw(bw),
         _make_existing(),
         "folder-1",
@@ -288,7 +301,7 @@ def assert_unchanged_entry_is_skipped() -> None:
 def assert_changed_notes_trigger_update() -> None:
     conv = UpdateTestConverter()
     bw = FakeBw()
-    outcome, _ = conv.reconcile(
+    outcome, _, _ = conv.reconcile(
         _as_bw(bw),
         _make_existing(notes="old"),
         "folder-1",
@@ -308,7 +321,7 @@ def assert_missing_attachment_is_uploaded() -> None:
     conv = UpdateTestConverter()
     bw = FakeBw(existing_attachments=[])  # item has no attachments yet
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
-    outcome, missing = conv.reconcile(
+    outcome, missing, stale = conv.reconcile(
         _as_bw(bw),
         _make_existing(),
         "folder-1",
@@ -320,16 +333,23 @@ def assert_missing_attachment_is_uploaded() -> None:
         raise AssertionError(
             f"missing notes attachment should be queued, got {missing!r}"
         )
+    if stale:
+        raise AssertionError(f"a brand-new attachment has no stale copy, got {stale!r}")
     # Content unchanged, so the only reason this isn't pure-skip is the upload.
     if outcome != "skipped":
         raise AssertionError(f"expected content outcome 'skipped', got {outcome!r}")
 
 
-def assert_present_attachment_not_reuploaded() -> None:
+def assert_identical_attachment_not_reuploaded() -> None:
     conv = UpdateTestConverter()
-    bw = FakeBw(existing_attachments=[{"id": "att1", "fileName": "notes.txt"}])
+    # Existing notes.txt holds exactly the bytes the KeePass long note would
+    # materialise to, so an unchanged re-run must touch nothing.
+    bw = FakeBw(
+        existing_attachments=[{"id": "att1", "fileName": "notes.txt"}],
+        attachment_bytes={"att1": b"y" * 20000},
+    )
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
-    _, missing = conv.reconcile(
+    _, missing, stale = conv.reconcile(
         _as_bw(bw),
         _make_existing(),
         "folder-1",
@@ -338,14 +358,68 @@ def assert_present_attachment_not_reuploaded() -> None:
         fixed_coll_id=None,
     )
     if missing:
-        raise AssertionError("existing attachment must not be re-uploaded (no dups)")
+        raise AssertionError("identical attachment must not be re-uploaded (no dups)")
+    if stale:
+        raise AssertionError("identical attachment must not schedule a delete")
+
+
+def assert_changed_attachment_is_refreshed() -> None:
+    conv = UpdateTestConverter()
+    # Existing notes.txt holds stale bytes; the KeePass long note changed but
+    # keeps the same filename, so it must be re-uploaded and the old copy
+    # scheduled for deletion (content-aware reconciliation, issue #11).
+    bw = FakeBw(
+        existing_attachments=[{"id": "att1", "fileName": "notes.txt"}],
+        attachment_bytes={"att1": b"OLD recovery keys"},
+    )
+    atts: list[AttachmentItem] = [("notes", "y" * 20000)]
+    _, missing, stale = conv.reconcile(
+        _as_bw(bw),
+        _make_existing(),
+        "folder-1",
+        _make_desired(),
+        atts,
+        fixed_coll_id=None,
+    )
+    names = [name for name, _ in (cast(tuple[str, str], a) for a in missing)]
+    if names != ["notes"]:
+        raise AssertionError(
+            f"changed attachment should be re-uploaded, got {missing!r}"
+        )
+    if stale != {"notes.txt": "att1"}:
+        raise AssertionError(
+            f"stale copy should be scheduled for deletion, got {stale!r}"
+        )
+
+
+def assert_changed_attachment_safe_on_download_failure() -> None:
+    conv = UpdateTestConverter()
+    # The existing copy cannot be downloaded for comparison; we must not risk a
+    # re-upload-and-delete that could lose the only copy -- treat as unchanged.
+    bw = FakeBw(
+        existing_attachments=[{"id": "att1", "fileName": "notes.txt"}],
+        fail_get_attachment=True,
+    )
+    atts: list[AttachmentItem] = [("notes", "y" * 20000)]
+    _, missing, stale = conv.reconcile(
+        _as_bw(bw),
+        _make_existing(),
+        "folder-1",
+        _make_desired(),
+        atts,
+        fixed_coll_id=None,
+    )
+    if missing or stale:
+        raise AssertionError(
+            "on download failure, must not re-upload or delete (avoid data loss)"
+        )
 
 
 def assert_attachment_sync_safe_on_get_failure() -> None:
     conv = UpdateTestConverter()
     bw = FakeBw(fail_get=True)
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
-    _, missing = conv.reconcile(
+    _, missing, stale = conv.reconcile(
         _as_bw(bw),
         _make_existing(),
         "folder-1",
@@ -353,14 +427,14 @@ def assert_attachment_sync_safe_on_get_failure() -> None:
         atts,
         fixed_coll_id=None,
     )
-    if missing:
+    if missing or stale:
         raise AssertionError("on GET failure, must not upload (avoid duplicates)")
 
 
 def assert_rejected_update_is_non_fatal() -> None:
     conv = UpdateTestConverter()
     bw = FakeBw(fail_update=True)
-    outcome, _ = conv.reconcile(
+    outcome, _, _ = conv.reconcile(
         _as_bw(bw),
         _make_existing(notes="old"),
         "folder-1",
@@ -378,7 +452,7 @@ def assert_no_update_flag_restores_skip() -> None:
     conv = UpdateTestConverter(update_existing=False)
     bw = FakeBw(existing_attachments=[])
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
-    outcome, missing = conv.reconcile(
+    outcome, missing, _ = conv.reconcile(
         _as_bw(bw),
         _make_existing(notes="old"),
         "folder-1",
@@ -398,7 +472,7 @@ def assert_non_login_collision_is_not_mutated() -> None:
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     # A secure note (type 2) sharing the (folder, name) must not receive the
     # KeePass login's content or attachments.
-    outcome, missing = conv.reconcile(
+    outcome, missing, stale = conv.reconcile(
         _as_bw(bw),
         _make_existing(type=2, notes="old"),
         "folder-1",
@@ -406,7 +480,7 @@ def assert_non_login_collision_is_not_mutated() -> None:
         atts,
         fixed_coll_id=None,
     )
-    if outcome != "skipped" or missing:
+    if outcome != "skipped" or missing or stale:
         raise AssertionError("non-login collision must be skipped with no uploads")
     if bw.updates:
         raise AssertionError("non-login collision must not issue a PUT")
@@ -426,7 +500,9 @@ def main() -> None:
     assert_unchanged_entry_is_skipped()
     assert_changed_notes_trigger_update()
     assert_missing_attachment_is_uploaded()
-    assert_present_attachment_not_reuploaded()
+    assert_identical_attachment_not_reuploaded()
+    assert_changed_attachment_is_refreshed()
+    assert_changed_attachment_safe_on_download_failure()
     assert_attachment_sync_safe_on_get_failure()
     assert_rejected_update_is_non_fatal()
     assert_no_update_flag_restores_skip()

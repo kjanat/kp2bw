@@ -210,6 +210,43 @@ def _update_keepass_snapshot(path: Path, password: str) -> None:
     kp.save()
 
 
+# A second long note (still over the 10k attachment threshold) used to verify
+# that an *edited* attachment keeping the same filename is refreshed in place on
+# a re-run instead of going stale or duplicating (issue #11).
+LONG_NOTE_V2 = "ROTATED-SECRET-" * 1000  # ~15k chars, comfortably over the limit
+
+
+def _edit_big_note_snapshot(path: Path, password: str, new_notes: str) -> None:
+    """Replace the Big Note entry's long note to exercise attachment refresh."""
+    kp = PyKeePass(str(path), password=password)
+    found = kp.find_entries(title="Big Note", first=True)
+    if found is None:
+        raise AssertionError("Fixture contract broken: 'Big Note' entry not found")
+    big = cast(Entry, found)
+    big.notes = new_notes
+    kp.save()
+
+
+def _get_attachment_text(
+    env: dict[str, str], session: str, item_id: str, file_name: str
+) -> str:
+    """Download a named attachment's decrypted text via the bw CLI."""
+    return _run(
+        [
+            "bw",
+            "get",
+            "attachment",
+            file_name,
+            "--itemid",
+            item_id,
+            "--raw",
+            "--session",
+            session,
+        ],
+        env=env,
+    )
+
+
 def _run_migration(
     snapshot_path: Path,
     kp_password: str,
@@ -450,6 +487,45 @@ def main() -> None:
         if len(big_full.get("notes") or "") > 10 * 1000:
             raise AssertionError("Long note should be offloaded to the attachment")
 
+        big_id = str(big_notes[0]["id"])
+        # The attachment must carry the original long note verbatim.
+        original_attachment = _get_attachment_text(env, session, big_id, "notes.txt")
+        if original_attachment != LONG_NOTE:
+            raise AssertionError(
+                "notes.txt attachment content does not match the original long note"
+            )
+
+        # --- Attachment refresh: edit the long note (same filename) and re-run.
+        # The notes.txt attachment must be replaced with the new content and the
+        # stale copy removed -- not left as a duplicate (content-aware sync, #11).
+        logger.info("Editing Big Note's long note and running attachment-refresh pass")
+        _edit_big_note_snapshot(snapshot_path, kp_password, LONG_NOTE_V2)
+        _ = _run_migration(snapshot_path, kp_password, bw_password, env)
+        session = _get_session(env, bw_password)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+
+        big_full = json.loads(
+            _run(["bw", "get", "item", big_id, "--session", session], env=env)
+        )
+        notes_attachments = [
+            a
+            for a in big_full.get("attachments", [])
+            if a.get("fileName") == "notes.txt"
+        ]
+        if len(notes_attachments) != 1:
+            raise AssertionError(
+                f"Refreshed attachment must replace, not duplicate: {notes_attachments}"
+            )
+        refreshed_attachment = _get_attachment_text(env, session, big_id, "notes.txt")
+        if refreshed_attachment != LONG_NOTE_V2:
+            raise AssertionError(
+                "notes.txt attachment was not refreshed with the edited long note"
+            )
+
+        # Re-capture the post-refresh item list so the final idempotency check
+        # compares against the refreshed state.
+        items = _bw_json(env, "list", "items", "--session", session)
+
         # Re-running with no further edits must be idempotent (no duplicates).
         _ = _run_migration(snapshot_path, kp_password, bw_password, env)
         # kp2bw's `bw serve` rotates the shared CLI session, so re-acquire one
@@ -462,6 +538,21 @@ def main() -> None:
         if len(items_after) != len(items):
             raise AssertionError(
                 f"Idempotent re-run changed item count: {len(items)} -> {len(items_after)}"
+            )
+
+        # An unchanged attachment must not be re-uploaded or duplicated either:
+        # content-aware reconciliation has to see identical bytes and skip.
+        big_after = json.loads(
+            _run(["bw", "get", "item", big_id, "--session", session], env=env)
+        )
+        notes_after = [
+            a
+            for a in big_after.get("attachments", [])
+            if a.get("fileName") == "notes.txt"
+        ]
+        if len(notes_after) != 1:
+            raise AssertionError(
+                f"Idempotent re-run changed notes.txt copies: {len(notes_after)}"
             )
 
     print("vaultwarden end-to-end integration test passed")

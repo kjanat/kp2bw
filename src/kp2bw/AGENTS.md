@@ -59,10 +59,17 @@ src/kp2bw/
   a matched login item via `_content_differs()` and, when changed, `PUT`s a
   payload built by `_build_update_payload()` (preserves id/favorite/folder/org,
   unions collectionIds, keeps a Bitwarden-side passkey absent from KeePass).
-  Missing attachments are uploaded, deduped per `(item_id, filename)`. Content
-  and attachment failures are non-fatal and counted; `convert()` returns the
-  failure count and the CLI exits non-zero when it is non-zero. `--no-update`
-  restores skip-only behavior (collection-membership sync still applies).
+  Attachments are reconciled by content, not just name: a file the item lacks is
+  uploaded, and one whose bytes changed but kept its filename is re-uploaded
+  (`_attachment_content_differs()` downloads via `get_attachment()` and compares;
+  an unreadable existing copy is treated as unchanged to avoid data loss). The
+  stale copy is deleted only after its replacement uploads (upload-then-delete),
+  so `upload_attachments()` returns failed `(item_id, filename)` pairs and a
+  delete is skipped when its replacement upload failed. Uploads are deduped per
+  `(item_id, filename)`. Content and attachment failures are non-fatal and
+  counted; `convert()` returns the failure count and the CLI exits non-zero when
+  it is non-zero. `--no-update` restores skip-only behavior (collection-
+  membership sync still applies).
 - Dedup index is org-scoped when `--bitwarden-org` is set: `_build_dedup_index()` passes `organization_id=self._org_id` to `list_items()`, which appends `organizationId` as a query param to `/list/object/items`. When `org_id` is `None` (personal vault), no filter is applied and all vault items are indexed. This prevents personal vault entries from shadowing an empty org vault during migration.
 - When a fixed `--bitwarden-collection` is given, the dedup index is further scoped to that collection via `collection_id`. Items in other collections are treated as new.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via `codegen-check.yml`.

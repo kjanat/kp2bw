@@ -142,9 +142,11 @@ Re-running `kp2bw` against the same database updates matched entries in place
 when their KeePass content changed (notes, password, username, URIs or custom
 fields), so you no longer need to purge the vault to push edits. Unchanged
 entries are left untouched. A re-run also uploads any `notes.txt` / long-field
-/ file attachment that a previously-imported entry was missing. Pass
-`--no-update` (or `KP2BW_UPDATE=0`) to keep the old skip-only behavior and
-preserve manual Bitwarden-side edits.
+/ file attachment that a previously-imported entry was missing, and refreshes
+one whose contents changed in KeePass even when it keeps the same filename (the
+stale copy is removed only once the new one has uploaded). Pass `--no-update`
+(or `KP2BW_UPDATE=0`) to keep the old skip-only behavior and preserve manual
+Bitwarden-side edits.
 
 ### An attachment failed to upload
 

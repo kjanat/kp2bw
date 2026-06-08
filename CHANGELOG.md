@@ -24,10 +24,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   notes (e.g. pasting in new recovery keys) without touching credentials left
   the existing Bitwarden item unchanged, forcing a full vault purge to
   re-import. Existing items are now updated in place on re-run.
-- **Long notes not attached to already-imported entries** (#11) -- notes over
-  10k chars migrate to a `notes.txt` attachment, but previously-imported
-  (skipped) entries never received it. Re-runs now upload any attachment an
-  existing item is missing, without creating duplicates.
+- **Long notes not attached to (or refreshed on) already-imported entries**
+  (#11) -- notes over 10k chars migrate to a `notes.txt` attachment, but
+  previously-imported (skipped) entries never received it, and an edited
+  attachment that kept the same filename was never updated. Re-runs now upload
+  any attachment an existing item is missing **and** refresh one whose content
+  changed (the stale copy is removed only after the replacement uploads), all
+  without creating duplicates. Applies to every attachment kp2bw manages --
+  long notes, long custom fields, and real KeePass file attachments.
 - **A single rejected attachment aborted the whole migration** (#11) -- an
   attachment the server refused (for example a `.jpg` rejected for premium or
   storage-quota reasons) raised an opaque `HTTP 400` that stopped everything.
