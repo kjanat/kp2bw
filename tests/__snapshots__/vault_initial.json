@@ -1,0 +1,221 @@
+{
+  "items": [
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [],
+      "folder": null,
+      "login": {
+        "fido2Credentials": [],
+        "password": null,
+        "totp": null,
+        "uris": [],
+        "username": "lonely-user"
+      },
+      "name": "Empty Password",
+      "notes": "",
+      "token": "/Empty Password",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [],
+      "folder": null,
+      "login": {
+        "fido2Credentials": [],
+        "password": "root-pass",
+        "totp": null,
+        "uris": [],
+        "username": "root-user"
+      },
+      "name": "Root Entry",
+      "notes": "root note",
+      "token": "/Root Entry",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [
+        {
+          "name": "notiz",
+          "type": 1,
+          "value": "geschützt"
+        }
+      ],
+      "folder": "Internet",
+      "login": {
+        "fido2Credentials": [],
+        "password": "naïve-pø$$wörd",
+        "totp": null,
+        "uris": [
+          {
+            "match": null,
+            "uri": "https://例え.テスト"
+          }
+        ],
+        "username": "café-user"
+      },
+      "name": "Café ☕ Ünïcødé",
+      "notes": "naïve note — ünïcødé ✓",
+      "token": "Internet/Café ☕ Ünïcødé",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [
+        {
+          "name": "api_token",
+          "type": 0,
+          "value": "abc123"
+        }
+      ],
+      "folder": "Internet",
+      "login": {
+        "fido2Credentials": [],
+        "password": "demo-pass",
+        "totp": "otpauth://totp/Example?secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=6&period=60",
+        "uris": [
+          {
+            "match": null,
+            "uri": "https://example.com"
+          }
+        ],
+        "username": "demo-user"
+      },
+      "name": "Example",
+      "notes": "seed note",
+      "token": "Internet/Example",
+      "type": 1
+    },
+    {
+      "attachments": [
+        {
+          "fileName": "logo.png",
+          "sha256": "c450020ade6b372670dc93155357cfe6e3331a435396cf74a42dbfea3afaabf8"
+        },
+        {
+          "fileName": "payload.bin",
+          "sha256": "785b0751fc2c53dc14a4ce3d800e69ef9ce1009eb327ccf458afe09c242c26c9"
+        }
+      ],
+      "favorite": false,
+      "fields": [
+        {
+          "name": "label",
+          "type": 0,
+          "value": "with attachments"
+        }
+      ],
+      "folder": "Internet",
+      "login": {
+        "fido2Credentials": [],
+        "password": "files-pass",
+        "totp": null,
+        "uris": [],
+        "username": "files-user"
+      },
+      "name": "Has Files",
+      "notes": "",
+      "token": "Internet/Has Files",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [],
+      "folder": "Internet",
+      "login": {
+        "fido2Credentials": [],
+        "password": "xc-pass",
+        "totp": "otpauth://totp/Issuer:xc-user?secret=GEZDGNBVGY3TQOJQ&issuer=Issuer&period=30&digits=6",
+        "uris": [],
+        "username": "xc-user"
+      },
+      "name": "KeePassXC OTP",
+      "notes": "",
+      "token": "Internet/KeePassXC OTP",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [
+        {
+          "name": "PIN",
+          "type": 1,
+          "value": "1234"
+        },
+        {
+          "name": "branch",
+          "type": 0,
+          "value": "downtown"
+        }
+      ],
+      "folder": "Internet/Banking",
+      "login": {
+        "fido2Credentials": [],
+        "password": "bank-pass",
+        "totp": "GEZDGNBVGY3TQOJQ",
+        "uris": [
+          {
+            "match": null,
+            "uri": "https://bank.example"
+          }
+        ],
+        "username": "bank-user"
+      },
+      "name": "Bank Account",
+      "notes": "",
+      "token": "Internet/Banking/Bank Account",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [
+        {
+          "name": "HmacOtp-Secret-Base32",
+          "type": 1,
+          "value": "JBSWY3DPEHPK3PXP"
+        }
+      ],
+      "folder": "Work",
+      "login": {
+        "fido2Credentials": [],
+        "password": "hotp-pass",
+        "totp": null,
+        "uris": [],
+        "username": "hotp-user"
+      },
+      "name": "HOTP Legacy",
+      "notes": "",
+      "token": "Work/HOTP Legacy",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
+      "fields": [],
+      "folder": "Work/Servers",
+      "login": {
+        "fido2Credentials": [],
+        "password": "ssh-pass",
+        "totp": "otpauth://totp/SSH%20Box?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&algorithm=SHA256&digits=8&period=30",
+        "uris": [
+          {
+            "match": null,
+            "uri": "ssh://10.0.0.5"
+          }
+        ],
+        "username": "ssh-user"
+      },
+      "name": "SSH Box",
+      "notes": "",
+      "token": "Work/Servers/SSH Box",
+      "type": 1
+    }
+  ]
+}

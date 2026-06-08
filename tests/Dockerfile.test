@@ -6,12 +6,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl unzip nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Bitwarden CLI — installed via bun, runs via node from apt
-RUN curl -fsSL https://bun.sh/install | bash \
-    && /root/.bun/bin/bun i -g @bitwarden/cli@latest
-ENV PATH="/root/.bun/bin:$PATH"
+# Bun is the package manager for the Bitwarden CLI; the CLI itself runs on the
+# apt-installed node.
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:/app/node_modules/.bin:$PATH"
 
 WORKDIR /app
+
+# Resolve @bitwarden/cli from the committed package.json + bun.lock (NOT @latest)
+# so the version is pinned and reproducible -- the golden snapshots are a
+# function of this exact CLI's JSON output, and Dependabot bumps it via the
+# `bun` ecosystem. Copy the manifests first so this layer caches independently
+# of source changes (bun-in-docker best practice).
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
 COPY . .
 RUN uv sync --frozen
 

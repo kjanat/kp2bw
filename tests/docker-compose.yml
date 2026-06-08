@@ -33,6 +33,14 @@ services:
       BW_TEST_EMAIL: "integration@example.com"
       BW_TEST_PASSWORD: "TestMasterPassword123!"
       KP_TEST_PASSWORD: "KpSnapshotPassword123!"
+      # The container ships the pinned @bitwarden/cli, so it owns the golden:
+      # compare by default; regenerate with `KP2BW_UPDATE_SNAPSHOTS=1 docker compose up`.
+      KP2BW_SNAPSHOT_GOLDEN: "1"
+      KP2BW_UPDATE_SNAPSHOTS: "${KP2BW_UPDATE_SNAPSHOTS:-0}"
+    # Bind the golden dir so the committed snapshots are read here and any
+    # regeneration lands back in the working tree (not just inside the image).
+    volumes:
+      - ./__snapshots__:/app/tests/__snapshots__
     networks: [testnet]
 
 networks:

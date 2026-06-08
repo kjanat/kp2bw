@@ -1,7 +1,7 @@
 {
 	"extends": "https://github.com/kjanat/kjanat/raw/886a886/configs/dprint.remote.json",
 	"dockerfile": { "associations": ["!*.ts"] },
-	"excludes": ["**/fixtures/**"],
+	"excludes": ["**/*fixtures*/**", "**/*snapshots*/**"],
 	"markdown": {
 		"lineWidth": 150,
 		"textWrap": "maintain",

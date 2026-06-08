@@ -6,34 +6,94 @@ on:
   pull_request:
   push: { branches: [master] }
   workflow_dispatch:
+defaults: { run: { shell: bash } }
 jobs:
-  vaultwarden-e2e:
+  # Single source of truth for the pinned Bitwarden CLI version: the root
+  # package.json (bumped by Dependabot's `bun` ecosystem). The golden snapshots
+  # are validated against exactly this version.
+  config:
     runs-on: ubuntu-latest
     permissions: { contents: read }
-    timeout-minutes: 10
+    outputs:
+      bw-pinned: ${{ steps.pin.outputs.version }}
     steps:
       - uses: actions/checkout@v6.0.3
+        with: { persist-credentials: false }
+      - id: pin
+        name: Resolve pinned @bitwarden/cli version
+        run: |
+          version="$(jq -r '.devDependencies["@bitwarden/cli"] | ltrimstr("^") | ltrimstr("~")' package.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Pinned @bitwarden/cli: $version"
+
+  e2e:
+    needs: config
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    timeout-minutes: 15
+    # The `latest` leg is an informational canary: it runs behavioral +
+    # idempotency checks but cannot redden CI on its own (the golden is owned by
+    # the pinned leg, which is the hard gate).
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - bw-version: ${{ needs.config.outputs.bw-pinned }}
+            golden: "1"
+            experimental: false
+          - bw-version: latest
+            golden: "0"
+            experimental: true
+    steps:
+      - uses: actions/checkout@v6.0.3
+        with: { persist-credentials: false }
+
+      - name: Build Vaultwarden image
+        run: docker build -f tests/Dockerfile.vaultwarden -t kp2bw-vaultwarden tests
+
+      - name: Start Vaultwarden
+        run: |
+          docker run -d --name vaultwarden -p 18443:443 \
+            -e I_REALLY_WANT_VOLATILE_STORAGE=true \
+            -e SIGNUPS_ALLOWED=false \
+            -e DOMAIN=https://localhost:18443 \
+            -e ROCKET_PORT=443 \
+            -e 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}' \
+            kp2bw-vaultwarden
+
+      - name: Wait for Vaultwarden
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsk https://localhost:18443/ >/dev/null 2>&1; then
+              echo "Vaultwarden is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Vaultwarden did not become healthy"
+          docker logs vaultwarden
+          exit 1
+
+      - uses: astral-sh/setup-uv@v8.2.0
+      - run: uv sync --frozen
+
+      - name: Set up Bitwarden CLI (${{ matrix.bw-version }})
+        uses: ./.github/actions/setup-bw
+        with: { version: "${{ matrix.bw-version }}" }
 
       - name: Run Vaultwarden end-to-end migration test
-        run: |
-          echo "::group::Build Docker images"
-          for attempt in 1 2 3; do
-            if docker compose -f tests/docker-compose.yml build; then
-              break
-            fi
-            if [ "$attempt" = 3 ]; then
-              exit 1
-            fi
-            sleep $((attempt * 10))
-          done
-          echo "::endgroup::"
-          docker compose -f tests/docker-compose.yml up \
-            --abort-on-container-exit --exit-code-from test
+        env:
+          BW_SERVER_URL: https://localhost:18443
+          BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
+          NODE_EXTRA_CA_CERTS: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
+          KP2BW_SNAPSHOT_GOLDEN: ${{ matrix.golden }}
+        run: uv run python tests/e2e_vaultwarden_test.py
 
       - name: Show Vaultwarden logs on failure
         if: failure() || cancelled()
-        run: docker compose -f tests/docker-compose.yml logs vaultwarden
+        run: docker logs vaultwarden
 
       - name: Cleanup
         if: always()
-        run: docker compose -f tests/docker-compose.yml down --volumes
+        run: docker rm -f vaultwarden || true

@@ -1,11 +1,28 @@
+import difflib
+import hashlib
 import json
 import logging
 import os
+import struct
 import subprocess
 import tempfile
+import zlib
 from pathlib import Path
 from typing import cast
 
+from _snapshot import (
+    JsonValue,
+    NormField,
+    NormItem,
+    NormLogin,
+    NormVault,
+    as_object,
+    assert_matches_golden,
+    attachment_key,
+    canonical_json,
+    normalize_vault,
+    parse_object,
+)
 from pykeepass import Entry, PyKeePass, create_database
 
 logger = logging.getLogger("e2e")
@@ -16,6 +33,24 @@ SENSITIVE_ARG_FLAGS = {
     "--passwordenv",
     "--session",
 }
+
+_SNAPSHOT_DIR = Path(__file__).resolve().parent / "__snapshots__"
+GOLDEN_INITIAL = _SNAPSHOT_DIR / "vault_initial.json"
+GOLDEN_AFTER_UPDATE = _SNAPSHOT_DIR / "vault_after_update.json"
+
+
+def _golden_enabled() -> bool:
+    """Whether to compare/update golden snapshots this run.
+
+    The pinned-CLI matrix leg sets ``KP2BW_SNAPSHOT_GOLDEN=1`` and owns the
+    golden; the ``latest`` leg leaves it unset and runs behavioral + idempotency
+    checks only, so an upstream ``bw`` release that reshapes the JSON cannot
+    redden CI on its own.  ``KP2BW_UPDATE_SNAPSHOTS=1`` (regeneration) implies it.
+    """
+    return (
+        os.environ.get("KP2BW_SNAPSHOT_GOLDEN") == "1"
+        or os.environ.get("KP2BW_UPDATE_SNAPSHOTS") == "1"
+    )
 
 
 def _collect_sensitive_values(command: list[str]) -> tuple[str, ...]:
@@ -92,14 +127,17 @@ def _run(
     return result.stdout.strip()
 
 
-def _bw_json(env: dict[str, str], *args: str) -> list[dict[str, object]]:
+def _bw_json(env: dict[str, str], *args: str) -> list[dict[str, JsonValue]]:
     output = _run(["bw", *args], env=env)
     try:
-        return json.loads(output)
+        data: JsonValue = json.loads(output)
     except json.JSONDecodeError as exc:
         raise AssertionError(
             f"Expected JSON output from bw command {' '.join(args)}, got:\n{output}"
         ) from exc
+    if not isinstance(data, list):
+        raise TypeError(f"Expected a JSON array from bw {' '.join(args)}")
+    return [as_object(entry) for entry in data]
 
 
 def _get_session(env: dict[str, str], password: str) -> str:
@@ -146,11 +184,76 @@ def _login_session(env: dict[str, str], email: str, password: str) -> str:
     return _get_session(env, password)
 
 
+# --- deterministic binary fixtures ------------------------------------------
+#
+# Images/binaries are synthesized in-process (no committed binary, no Pillow) so
+# the seed is one self-contained text file.  Bytes must be *byte-stable* across
+# machines: the interpreter ships zlib-ng, whose ``zlib.compress`` output is not
+# reproducible, so the PNG is built from stored (uncompressed) DEFLATE blocks
+# plus the fixed-output Adler-32/CRC-32 checksums, which are identical anywhere.
+
+
+def _zlib_stored(raw: bytes) -> bytes:
+    """A zlib stream of *stored* (uncompressed) DEFLATE blocks -- byte-stable."""
+    out = bytearray(b"\x78\x01")  # zlib header (CM=deflate, no preset dict)
+    total = len(raw)
+    start = 0
+    while True:
+        block = raw[start : start + 0xFFFF]
+        start += len(block)
+        final = 1 if start >= total else 0
+        out.append(final)  # BFINAL bit + BTYPE=00 (stored)
+        length = len(block)
+        out += struct.pack("<HH", length, length ^ 0xFFFF)  # LEN + NLEN
+        out += block
+        if final:
+            break
+    out += struct.pack(">I", zlib.adler32(raw) & 0xFFFFFFFF)
+    return bytes(out)
+
+
+def _png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
+    """A minimal valid 8-bit truecolor PNG with byte-stable contents."""
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return (
+            struct.pack(">I", len(data))
+            + body
+            + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+        )
+
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
+    row = b"\x00" + bytes(rgb) * width  # filter byte 0 + pixels
+    idat = _zlib_stored(row * height)
+    return signature + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+
+# A tiny solid-blue 4x4 PNG and a 1 KiB blob covering every byte value.
+_LOGO_PNG = _png(4, 4, (10, 132, 255))
+_BLOB = bytes(range(256)) * 4
+
+
 def _create_keepass_snapshot(path: Path, password: str) -> None:
+    """Build a comprehensive, deterministic KeePass vault exercising every path.
+
+    Covers: nested folders, plain logins, all TOTP shapes (KeePassXC otpauth URI
+    passthrough, bare default-config Base32, Hex secret with SHA-256/8-digit
+    config, and HOTP which has no Bitwarden equivalent), text/hidden custom
+    fields, unicode, an empty password, and real binary + image attachments.
+    """
     create_database(str(path), password=password)
     kp = PyKeePass(str(path), password=password)
 
     internet = kp.add_group(kp.root_group, "Internet")
+    banking = kp.add_group(internet, "Banking")
+    work = kp.add_group(kp.root_group, "Work")
+    servers = kp.add_group(work, "Servers")
+
+    # Example: KeePassXC-native TOTP with a non-default period -> migrates to
+    # login.totp as an otpauth:// URI (not a bare secret) and must not leak into
+    # custom fields.  (Existing #11 contract -- keep verbatim.)
     example = kp.add_entry(
         internet,
         "Example",
@@ -160,11 +263,10 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
         notes="seed note",
     )
     example.set_custom_property("api_token", "abc123")
-    # KeePassXC-native TOTP with a non-default period: must migrate to login.totp
-    # as an otpauth:// URI (not a bare secret) and not leak into custom fields.
     example.set_custom_property("TimeOtp-Secret-Base32", "JBSWY3DPEHPK3PXP")
     example.set_custom_property("TimeOtp-Period", "60")
 
+    # Root Entry: lives in the root group (no Bitwarden folder).
     _ = kp.add_entry(
         kp.root_group,
         "Root Entry",
@@ -172,6 +274,58 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
         "root-pass",
         notes="root note",
     )
+
+    # Bank Account: a default-config Base32 secret round-trips as a *bare* secret
+    # (friendlier than an otpauth URI); plus a hidden (protected) and a plain
+    # custom field.
+    bank = kp.add_entry(
+        banking, "Bank Account", "bank-user", "bank-pass", url="https://bank.example"
+    )
+    bank.set_custom_property("TimeOtp-Secret-Base32", "GEZDGNBVGY3TQOJQ")
+    bank.set_custom_property("PIN", "1234", protect=True)
+    bank.set_custom_property("branch", "downtown")
+
+    # KeePassXC OTP: entry.otp is already an otpauth:// URI -> passthrough.
+    # ('otp' is a reserved KeePass string field; use the setter, not
+    # set_custom_property which rejects reserved keys.)
+    xc = kp.add_entry(internet, "KeePassXC OTP", "xc-user", "xc-pass")
+    xc.otp = "otpauth://totp/Issuer:xc-user?secret=GEZDGNBVGY3TQOJQ&issuer=Issuer&period=30&digits=6"
+
+    # SSH Box: a Hex secret with SHA-256 + 8 digits -> otpauth:// URI carrying
+    # algorithm/digits/period explicitly.
+    ssh = kp.add_entry(servers, "SSH Box", "ssh-user", "ssh-pass", url="ssh://10.0.0.5")
+    ssh.set_custom_property(
+        "TimeOtp-Secret-Hex", "3132333435363738393031323334353637383930"
+    )
+    ssh.set_custom_property("TimeOtp-Algorithm", "HMAC-SHA-256")
+    ssh.set_custom_property("TimeOtp-Length", "8")
+
+    # HOTP Legacy: counter-based HOTP has no time-based Bitwarden target, so the
+    # secret is kept as a hidden custom field and login.totp stays empty.
+    hotp = kp.add_entry(work, "HOTP Legacy", "hotp-user", "hotp-pass")
+    hotp.set_custom_property("HmacOtp-Secret-Base32", "JBSWY3DPEHPK3PXP", protect=True)
+
+    # Unicode everywhere: title, username, password, url, notes, field value.
+    cafe = kp.add_entry(
+        internet,
+        "Café ☕ Ünïcødé",
+        "café-user",
+        "naïve-pø$$wörd",
+        url="https://例え.テスト",
+        notes="naïve note — ünïcødé ✓",
+    )
+    cafe.set_custom_property("notiz", "geschützt", protect=True)
+
+    # Has Files: real binary + image attachments (the headline gap).
+    files = kp.add_entry(internet, "Has Files", "files-user", "files-pass")
+    files.set_custom_property("label", "with attachments")
+    logo_id = kp.add_binary(_LOGO_PNG)
+    files.add_attachment(logo_id, "logo.png")
+    blob_id = kp.add_binary(_BLOB)
+    files.add_attachment(blob_id, "payload.bin")
+
+    # Empty Password: a login with a username but no password.
+    _ = kp.add_entry(kp.root_group, "Empty Password", "lonely-user", "")
 
     kp.save()
 
@@ -247,6 +401,40 @@ def _get_attachment_text(
     )
 
 
+def _download_attachment(
+    env: dict[str, str],
+    session: str,
+    item_id: str,
+    file_name: str,
+    dest_dir: Path,
+) -> bytes:
+    """Download an attachment to a file and return its raw bytes.
+
+    Uses ``--output`` (not ``--raw`` to stdout) so binary content is written by
+    the CLI without any text-mode/locale corruption -- essential for images and
+    arbitrary blobs.
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    # Item ids are unique; prefixing avoids cross-item filename collisions.
+    dest = dest_dir / f"{item_id}__{file_name}"
+    _ = _run(
+        [
+            "bw",
+            "get",
+            "attachment",
+            file_name,
+            "--itemid",
+            item_id,
+            "--session",
+            session,
+            "--output",
+            str(dest),
+        ],
+        env=env,
+    )
+    return dest.read_bytes()
+
+
 def _run_migration(
     snapshot_path: Path,
     kp_password: str,
@@ -290,6 +478,159 @@ def _assert_bw_serve_available(env: dict[str, str]) -> None:
         )
 
 
+def _capture_vault(
+    env: dict[str, str],
+    session: str,
+    *,
+    download_dir: Path,
+) -> NormVault:
+    """Snapshot the whole vault into a normalized, deterministic shape.
+
+    The test requires a clean vault at the start (asserted in ``main``), so the
+    whole vault *is* the migration output -- no exclusion needed.  Excluding
+    pre-existing ids would be wrong here: an idempotent re-run updates matching
+    items in place rather than creating new ones, so excluding them yields an
+    empty snapshot.  Attachment bytes are downloaded and hashed; the hashes (not
+    the bytes) land in the snapshot.
+    """
+    folders = _bw_json(env, "list", "folders", "--session", session)
+    folder_names: dict[str, str] = {}
+    for folder in folders:
+        fid = folder.get("id")
+        fname = folder.get("name")
+        if isinstance(fid, str) and isinstance(fname, str):
+            folder_names[fid] = fname
+
+    items = _bw_json(env, "list", "items", "--session", session)
+    raw_items: list[dict[str, JsonValue]] = []
+    attachment_sha256: dict[str, str] = {}
+    for brief in items:
+        item_id = brief.get("id")
+        if not isinstance(item_id, str):
+            continue
+        full = parse_object(
+            _run(["bw", "get", "item", item_id, "--session", session], env=env)
+        )
+        raw_items.append(full)
+        attachments = full.get("attachments")
+        if not isinstance(attachments, list):
+            continue
+        for att in attachments:
+            file_name = as_object(att).get("fileName")
+            if not isinstance(file_name, str):
+                continue
+            data = _download_attachment(env, session, item_id, file_name, download_dir)
+            attachment_sha256[attachment_key(item_id, file_name)] = hashlib.sha256(
+                data
+            ).hexdigest()
+
+    return normalize_vault(
+        raw_items, folder_names=folder_names, attachment_sha256=attachment_sha256
+    )
+
+
+def _assert_snapshots_equal(first: NormVault, second: NormVault, *, label: str) -> None:
+    """Assert two captured vaults are byte-identical once normalized."""
+    left = canonical_json(first)
+    right = canonical_json(second)
+    if left == right:
+        return
+    diff = "".join(
+        difflib.unified_diff(
+            left.splitlines(keepends=True),
+            right.splitlines(keepends=True),
+            fromfile="first",
+            tofile="second",
+        )
+    )
+    raise AssertionError(f"{label}: normalized vault differs between passes:\n{diff}")
+
+
+def _item_by_name(vault: NormVault, name: str) -> NormItem:
+    """Return the single migrated item with this name (names are unique in the seed)."""
+    matches = [item for item in vault["items"] if item["name"] == name]
+    if len(matches) != 1:
+        names = sorted(str(item["name"]) for item in vault["items"])
+        raise AssertionError(
+            f"expected exactly one item named {name!r}, found {len(matches)} "
+            f"(items: {names})"
+        )
+    return matches[0]
+
+
+def _login(item: NormItem) -> NormLogin:
+    login = item["login"]
+    if login is None:
+        raise AssertionError(f"item {item['name']!r} has no login")
+    return login
+
+
+def _field(item: NormItem, name: str) -> NormField:
+    matches = [field for field in item["fields"] if field["name"] == name]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"item {item['name']!r}: expected one field {name!r}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _assert_comprehensive_seed(vault: NormVault) -> None:
+    """Behavioral assertions over the initial snapshot.
+
+    These overlap with the golden but give a sharp, named failure when a
+    specific migration contract (a TOTP form, a hidden field, an attachment's
+    bytes) regresses -- clearer than reading a golden diff.
+    """
+    # Bare default-config Base32 secret (not an otpauth URI).
+    bank = _item_by_name(vault, "Bank Account")
+    bank_totp = _login(bank)["totp"] or ""
+    if bank_totp.startswith("otpauth://") or "GEZDGNBVGY3TQOJQ" not in bank_totp:
+        raise AssertionError(
+            f"Bank Account TOTP should be a bare secret: {bank_totp!r}"
+        )
+    if _field(bank, "PIN")["type"] != 1:
+        raise AssertionError("Bank Account 'PIN' should be a hidden field (type 1)")
+    if _field(bank, "branch")["type"] != 0:
+        raise AssertionError("Bank Account 'branch' should be a text field (type 0)")
+
+    # Hex secret + SHA-256 + 8 digits -> otpauth URI carrying those params.
+    ssh_totp = _login(_item_by_name(vault, "SSH Box"))["totp"] or ""
+    if not ssh_totp.startswith("otpauth://totp/"):
+        raise AssertionError(f"SSH Box TOTP should be an otpauth URI: {ssh_totp!r}")
+    if "algorithm=SHA256" not in ssh_totp or "digits=8" not in ssh_totp:
+        raise AssertionError(
+            f"SSH Box TOTP missing SHA256/8-digit config: {ssh_totp!r}"
+        )
+
+    # KeePassXC otp passthrough keeps the original secret.
+    xc_totp = _login(_item_by_name(vault, "KeePassXC OTP"))["totp"] or ""
+    if (
+        not xc_totp.startswith("otpauth://totp/")
+        or "secret=GEZDGNBVGY3TQOJQ" not in xc_totp
+    ):
+        raise AssertionError(f"KeePassXC OTP passthrough wrong: {xc_totp!r}")
+
+    # HOTP has no Bitwarden TOTP target: empty login.totp, secret kept hidden.
+    hotp = _item_by_name(vault, "HOTP Legacy")
+    if _login(hotp)["totp"]:
+        raise AssertionError("HOTP Legacy must not produce a login.totp")
+    if _field(hotp, "HmacOtp-Secret-Base32")["type"] != 1:
+        raise AssertionError("HOTP secret should be kept as a hidden field (type 1)")
+
+    # Real binary + image attachments must round-trip byte-for-byte.
+    files = _item_by_name(vault, "Has Files")
+    by_name = {att["fileName"]: att["sha256"] for att in files["attachments"]}
+    if by_name.get("logo.png") != hashlib.sha256(_LOGO_PNG).hexdigest():
+        raise AssertionError("logo.png attachment bytes did not round-trip")
+    if by_name.get("payload.bin") != hashlib.sha256(_BLOB).hexdigest():
+        raise AssertionError("payload.bin attachment bytes did not round-trip")
+
+    # Unicode credentials survive the round-trip intact.
+    cafe = _login(_item_by_name(vault, "Café ☕ Ünïcødé"))
+    if cafe["username"] != "café-user" or cafe["password"] != "naïve-pø$$wörd":
+        raise AssertionError("Unicode credentials were corrupted in migration")
+
+
 def main() -> None:
     logging.basicConfig(
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
@@ -315,6 +656,7 @@ def main() -> None:
         tmp = Path(tmpdir)
         appdata = tmp / "bw-appdata"
         appdata.mkdir(parents=True, exist_ok=True)
+        downloads = tmp / "downloads"
 
         env = os.environ.copy()
         env["BITWARDENCLI_APPDATA_DIR"] = str(appdata)
@@ -329,6 +671,15 @@ def main() -> None:
         logger.info("Listing pre-migration items")
         before_items = _bw_json(env, "list", "items", "--session", initial_session)
         logger.info(f"Found {len(before_items)} existing items")
+        # Golden snapshots capture the whole vault, so the run must start clean.
+        # A fresh Vaultwarden container (CI host-mode / `docker compose down -v`)
+        # guarantees this; fail loudly rather than bake a polluted golden.
+        if before_items:
+            raise AssertionError(
+                f"e2e requires a clean Vaultwarden vault but found {len(before_items)} "
+                "items. Recreate the server (e.g. `docker compose -f tests/"
+                "docker-compose.yml down -v`) before running."
+            )
 
         snapshot_path = tmp / "snapshot.kdbx"
         _create_keepass_snapshot(snapshot_path, kp_password)
@@ -336,73 +687,48 @@ def main() -> None:
 
         logger.info("Running kp2bw migration (first pass)")
         _ = _run_migration(snapshot_path, kp_password, bw_password, env)
-        logger.info("First migration pass complete")
+        session = _get_session(env, bw_password)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+        s1 = _capture_vault(env, session, download_dir=downloads / "p1")
+        logger.info(f"First pass migrated {len(s1['items'])} items")
 
         logger.info("Running kp2bw migration (idempotency pass)")
         _ = _run_migration(snapshot_path, kp_password, bw_password, env)
-        logger.info("Second migration pass complete")
-
         session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
+        s2 = _capture_vault(env, session, download_dir=downloads / "p2")
 
+        # The headline reproducibility proof: a second migration with an
+        # unchanged source must produce a byte-identical normalized vault.
+        _assert_snapshots_equal(s1, s2, label="idempotency (pass 1 vs pass 2)")
+
+        if _golden_enabled():
+            assert_matches_golden(s2, GOLDEN_INITIAL)
+            logger.info("Initial vault snapshot matches golden")
+
+        # Sharp, named behavioral checks over the comprehensive seed.
+        _assert_comprehensive_seed(s2)
+
+        # --- Existing #11 contract checks (kept verbatim in spirit) ----------
         folders = _bw_json(env, "list", "folders", "--session", session)
         if not any(folder.get("name") == "Internet" for folder in folders):
             raise AssertionError("Expected folder 'Internet' not found in Bitwarden")
 
-        items = _bw_json(env, "list", "items", "--session", session)
-
-        expected_names = {"Example", "Root Entry"}
-        matching = [item for item in items if item.get("name") in expected_names]
-
-        if len(matching) != 2:
-            raise AssertionError(
-                f"Expected exactly 2 migrated items, found {len(matching)} ({matching})"
-            )
-
-        name_counts = {name: 0 for name in expected_names}
-        for item in matching:
-            name = str(item.get("name"))
-            name_counts[name] += 1
-        if any(count != 1 for count in name_counts.values()):
-            raise AssertionError(
-                f"Expected idempotent import, got name counts: {name_counts}"
-            )
-
-        example = next(item for item in matching if item.get("name") == "Example")
-        root_entry = next(item for item in matching if item.get("name") == "Root Entry")
-
-        example_id = str(example["id"])
-        root_entry_id = str(root_entry["id"])
-
-        example_full = json.loads(
-            _run(["bw", "get", "item", example_id, "--session", session], env=env)
-        )
-        root_entry_full = json.loads(
-            _run(["bw", "get", "item", root_entry_id, "--session", session], env=env)
-        )
-
-        example_login = example_full["login"]
+        example = _item_by_name(s2, "Example")
+        example_login = _login(example)
         if (
             example_login["username"] != "demo-user"
             or example_login["password"] != "demo-pass"
         ):
             raise AssertionError("Example item credentials were not migrated correctly")
-
-        uris = example_login.get("uris", [])
-        if not any(uri.get("uri") == "https://example.com" for uri in uris):
-            raise AssertionError("Example item URL was not migrated correctly")
-
-        fields = example_full.get("fields", [])
         if not any(
-            field.get("name") == "api_token" and field.get("value") == "abc123"
-            for field in fields
+            uri["uri"] == "https://example.com" for uri in example_login["uris"]
         ):
+            raise AssertionError("Example item URL was not migrated correctly")
+        if _field(example, "api_token")["value"] != "abc123":
             raise AssertionError("Expected custom field api_token=abc123 not found")
-
-        # KeePassXC-native TOTP (non-default period) must land in login.totp as an
-        # otpauth:// URI carrying the secret + period, never as a bare secret.
-        example_totp = example_login.get("totp")
-        if not example_totp or not str(example_totp).startswith("otpauth://totp/"):
+        example_totp = example_login["totp"] or ""
+        if not example_totp.startswith("otpauth://totp/"):
             raise AssertionError(
                 f"Expected an otpauth TOTP URI on Example, got {example_totp!r}"
             )
@@ -413,82 +739,59 @@ def main() -> None:
             raise AssertionError(
                 f"TOTP URI missing expected secret/period: {example_totp!r}"
             )
-
-        # The consumed TimeOtp-* fields must NOT linger as custom fields (no leak).
         leaked = [
-            field.get("name")
-            for field in fields
-            if field.get("name") in {"TimeOtp-Secret-Base32", "TimeOtp-Period"}
+            field["name"]
+            for field in example["fields"]
+            if field["name"] in {"TimeOtp-Secret-Base32", "TimeOtp-Period"}
         ]
         if leaked:
             raise AssertionError(
                 f"TOTP fields leaked into custom fields instead of login.totp: {leaked}"
             )
 
-        root_login = root_entry_full["login"]
+        root_login = _login(_item_by_name(s2, "Root Entry"))
         if (
             root_login["username"] != "root-user"
             or root_login["password"] != "root-pass"
         ):
             raise AssertionError("Root Entry credentials were not migrated correctly")
 
-        if len(items) < len(before_items) + 2:
-            raise AssertionError(
-                "Expected at least two new items after migration, but item count did not grow"
-            )
-
-        # --- Update pass: edit KeePass, re-run, and verify the changes sync ---
+        # --- Update pass: edit KeePass, re-run, verify the changes sync ------
         logger.info("Editing KeePass snapshot and running update pass")
         _update_keepass_snapshot(snapshot_path, kp_password)
         _ = _run_migration(snapshot_path, kp_password, bw_password, env)
-        logger.info("Update migration pass complete")
-
         session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
-        items = _bw_json(env, "list", "items", "--session", session)
+        s3 = _capture_vault(env, session, download_dir=downloads / "p3")
+
+        if _golden_enabled():
+            assert_matches_golden(s3, GOLDEN_AFTER_UPDATE)
+            logger.info("Post-update vault snapshot matches golden")
 
         # Existing "Example" entry must be updated in place, not duplicated.
-        examples = [i for i in items if i.get("name") == "Example"]
-        if len(examples) != 1:
+        example = _item_by_name(s3, "Example")
+        if example["notes"] != "updated recovery keys":
             raise AssertionError(
-                f"Update must not duplicate entries; found {len(examples)} 'Example'"
+                f"Edited notes were not synced to Bitwarden: {example['notes']!r}"
             )
-
-        example_full = json.loads(
-            _run(
-                ["bw", "get", "item", str(examples[0]["id"]), "--session", session],
-                env=env,
-            )
-        )
-        if example_full.get("notes") != "updated recovery keys":
-            raise AssertionError(
-                f"Edited notes were not synced to Bitwarden: {example_full.get('notes')!r}"
-            )
-        if example_full["login"]["password"] != "demo-pass-v2":
+        if _login(example)["password"] != "demo-pass-v2":
             raise AssertionError("Edited password was not synced to Bitwarden")
 
         # The long-note entry must store its note as a notes.txt attachment.
-        big_notes = [i for i in items if i.get("name") == "Big Note"]
-        if len(big_notes) != 1:
+        big = _item_by_name(s3, "Big Note")
+        if not any(att["fileName"] == "notes.txt" for att in big["attachments"]):
             raise AssertionError(
-                f"Expected exactly one 'Big Note' entry, found {len(big_notes)}"
+                f"Long note was not uploaded as a notes.txt attachment: {big['attachments']}"
             )
-        big_full = json.loads(
-            _run(
-                ["bw", "get", "item", str(big_notes[0]["id"]), "--session", session],
-                env=env,
-            )
-        )
-        attachments = big_full.get("attachments", [])
-        if not any(a.get("fileName") == "notes.txt" for a in attachments):
-            raise AssertionError(
-                f"Long note was not uploaded as a notes.txt attachment: {attachments}"
-            )
-        if len(big_full.get("notes") or "") > 10 * 1000:
+        if len(big["notes"] or "") > 10 * 1000:
             raise AssertionError("Long note should be offloaded to the attachment")
 
-        big_id = str(big_notes[0]["id"])
-        # The attachment must carry the original long note verbatim.
+        # Re-locate Big Note's server id for raw attachment-content checks.
+        items = _bw_json(env, "list", "items", "--session", session)
+        big_matches = [i for i in items if i.get("name") == "Big Note"]
+        if len(big_matches) != 1:
+            raise AssertionError(f"Expected one 'Big Note', found {len(big_matches)}")
+        big_id = str(big_matches[0]["id"])
         original_attachment = _get_attachment_text(env, session, big_id, "notes.txt")
         if original_attachment != LONG_NOTE:
             raise AssertionError(
@@ -504,30 +807,25 @@ def main() -> None:
         session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
 
-        # The refresh re-run must update in place, not spawn a second item:
-        # re-list by name and confirm there's still exactly one 'Big Note' with
-        # the same id (otherwise the attachment checks below could pass on the
-        # original item while a duplicate sinks idempotency). `items` is reused
-        # for the final idempotency check.
         items = _bw_json(env, "list", "items", "--session", session)
         big_after_refresh = [i for i in items if i.get("name") == "Big Note"]
         if len(big_after_refresh) != 1 or str(big_after_refresh[0]["id"]) != big_id:
             raise AssertionError(
-                f"Attachment-refresh re-run must not duplicate 'Big Note': "
-                f"{big_after_refresh}"
+                f"Attachment-refresh re-run must not duplicate 'Big Note': {big_after_refresh}"
             )
-
-        big_full = json.loads(
+        big_full = parse_object(
             _run(["bw", "get", "item", big_id, "--session", session], env=env)
         )
-        notes_attachments = [
-            a
-            for a in big_full.get("attachments", [])
-            if a.get("fileName") == "notes.txt"
+        raw_big_atts = big_full.get("attachments")
+        big_att_list: list[JsonValue] = (
+            raw_big_atts if isinstance(raw_big_atts, list) else []
+        )
+        notes_copies = [
+            att for att in big_att_list if as_object(att).get("fileName") == "notes.txt"
         ]
-        if len(notes_attachments) != 1:
+        if len(notes_copies) != 1:
             raise AssertionError(
-                f"Refreshed attachment must replace, not duplicate: {notes_attachments}"
+                f"Refreshed attachment must replace, not duplicate: {notes_copies}"
             )
         refreshed_attachment = _get_attachment_text(env, session, big_id, "notes.txt")
         if refreshed_attachment != LONG_NOTE_V2:
@@ -535,34 +833,15 @@ def main() -> None:
                 "notes.txt attachment was not refreshed with the edited long note"
             )
 
-        # Re-running with no further edits must be idempotent (no duplicates).
+        # Final idempotent re-run (no edits) must change nothing.
+        s_refresh = _capture_vault(env, session, download_dir=downloads / "p4a")
         _ = _run_migration(snapshot_path, kp_password, bw_password, env)
-        # kp2bw's `bw serve` rotates the shared CLI session, so re-acquire one
-        # before querying again (a stale token returns an empty item list).
         session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
-        items_after = _bw_json(env, "list", "items", "--session", session)
-        if len([i for i in items_after if i.get("name") == "Example"]) != 1:
-            raise AssertionError("Idempotent re-run duplicated the 'Example' entry")
-        if len(items_after) != len(items):
-            raise AssertionError(
-                f"Idempotent re-run changed item count: {len(items)} -> {len(items_after)}"
-            )
-
-        # An unchanged attachment must not be re-uploaded or duplicated either:
-        # content-aware reconciliation has to see identical bytes and skip.
-        big_after = json.loads(
-            _run(["bw", "get", "item", big_id, "--session", session], env=env)
+        s_final = _capture_vault(env, session, download_dir=downloads / "p4b")
+        _assert_snapshots_equal(
+            s_refresh, s_final, label="idempotency (refreshed state)"
         )
-        notes_after = [
-            a
-            for a in big_after.get("attachments", [])
-            if a.get("fileName") == "notes.txt"
-        ]
-        if len(notes_after) != 1:
-            raise AssertionError(
-                f"Idempotent re-run changed notes.txt copies: {len(notes_after)}"
-            )
 
     print("vaultwarden end-to-end integration test passed")
 

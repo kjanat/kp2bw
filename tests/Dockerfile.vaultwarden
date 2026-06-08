@@ -1,4 +1,7 @@
-FROM ghcr.io/dani-garcia/vaultwarden:latest
+# Pinned (tag + digest) for reproducible golden snapshots; Dependabot's `docker`
+# ecosystem (see .github/dependabot.yml, dir /tests) bumps it. Regenerate the
+# snapshots when this changes -- see tests/AGENTS.md.
+FROM ghcr.io/dani-garcia/vaultwarden:1.36.0@sha256:d626d04934cd1192ad8ced1adb975099fca78cec33ab467d2d3c923cde7f3b0c
 COPY fixtures/vaultwarden-data/db.sqlite3 /data/db.sqlite3
 COPY fixtures/vaultwarden-data/rsa_key.pem /data/rsa_key.pem
 COPY fixtures/vaultwarden-certs/cert.pem /ssl/cert.pem
