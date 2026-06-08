@@ -8,6 +8,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Chained `{REF:...}` references** -- a reference whose target was itself
+  another reference entry (a chain `A -> B -> C`) raised `KeyError` in
+  `_resolve_entries_with_references`, logged a `Could not resolve entry`
+  warning, and dropped the referencing entry from the import even though
+  KeePass resolves such chains correctly. Unresolved targets that are
+  themselves REF entries are now resolved transitively and on demand, with
+  memoization and cycle detection, so the chain collapses onto whatever it
+  ultimately maps to. Fixes #6.
+
 ## [3.0.1] - 2026-06-08
 
 ### Fixed
