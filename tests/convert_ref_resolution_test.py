@@ -10,7 +10,12 @@ REFERENCE_ENTRY_UUID_REF = REFERENCE_ENTRY_UUID.hex.upper()
 
 
 class ReferenceEntry(Entry):
-    """Minimal Entry double; real Entry init needs a PyKeePass backing store."""
+    """Minimal Entry double; real Entry init needs a PyKeePass backing store.
+
+    The real ``Entry`` exposes its fields as XML-backed descriptors, so each
+    accessed field is overridden here as a plain in-memory property to shadow
+    that descriptor and keep the test independent of a ``.kdbx`` store.
+    """
 
     _test_password: str | None
     _test_title: str | None
@@ -26,6 +31,7 @@ class ReferenceEntry(Entry):
         password: str | None,
         url: str | None,
     ) -> None:
+        """Seed the in-memory field backing store without touching PyKeePass."""
         self._test_title = title
         self._test_username = username
         self._test_password = password
@@ -34,54 +40,68 @@ class ReferenceEntry(Entry):
 
     @property
     def title(self) -> str | None:
+        """Return the entry title."""
         return self._test_title
 
     @title.setter
     def title(self, value: str | None) -> None:
+        """Store the entry title."""
         self._test_title = value
 
     @property
     def username(self) -> str | None:
+        """Return the username (may be ``None``, the case under test)."""
         return self._test_username
 
     @username.setter
     def username(self, value: str | None) -> None:
+        """Store the username, as REF resolution does via ``setattr``."""
         self._test_username = value
 
     @property
     def password(self) -> str | None:
+        """Return the password (may be ``None`` or a ``{REF:...}`` string)."""
         return self._test_password
 
     @password.setter
     def password(self, value: str | None) -> None:
+        """Store the password, as REF resolution does via ``setattr``."""
         self._test_password = value
 
     @property
     def url(self) -> str | None:
+        """Return the URL merged onto the referenced item as a URI."""
         return self._test_url
 
     @url.setter
     def url(self, value: str | None) -> None:
+        """Store the URL."""
         self._test_url = value
 
     @property
     def uuid(self) -> UUID:
+        """Return the fixed entry UUID used for warning messages."""
         return self._test_uuid
 
     @uuid.setter
     def uuid(self, uuid: UUID) -> None:
+        """Store the entry UUID."""
         self._test_uuid = uuid
 
     @property
     def group(self) -> Group | None:
+        """Return ``None``; the double is not attached to any group."""
         return None
 
 
 class ReferenceResolutionTestConverter(Converter):
+    """Converter wired with stubbed lookups to exercise REF resolution alone."""
+
     duplicate_creates: int
     referenced_item: BwItemCreate
 
     def __init__(self, referenced_item: BwItemCreate) -> None:
+        """Build a converter against dummy credentials and a fixed referent."""
         super().__init__(
             keepass_file_path="dummy.kdbx",
             keepass_password="password",
@@ -97,19 +117,23 @@ class ReferenceResolutionTestConverter(Converter):
         self.referenced_item = referenced_item
 
     def add_ref_entry(self, entry: Entry) -> None:
+        """Register *entry* as the sole REF entry to resolve."""
         self._kp_ref_entries = [entry]
 
     def resolve_references(self) -> None:
+        """Run the method under test."""
         self._resolve_entries_with_references()
 
     def _get_referenced_entry(
         self, lookup_mode: str, ref_compare_string: str
     ) -> EntryValue:
+        """Return the fixed referenced item, bypassing real lookup."""
         return (None, None, self.referenced_item, [])
 
     def _find_referenced_value(
         self, ref_entry: BwItemCreate, field_referenced: str
     ) -> str | None:
+        """Resolve a ``P`` (password) reference; reject anything else."""
         if field_referenced == "P":
             return ref_entry["login"]["password"]
         raise AssertionError(f"Unexpected REF field: {field_referenced}")
@@ -117,10 +141,12 @@ class ReferenceResolutionTestConverter(Converter):
     def _add_bw_entry_to_entries_dict(
         self, entry: Entry, custom_protected: list[str] | None
     ) -> None:
+        """Count duplicate creations instead of mutating the entries dict."""
         self.duplicate_creates += 1
 
 
 def _make_referenced_item() -> BwItemCreate:
+    """Build a Bitwarden item whose creds match the resolved REF entry."""
     return {
         "organizationId": None,
         "collectionIds": [],
@@ -144,6 +170,7 @@ def _make_referenced_item() -> BwItemCreate:
 
 
 def assert_resolves_none_fields_with_references() -> None:
+    """Assert a REF entry with a ``None`` username resolves and merges its URI."""
     referenced_item = _make_referenced_item()
     converter = ReferenceResolutionTestConverter(referenced_item)
 
@@ -180,6 +207,7 @@ def assert_resolves_none_fields_with_references() -> None:
 
 
 def main() -> None:
+    """Run the script-style assertion and report success."""
     assert_resolves_none_fields_with_references()
     print("convert reference resolution test passed")
 

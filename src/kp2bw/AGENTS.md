@@ -23,16 +23,16 @@ src/kp2bw/
 
 ## WHERE TO LOOK
 
-| Task                   | Location                  | Notes                                           |
-| ---------------------- | ------------------------- | ----------------------------------------------- |
-| Add/adjust CLI flags   | `src/kp2bw/cli.py`        | `main()` and argument parser are here           |
-| Change import behavior | `src/kp2bw/convert.py`    | Top-level `convert()` flow and migration phases |
-| Tune dedup/idempotency | `src/kp2bw/bw_serve.py`   | Existing item index + batch create behavior     |
-| Attachment behavior    | `src/kp2bw/bw_serve.py`   | Async upload path and multipart logic           |
-| Map KeePass fields     | `src/kp2bw/convert.py`    | Entry/custom field/TOTP/passkey mapping         |
-| API type definitions   | `src/kp2bw/bw_types.py`   | Hand-written TypedDicts supplementing codegen   |
+| Task                   | Location                       | Notes                                               |
+| ---------------------- | ------------------------------ | --------------------------------------------------- |
+| Add/adjust CLI flags   | `src/kp2bw/cli.py`             | `main()` and argument parser are here               |
+| Change import behavior | `src/kp2bw/convert.py`         | Top-level `convert()` flow and migration phases     |
+| Tune dedup/idempotency | `src/kp2bw/bw_serve.py`        | Existing item index + batch create behavior         |
+| Attachment behavior    | `src/kp2bw/bw_serve.py`        | Async upload path and multipart logic               |
+| Map KeePass fields     | `src/kp2bw/convert.py`         | Entry/custom field/TOTP/passkey mapping             |
+| API type definitions   | `src/kp2bw/bw_types.py`        | Hand-written TypedDicts supplementing codegen       |
 | Regenerate API types   | `scripts/generate-bw-types.sh` | Run after editing `specs/vault-management-api.json` |
-| Error contract         | `src/kp2bw/exceptions.py` | Keep custom exception taxonomy central          |
+| Error contract         | `src/kp2bw/exceptions.py`      | Keep custom exception taxonomy central              |
 
 ## CONVENTIONS
 

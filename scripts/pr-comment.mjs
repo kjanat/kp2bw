@@ -13,7 +13,7 @@ const COMMENTABLE_FILE_STATUSES = new Set(['added', 'modified', 'renamed', 'remo
 function examplesSection(config, sourceGitUrl, ref) {
 	if (!config.cliExamples.trim()) return '';
 
-	const baseCmd = `uvx ${config.pyFlag}--from ${sourceGitUrl}@${ref} ${config.cliName}`;
+	const baseCmd = `uvx ${config.pyFlag}--from ${quotedFromValue(sourceGitUrl, ref)} ${config.cliName}`;
 	const examples = config.cliExamples.replace(/\{cmd\}/g, baseCmd).trim();
 	return `
 
@@ -34,13 +34,13 @@ You can test this PR directly using \`uvx\`:
 **From branch:**
 
 ${FENCE}bash
-uvx ${config.pyFlag}--from ${headGitUrl}@${headRef} ${config.cliName} --help
+uvx ${config.pyFlag}--from ${quotedFromValue(headGitUrl, headRef)} ${config.cliName} --help
 ${FENCE}
 
 **From specific commit (\`${shortSha}\`):**
 
 ${FENCE}bash
-uvx ${config.pyFlag}--from ${headGitUrl}@${headSha} ${config.cliName} --help
+uvx ${config.pyFlag}--from ${quotedFromValue(headGitUrl, headSha)} ${config.cliName} --help
 ${FENCE}${examplesSection(config, headGitUrl, headRef)}
 
 ---
@@ -71,7 +71,7 @@ function archivedBody({
 This PR has been ${isMerged ? 'merged' : 'closed'}. You can still test the final state:
 
 ${FENCE}bash
-uvx ${config.pyFlag}--from ${archivedGitUrl}@${archivedRef} ${config.cliName} --help
+uvx ${config.pyFlag}--from ${quotedFromValue(archivedGitUrl, archivedRef)} ${config.cliName} --help
 ${FENCE}
 
 📋 PR Details
@@ -337,4 +337,14 @@ function errorDetails(error) {
 	}
 
 	return String(error);
+}
+
+/** @param {string} value @returns {string} */
+function shellQuote(value) {
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/** @param {string} sourceGitUrl @param {string} ref @returns {string} */
+function quotedFromValue(sourceGitUrl, ref) {
+	return shellQuote(`${sourceGitUrl}@${ref}`);
 }
