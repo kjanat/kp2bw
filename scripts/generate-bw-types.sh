@@ -7,9 +7,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IN_FILE="${REPO_ROOT}/specs/vault-management-api.json"
+OUT_FILE="${REPO_ROOT}/src/kp2bw/_bw_api_types.py"
 
-uvx --from "datamodel-code-generator[ruff]" datamodel-codegen \
-	--input "${REPO_ROOT}/specs/vault-management-api.json" \
+if uvx --from "datamodel-code-generator[ruff]" datamodel-codegen \
+	--input "${IN_FILE}" \
 	--input-file-type openapi \
 	--output-model-type typing.TypedDict \
 	--target-python-version 3.14 \
@@ -18,6 +20,9 @@ uvx --from "datamodel-code-generator[ruff]" datamodel-codegen \
 	--reuse-model \
 	--disable-timestamp \
 	--formatters ruff-format ruff-check \
-	>"${REPO_ROOT}/src/kp2bw/_bw_api_types.py"
-
-echo "Generated src/kp2bw/_bw_api_types.py"
+	>"${OUT_FILE}"; then
+	echo "Generated ${OUT_FILE}"
+else
+	echo "Failed to generate ${OUT_FILE}"
+	exit 1
+fi

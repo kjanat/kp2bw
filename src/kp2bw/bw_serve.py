@@ -13,7 +13,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from types import FrameType, TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 
 import httpx
 
@@ -34,6 +34,19 @@ _HTTP_TIMEOUT_S: float = 60.0
 
 # Max length for sanitized CLI output snippets in logs/errors.
 _SANITIZED_OUTPUT_MAX_CHARS: int = 240
+
+# Response-only keys returned by ``GET``/``list`` that must never be sent back in
+# a ``PUT`` body: the API expects a create-shaped object (``BwItemCreate``), and
+# echoing server-managed fields (notably ``attachments``) risks rejection or
+# clobbering state.  The item id travels in the URL, not the body.
+_RESPONSE_ONLY_ITEM_KEYS: frozenset[str] = frozenset({
+    "object",
+    "id",
+    "revisionDate",
+    "creationDate",
+    "deletedDate",
+    "attachments",
+})
 
 # Actionable message shown when the Bitwarden CLI cannot be located.
 BW_NOT_FOUND_MSG: str = (
@@ -564,13 +577,33 @@ class BitwardenServeClient:
         logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
 
+    def get_item(self, item_id: str) -> BwItemResponse:
+        """Fetch a single full item (including ``attachments``) via ``GET``.
+
+        The list endpoint is enough for content dedup, but its ``attachments``
+        array is only consulted for upload-if-missing reconciliation, so this
+        authoritative fetch is used to avoid creating duplicate attachments.
+        """
+        data = self._request("GET", f"/object/item/{item_id}")
+        return cast(BwItemResponse, data)
+
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
         """Replace an existing vault item via ``PUT /object/item/{id}``.
 
         The API requires the full object in the request body — partial updates
-        are not supported.
+        are not supported.  Callers may pass an item read back from the vault
+        (a ``BwItemResponse``); response-only keys (``id``, ``object``,
+        ``revisionDate``, ``attachments``, …) are stripped here so the wire body
+        is the create-shaped object the endpoint expects.  Stripping happens on a
+        copy, so a caller can still hand the original (id-bearing) object to
+        :meth:`update_dedup_entry`.
         """
-        self._request("PUT", f"/object/item/{item_id}", json_body=item)
+        body: dict[str, Any] = {
+            k: v
+            for k, v in cast(dict[str, Any], item).items()
+            if k not in _RESPONSE_ONLY_ITEM_KEYS
+        }
+        self._request("PUT", f"/object/item/{item_id}", json_body=body)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
 
     def create_items_batch(
@@ -716,6 +749,43 @@ class BitwardenServeClient:
         return coll_id
 
     # ------------------------------------------------------------------
+    # CRUD — attachments
+    # ------------------------------------------------------------------
+
+    def get_attachment(self, item_id: str, attachment_id: str) -> bytes:
+        """Download one attachment's decrypted bytes via ``GET /object/attachment``.
+
+        Unlike the JSON endpoints this returns the raw file body
+        (octet-stream), so it bypasses the :meth:`_request` envelope handling.
+        Used by content-aware reconciliation to compare a vault attachment
+        against the KeePass-derived bytes before deciding whether to refresh it.
+        """
+        resp = self._http.get(
+            f"/object/attachment/{attachment_id}",
+            params={"itemid": item_id},
+        )
+        if resp.status_code >= 400:
+            raise BitwardenClientError(
+                f"bw serve returned HTTP {resp.status_code} downloading "
+                f"attachment {attachment_id} on item {item_id}"
+            )
+        return resp.content
+
+    def delete_attachment(self, item_id: str, attachment_id: str) -> None:
+        """Delete one attachment via ``DELETE /object/attachment/{id}``.
+
+        Used after a content-changed attachment is re-uploaded so the stale
+        copy is removed (upload-then-delete keeps the file safe if the upload
+        fails).
+        """
+        self._request(
+            "DELETE",
+            f"/object/attachment/{attachment_id}",
+            params={"itemid": item_id},
+        )
+        logger.log(VERBOSE, f"Deleted attachment {attachment_id} from item {item_id}")
+
+    # ------------------------------------------------------------------
     # Async attachment uploads
     # ------------------------------------------------------------------
 
@@ -732,24 +802,29 @@ class BitwardenServeClient:
             params={"itemid": item_id},
             files={"file": (filename, data)},
         )
-        if resp.status_code >= 400:
+        try:
+            parsed: Any = resp.json()
+        except ValueError:
+            parsed = None
+        # Guard against a non-object JSON body (array/string) so reading the
+        # envelope can't raise AttributeError instead of a clean error.
+        body: dict[str, Any] = (
+            cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+        )
+
+        # bw serve reports command-level failures (e.g. "Premium status is
+        # required", storage-quota or attachment-size limits) as HTTP 400 with
+        # the real reason in the body's ``message`` field.  Surface it instead
+        # of an opaque status code so the user knows *why* a file was rejected.
+        if resp.status_code >= 400 or not body.get("success", False):
+            message = body.get("message")
+            if not message:
+                message = f"HTTP {resp.status_code}"
+                if parsed is None:
+                    message += " (non-JSON response)"
             raise BitwardenClientError(
                 f"Attachment upload failed for {filename!r} on item {item_id}: "
-                f"HTTP {resp.status_code}"
-            )
-
-        try:
-            body: dict[str, Any] = resp.json()
-        except ValueError as exc:
-            raise BitwardenClientError(
-                f"Attachment upload returned non-JSON response "
-                f"(HTTP {resp.status_code}) for {filename!r} on item {item_id}"
-            ) from exc
-
-        if not body.get("success", False):
-            msg = body.get("message", "unknown error")
-            raise BitwardenClientError(
-                f"Attachment upload error for {filename!r}: {msg}"
+                f"{message}"
             )
         logger.log(VERBOSE, f"Uploaded attachment {filename!r} to item {item_id}")
 
@@ -758,14 +833,21 @@ class BitwardenServeClient:
         items: list[tuple[str, list[tuple[str, bytes]]]],
         *,
         max_concurrency: int = 4,
-    ) -> None:
+    ) -> list[tuple[str, str]]:
         """Upload all attachments with bounded parallelism.
 
         *items* is a list of ``(item_id, [(filename, data), ...])`` tuples.
+
+        Returns the ``(item_id, filename)`` pairs of any uploads that failed
+        (empty list when all succeed).  The structured pairs let the caller
+        pair a successful upload with the stale copy it replaces (so a
+        content-changed attachment is only deleted once its replacement
+        landed).  Failures are **non-fatal**: a single rejected file must not
+        abort the whole migration and discard every other entry's progress.
         """
         total = sum(len(atts) for _, atts in items)
         if total == 0:
-            return
+            return []
 
         logger.info(f"Uploading {total} attachments (concurrency={max_concurrency})")
         sem = asyncio.Semaphore(max_concurrency)
@@ -784,7 +866,7 @@ class BitwardenServeClient:
             timeout=_HTTP_TIMEOUT_S,
         ) as client:
             tasks: list[asyncio.Task[None]] = []
-            labels: list[str] = []
+            keys: list[tuple[str, str]] = []
             for item_id, attachments in items:
                 for filename, data in attachments:
                     tasks.append(
@@ -792,32 +874,40 @@ class BitwardenServeClient:
                             _upload_one(client, item_id, filename, data)
                         )
                     )
-                    labels.append(f"{filename} (item {item_id})")
+                    keys.append((item_id, filename))
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        failed_labels: list[str] = []
-        for label, result in zip(labels, results, strict=True):
+        failed: list[tuple[str, str]] = []
+        for (item_id, filename), result in zip(keys, results, strict=True):
             if isinstance(result, BaseException):
-                logger.error(f"Attachment upload failed for {label}: {result}")
-                failed_labels.append(label)
-        if failed_labels:
-            summary = ", ".join(failed_labels[:5])
-            if len(failed_labels) > 5:
-                summary += f", ... (+{len(failed_labels) - 5} more)"
-            raise BitwardenClientError(
-                f"{len(failed_labels)}/{total} attachment uploads failed: {summary}"
-            )
+                logger.error(
+                    f"Attachment upload failed for {filename!r} (item {item_id}): "
+                    f"{result}"
+                )
+                failed.append((item_id, filename))
 
-        logger.info(f"Uploaded {total} attachments")
+        succeeded = total - len(failed)
+        if failed:
+            logger.warning(
+                f"{len(failed)}/{total} attachment upload(s) failed; "
+                f"continuing with the remaining entries"
+            )
+        logger.info(f"Uploaded {succeeded}/{total} attachments")
+        return failed
 
     def upload_attachments(
         self,
         items: list[tuple[str, list[tuple[str, bytes]]]],
         *,
         max_concurrency: int = 4,
-    ) -> None:
-        """Synchronous wrapper for :meth:`upload_attachments_parallel`."""
-        asyncio.run(
+    ) -> list[tuple[str, str]]:
+        """Synchronous wrapper for :meth:`upload_attachments_parallel`.
+
+        Returns the ``(item_id, filename)`` pairs of failed uploads (empty when
+        all succeed); failures are non-fatal so the migration completes and the
+        caller can summarise and skip any dependent stale-copy deletes.
+        """
+        return asyncio.run(
             self.upload_attachments_parallel(items, max_concurrency=max_concurrency)
         )
 

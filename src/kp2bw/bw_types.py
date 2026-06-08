@@ -29,6 +29,7 @@ from ._bw_api_types import (
 )
 
 __all__ = [
+    "BwAttachment",
     "BwCollection",
     "BwFido2Credential",
     "BwField",
@@ -69,6 +70,23 @@ class BwField(TypedDict):
     name: str
     value: str
     type: Literal[0, 1, 2, 3]  # text, hidden, boolean, linked
+
+
+class BwAttachment(TypedDict):
+    """Attachment metadata returned on an item response.
+
+    Absent from the request-only template schema; ``bw serve`` includes an
+    ``attachments`` array on item GET/LIST responses for items that have files.
+    Only ``id`` and ``fileName`` are relied on (for upload-if-missing dedup);
+    the rest are best-effort.
+    """
+
+    id: str
+    fileName: str
+    size: NotRequired[str]
+    sizeName: NotRequired[str]
+    url: NotRequired[str | None]
+    object: NotRequired[str]
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +187,7 @@ class BwItemResponse(_BwItemCommon):
     revisionDate: str
     deletedDate: NotRequired[str | None]
     login: NotRequired[BwItemLogin]  # absent on non-login vault items
+    attachments: NotRequired[list[BwAttachment] | None]  # present when files attached
 
 
 # ---------------------------------------------------------------------------

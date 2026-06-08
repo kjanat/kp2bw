@@ -161,6 +161,17 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--update",
+        dest="update_existing",
+        help=(
+            "Sync changed KeePass content (and missing attachments) onto "
+            "existing Bitwarden entries; --no-update leaves their content "
+            "untouched (default: on, env: KP2BW_UPDATE)"
+        ),
+        action=BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
         "-y",
         "--yes",
         dest="skip_confirm",
@@ -248,6 +259,14 @@ def main() -> None:
                 env_var="KP2BW_MIGRATE_METADATA",
             )
         )
+        update_existing = (
+            args.update_existing
+            if args.update_existing is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_UPDATE"),
+                env_var="KP2BW_UPDATE",
+            )
+        )
         skip_confirm = (
             args.skip_confirm
             if args.skip_confirm is not None
@@ -289,6 +308,7 @@ def main() -> None:
     skip_expired = skip_expired if skip_expired is not None else False
     include_recyclebin = include_recyclebin if include_recyclebin is not None else False
     migrate_metadata = migrate_metadata if migrate_metadata is not None else True
+    update_existing = update_existing if update_existing is not None else True
     skip_confirm = skip_confirm if skip_confirm is not None else False
     verbose = verbose if verbose is not None else False
     debug = debug if debug is not None else False
@@ -365,14 +385,20 @@ def main() -> None:
         skip_expired=skip_expired,
         include_recyclebin=include_recyclebin,
         migrate_metadata=migrate_metadata,
+        update_existing=update_existing,
     )
     try:
-        c.convert()
+        failures = c.convert()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
     except (BitwardenClientError, ConversionError) as exc:
         _fail(exc)
+
+    # Exit non-zero on non-fatal failures (rejected updates/attachment uploads)
+    # so wrappers and CI can tell a partial migration from a clean one.
+    if failures:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -20,7 +20,9 @@ the built-in Bitwarden importer:
   attachments (values > 10k chars auto-upload as files)
 - **Long notes handling** -- notes exceeding 10k chars are uploaded as
   `notes.txt` attachments
-- **Idempotent** -- safe to run multiple times without duplicating entries
+- **Idempotent re-runs that sync changes** -- safe to run repeatedly; existing
+  entries are updated in place when their KeePass content changed (notes,
+  credentials, URIs, fields) and never duplicated. Disable with `--no-update`
 - **Nested folders** -- KeePass folder hierarchy is recreated in Bitwarden
 - **Recycle Bin filtering** -- deleted entries are automatically excluded
 - **Expiry awareness** -- expired entries are marked `[EXPIRED]` in notes;
@@ -73,7 +75,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
-       [--metadata | --no-metadata] [-y] [-v] [-d]
+       [--metadata | --no-metadata] [--update | --no-update] [-y] [-v] [-d]
        FILE
 ```
 
@@ -91,6 +93,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--skip-expired`                       | Skip entries that have expired in KeePass                      | `KP2BW_SKIP_EXPIRED`                  |
 | `--include-recycle-bin`                | Include Recycle Bin entries (excluded by default)              | `KP2BW_INCLUDE_RECYCLE_BIN`           |
 | `--metadata` / `--no-metadata`         | Toggle KeePass metadata as custom fields (default: on)         | `KP2BW_MIGRATE_METADATA`              |
+| `--update` / `--no-update`             | Update existing entries changed in KeePass (default: on)       | `KP2BW_UPDATE`                        |
 | `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt               | `KP2BW_YES`                           |
 | `-v, --verbose`                        | Verbose output                                                 | `KP2BW_VERBOSE`                       |
 | `-d, --debug`                          | Debug output — includes third-party library logs               | `KP2BW_DEBUG`                         |
@@ -129,9 +132,30 @@ kp2bw starts `bw serve` on a random localhost port. If it times out after 60s:
 ### Items skipped unexpectedly during org import
 
 When importing with `--bitwarden-org`, items already present in the
-organization vault are skipped. If you're importing into a specific collection
-(`--bitwarden-collection`), only items already in *that* collection are
-considered duplicates — items in other collections will be created or updated.
+organization vault are matched by folder + name. If you're importing into a
+specific collection (`--bitwarden-collection`), only items already in *that*
+collection are matched — items in other collections are created.
+
+### Re-running to pick up KeePass changes
+
+Re-running `kp2bw` against the same database updates matched entries in place
+when their KeePass content changed (notes, password, username, URIs or custom
+fields), so you no longer need to purge the vault to push edits. Unchanged
+entries are left untouched. A re-run also uploads any `notes.txt` / long-field
+/ file attachment that a previously imported entry was missing, and refreshes
+one whose contents changed in KeePass even when it keeps the same filename (the
+stale copy is removed only once the new one has uploaded). Pass `--no-update`
+(or `KP2BW_UPDATE=0`) to keep the old skip-only behavior and preserve manual
+Bitwarden-side edits.
+
+### An attachment failed to upload
+
+Attachment uploads are sent through `bw serve`, which forwards them to your
+Bitwarden/Vaultwarden server. A rejected file (for example, an image too large
+for your plan, or an upload that needs premium/organization storage) now
+reports the server's actual message and is skipped — it no longer aborts the
+whole migration, so the rest of your entries still import. Resolve the
+underlying limit and re-run to upload the remaining files.
 
 [jampe/kp2bw]: https://github.com/jampe/kp2bw
 [Bitwarden CLI]: https://bitwarden.com/help/cli/

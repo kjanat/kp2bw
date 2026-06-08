@@ -25,9 +25,10 @@ from .bw_types import (
     BwField,
     BwItemCreate,
     BwItemLogin,
+    BwItemResponse,
     BwUri,
 )
-from .exceptions import ConversionError
+from .exceptions import BitwardenClientError, ConversionError
 from .otp import resolve_otp
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,9 @@ logger = logging.getLogger(__name__)
 KP_REF_IDENTIFIER: str = "{REF:"
 MAX_BW_ITEM_LENGTH: int = 10 * 1000
 KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
+# Bitwarden item type for login entries (1=login, 2=secureNote, 3=card,
+# 4=identity).  kp2bw only ever creates and content-syncs login items.
+BW_ITEM_TYPE_LOGIN: int = 1
 
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
 type AttachmentItem = Attachment | tuple[str, str]
@@ -50,24 +54,52 @@ type FieldSpec = tuple[str | None, Literal[0, 1, 2, 3]]
 def _print_summary(
     elapsed: float,
     n_created: int,
+    n_updated: int,
     n_skipped: int,
     n_collection_update: int,
     n_attachments: int,
+    n_update_failed: int,
+    n_attach_failed: int,
 ) -> None:
     """Print a final migration summary to the shared rich console."""
     m, s = divmod(int(elapsed), 60)
     duration = f"{m}m {s:02d}s" if m else f"{s}s"
     console.print(f"\nDone in [bold]{duration}[/bold]")
-    w = len(str(max(n_created, n_skipped, n_collection_update, n_attachments, 1)))
+    w = len(
+        str(
+            max(
+                n_created,
+                n_updated,
+                n_skipped,
+                n_collection_update,
+                n_attachments,
+                n_update_failed,
+                n_attach_failed,
+                1,
+            )
+        )
+    )
     console.print(f"  [green]{n_created:{w}d}[/green] created")
+    if n_updated:
+        console.print(f"  [blue]{n_updated:{w}d}[/blue] updated (changed in KeePass)")
     if n_skipped:
-        console.print(f"  [dim]{n_skipped:{w}d}[/dim] skipped (already in target)")
+        console.print(f"  [dim]{n_skipped:{w}d}[/dim] skipped (unchanged)")
     if n_collection_update:
         console.print(
             f"  [yellow]{n_collection_update:{w}d}[/yellow] added to collection"
         )
     if n_attachments:
         console.print(f"  [cyan]{n_attachments:{w}d}[/cyan] attachments uploaded")
+    if n_update_failed:
+        console.print(
+            f"  [red]{n_update_failed:{w}d}[/red] entries failed to update "
+            f"(see warnings above)"
+        )
+    if n_attach_failed:
+        console.print(
+            f"  [red]{n_attach_failed:{w}d}[/red] attachments failed "
+            f"(see warnings above)"
+        )
 
 
 class Converter:
@@ -83,6 +115,7 @@ class Converter:
     _skip_expired: bool
     _include_recyclebin: bool
     _migrate_metadata: bool
+    _update_existing: bool
     _kp_ref_entries: list[Entry]
     _entries: dict[str, EntryValue]
     _member_reference_resolving_dict: dict[str, str]
@@ -105,6 +138,7 @@ class Converter:
         skip_expired: bool = False,
         include_recyclebin: bool = False,
         migrate_metadata: bool = True,
+        update_existing: bool = True,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._keepass_file_path = keepass_file_path
@@ -119,6 +153,7 @@ class Converter:
         self._skip_expired = skip_expired
         self._include_recyclebin = include_recyclebin
         self._migrate_metadata = migrate_metadata
+        self._update_existing = update_existing
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -208,7 +243,7 @@ class Converter:
             organizationId=self._bitwarden_organization_id,
             collectionIds=[],
             folderId=None,
-            type=1,
+            type=BW_ITEM_TYPE_LOGIN,
             name=title,
             notes=notes,
             favorite=False,
@@ -642,20 +677,285 @@ class Converter:
         return collection_id
 
     @staticmethod
-    def _materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:
-        """Convert an AttachmentItem to a ``(filename, data)`` pair."""
+    def _attachment_filename(att: AttachmentItem) -> str:
+        """Return the Bitwarden filename an AttachmentItem materialises to.
+
+        Single source of truth for the naming rule, shared by
+        :meth:`_materialise_attachment` (which uploads) and upload-if-missing
+        reconciliation (which compares names without encoding the payload), so
+        the two can never drift apart.
+        """
         if not isinstance(att, Attachment):
             # Long custom property — (key, value) text tuple
-            name: str = att[0]
-            value: str = att[1]
-            return name + ".txt", value.encode("UTF-8")
+            return att[0] + ".txt"
         # Real pykeepass Attachment
-        filename = att.filename if att.filename else "attachment"
-        data: bytes = att.data
-        return filename, data
+        return att.filename if att.filename else "attachment"
 
-    def _create_bitwarden_items_for_entries(self) -> None:
-        """Create entries via ``bw serve`` HTTP API and upload attachments."""
+    @staticmethod
+    def _materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:
+        """Convert an AttachmentItem to a ``(filename, data)`` pair."""
+        name = Converter._attachment_filename(att)
+        if isinstance(att, Attachment):
+            return name, att.data
+        return name, att[1].encode("UTF-8")
+
+    @staticmethod
+    def _fields_signature(
+        fields: list[BwField] | None,
+    ) -> list[tuple[str, str, int]]:
+        """Order-independent (name, value, type) signature of custom fields."""
+        return sorted(
+            (
+                (f.get("name") or "", f.get("value") or "", f.get("type") or 0)
+                for f in (fields or [])
+            ),
+            key=lambda t: (t[0], t[2], t[1]),
+        )
+
+    @staticmethod
+    def _login_differs(existing: BwItemLogin | None, desired: BwItemLogin) -> bool:
+        """Compare the login fields kp2bw owns (creds, totp, URIs)."""
+        if existing is None:
+            existing = BwItemLogin(
+                uris=[],
+                username="",
+                password="",
+                totp=None,
+                passwordRevisionDate=None,
+            )
+        if (existing.get("username") or "") != (desired.get("username") or ""):
+            return True
+        if (existing.get("password") or "") != (desired.get("password") or ""):
+            return True
+        if (existing.get("totp") or "") != (desired.get("totp") or ""):
+            return True
+        ex_uris = [u.get("uri", "") for u in (existing.get("uris") or [])]
+        de_uris = [u.get("uri", "") for u in (desired.get("uris") or [])]
+        return ex_uris != de_uris
+
+    @classmethod
+    def _content_differs(cls, existing: BwItemResponse, desired: BwItemCreate) -> bool:
+        """True if the KeePass-derived content diverges from the vault item.
+
+        Compares only the fields kp2bw manages (name, notes, custom fields and
+        the login credentials/URIs) so an unchanged re-run stays idempotent and
+        never issues a redundant PUT.
+        """
+        if (existing.get("name") or "") != (desired.get("name") or ""):
+            return True
+        if (existing.get("notes") or "") != (desired.get("notes") or ""):
+            return True
+        if cls._fields_signature(existing.get("fields")) != cls._fields_signature(
+            desired.get("fields")
+        ):
+            return True
+        return cls._login_differs(existing.get("login"), desired["login"])
+
+    @staticmethod
+    def _build_update_payload(
+        existing: BwItemResponse, desired: BwItemCreate
+    ) -> BwItemResponse:
+        """Build a PUT body that syncs KeePass content onto an existing item.
+
+        Starts from the existing item so server-managed and user-managed fields
+        (``id``, ``favorite``, ``folderId``, ``organizationId``, collection
+        membership) are preserved, then overwrites the fields kp2bw owns.
+        Collection IDs are only ever added to, never dropped: any target IDs are
+        appended to the existing ones, and the Bitwarden CLI additionally unions
+        the request against the item's real membership server-side, so a content
+        PUT cannot remove an item from a collection even though listed items
+        report ``collectionIds=null``.  Existing passkeys are preserved when the
+        KeePass entry has none, so a re-run can't silently drop a Bitwarden-side
+        FIDO2 credential.
+        """
+        payload: BwItemResponse = copy.copy(existing)
+        payload["name"] = desired["name"]
+        payload["notes"] = desired["notes"]
+        payload["fields"] = desired["fields"]
+
+        desired_login: BwItemLogin = copy.copy(desired["login"])
+        ex_login = existing.get("login")
+        if "fido2Credentials" not in desired_login and ex_login:
+            ex_fido2 = ex_login.get("fido2Credentials")
+            if ex_fido2:
+                desired_login["fido2Credentials"] = ex_fido2
+        payload["login"] = desired_login
+
+        target_colls = desired.get("collectionIds") or []
+        existing_colls = existing.get("collectionIds") or []
+        missing = [c for c in target_colls if c not in existing_colls]
+        payload["collectionIds"] = existing_colls + missing
+        return payload
+
+    @staticmethod
+    def _existing_attachments(
+        bw: BitwardenServeClient, item_id: str
+    ) -> dict[str, str] | None:
+        """Return ``{fileName: attachment_id}`` for *item_id*, or ``None`` on error.
+
+        Fetched authoritatively via GET so reconciliation never duplicates a
+        file and can address an existing attachment by id when its content needs
+        refreshing.  ``None`` signals "could not determine" so the caller skips
+        the sync rather than risk a duplicate or a destructive delete.  When a
+        filename is somehow present more than once (a state kp2bw never creates),
+        the last id wins; the extra copy is harmless and collapses on a re-run.
+        """
+        try:
+            item = bw.get_item(item_id)
+        except BitwardenClientError:
+            logger.warning(
+                f"Could not read existing attachments for item {item_id}; "
+                f"skipping its attachment sync to avoid duplicates"
+            )
+            return None
+        return {
+            name: att_id
+            for a in (item.get("attachments") or [])
+            if (name := a.get("fileName", "")) and (att_id := a.get("id", ""))
+        }
+
+    @staticmethod
+    def _attachment_content_differs(
+        bw: BitwardenServeClient,
+        item_id: str,
+        attachment_id: str,
+        att: AttachmentItem,
+    ) -> bool:
+        """True if the vault attachment's bytes differ from the KeePass source.
+
+        Lets an edited attachment that keeps the same filename (a refreshed
+        ``notes.txt`` recovery key, a swapped ``secret.jpg``) be replaced on a
+        re-run instead of going stale, while an unchanged file stays untouched
+        so the run remains idempotent.  If the existing bytes cannot be read the
+        attachment is treated as unchanged: that is the safe choice, since
+        re-uploading-and-deleting on an unreadable file risks losing it.
+        """
+        _name, desired = Converter._materialise_attachment(att)
+        try:
+            current = bw.get_attachment(item_id, attachment_id)
+        except BitwardenClientError:
+            logger.warning(
+                f"Could not read attachment {attachment_id!r} on item {item_id}; "
+                f"leaving it unchanged"
+            )
+            return False
+        return current != desired
+
+    def _reconcile_existing_item(
+        self,
+        bw: BitwardenServeClient,
+        existing: BwItemResponse,
+        folder: str | None,
+        bw_item: BwItemCreate,
+        attachments: list[AttachmentItem],
+        *,
+        fixed_coll_id: str | None,
+    ) -> tuple[
+        Literal["updated", "collection", "skipped", "failed"],
+        list[AttachmentItem],
+        dict[str, str],
+    ]:
+        """Sync KeePass changes onto an item that already exists in the vault.
+
+        Returns ``(outcome, upload_attachments, stale_by_name)`` where *outcome*
+        is one of ``"updated"`` (content PUT), ``"collection"`` (membership-only
+        PUT), ``"skipped"`` (no change) or ``"failed"`` (the PUT was rejected);
+        *upload_attachments* are the files to (re-)upload -- those the item does
+        not have yet plus those whose content changed; and *stale_by_name* maps
+        a changed file's name to the id of the stale copy to delete once its
+        replacement has been uploaded.
+        """
+        name = bw_item["name"]
+        item_id = existing["id"]
+        outcome: Literal["updated", "collection", "skipped", "failed"] = "skipped"
+
+        # kp2bw only ever creates login items, so a non-login vault item sharing
+        # this (folder, name) is a name collision we must not mutate -- neither
+        # its content/collections nor (further down) its attachments.
+        if existing.get("type") != BW_ITEM_TYPE_LOGIN:
+            logger.log(
+                VERBOSE,
+                f"-- Entry {name!r}: matched a non-login item, skipping",
+            )
+            return outcome, [], {}
+
+        # Content/collection sync. A rejected PUT here is non-fatal: one
+        # problematic entry must not abort the whole re-run and strand every
+        # entry after it (the same robustness the attachment phase has).
+        try:
+            # Content sync: PUT only when the KeePass-derived content changed
+            # (keeps re-runs idempotent).
+            if self._update_existing and self._content_differs(existing, bw_item):
+                payload = self._build_update_payload(existing, bw_item)
+                bw.update_item(item_id, payload)
+                bw.update_dedup_entry(folder, name, payload)
+                logger.log(VERBOSE, f"-- Entry {name!r}: content updated from KeePass")
+                outcome = "updated"
+            elif not fixed_coll_id:
+                # Collection-membership-only update (auto/org mode). bw serve
+                # returns collectionIds=null on listed items, so in
+                # fixed-collection mode we cannot (and need not) do the
+                # missing-check — the item is already in the scoped target
+                # collection.
+                target_colls: list[str] = bw_item.get("collectionIds") or []
+                existing_colls: list[str] = existing.get("collectionIds") or []
+                missing = [c for c in target_colls if c not in existing_colls]
+                if missing:
+                    updated_item = copy.copy(existing)
+                    updated_item["collectionIds"] = existing_colls + missing
+                    bw.update_item(item_id, updated_item)
+                    # Keep the cache fresh so a second KeePass entry with the
+                    # same (folder, name) doesn't recompute stale collectionIds.
+                    bw.update_dedup_entry(folder, name, updated_item)
+                    logger.log(
+                        VERBOSE,
+                        f"-- Entry {name!r}: added to {len(missing)} collection(s)",
+                    )
+                    outcome = "collection"
+        except BitwardenClientError as exc:
+            logger.warning(
+                f"-- Entry {name!r}: update failed, leaving the existing "
+                f"item unchanged: {exc}"
+            )
+            # The content/collection PUT was rejected, so leave the item wholly
+            # untouched: syncing attachments now would half-mutate it (stale
+            # login fields beside a freshly refreshed notes.txt).
+            return "failed", [], {}
+
+        # Attachment sync: upload files the item is missing (so a
+        # previously-skipped entry finally gets its notes.txt / long-field / file
+        # attachments) *and* refresh files whose content changed but kept the
+        # same name, never duplicating an identical one already present.
+        upload_atts: list[AttachmentItem] = []
+        stale_by_name: dict[str, str] = {}
+        if self._update_existing and attachments:
+            existing_atts = self._existing_attachments(bw, item_id)
+            if existing_atts is not None:
+                for att in attachments:
+                    fname = self._attachment_filename(att)
+                    old_id = existing_atts.get(fname)
+                    if old_id is None:
+                        # Item doesn't have this file yet -- upload it.
+                        upload_atts.append(att)
+                    elif self._attachment_content_differs(bw, item_id, old_id, att):
+                        # Same name, changed bytes -- re-upload the new content
+                        # and mark the stale copy for deletion afterwards.
+                        upload_atts.append(att)
+                        stale_by_name[fname] = old_id
+
+        if outcome == "skipped" and not upload_atts:
+            logger.log(
+                VERBOSE,
+                f"-- Entry {name!r} unchanged in folder {folder!r}, skipping",
+            )
+
+        return outcome, upload_atts, stale_by_name
+
+    def _create_bitwarden_items_for_entries(self) -> int:
+        """Create entries via ``bw serve`` HTTP API and upload attachments.
+
+        Returns the count of non-fatal failures (rejected updates + uploads).
+        """
         logger.info("Connecting and reading existing folders and entries")
 
         # When a fixed collection ID is given, scope the dedup index to that
@@ -668,9 +968,12 @@ class Converter:
         )
 
         n_skipped = 0
+        n_updated = 0
         n_collection_update = 0
         n_created = 0
         n_attachments = 0
+        n_attach_failed = 0
+        n_update_failed = 0
         t_start = time.monotonic()
 
         progress = Progress(
@@ -694,6 +997,17 @@ class Converter:
             # --- Phase 1: Partition entries and resolve collections ----------
             import_entries: dict[str, tuple[str | None, BwItemCreate]] = {}
             attachment_map: dict[str, list[AttachmentItem]] = {}
+            # Existing items needing only missing attachments uploaded:
+            # (item_id, [attachments]).
+            existing_uploads: list[tuple[str, list[AttachmentItem]]] = []
+            # (item_id, filename) pairs already queued this run, so two KeePass
+            # entries sharing one (folder, name) can't upload the same file
+            # twice while each entry's *unique* attachments are still uploaded.
+            queued_atts: set[tuple[str, str]] = set()
+            # Stale copies to remove after their replacement uploads, as
+            # (item_id, attachment_id, filename); the delete only fires once the
+            # matching (item_id, filename) upload has succeeded.
+            pending_deletes: list[tuple[str, str, str]] = []
 
             task1 = progress.add_task("Processing entries", total=len(self._entries))
             for key, entry_value in self._entries.items():
@@ -704,51 +1018,46 @@ class Converter:
                 # Resolve collection (mutates bw_item)
                 self._resolve_collection(bw, bw_item, firstlevel)
 
-                # Dedup: skip items already in the vault.
-                #
-                # Fixed-collection mode: the dedup index is scoped to the
-                # target collection, so any hit means the item is already
-                # there.  bw serve returns collectionIds=null on listed items
-                # regardless of actual membership, so we cannot use the
-                # missing-check here — and we don't need to.
-                #
-                # Auto/no-collection mode: item may exist in the org but be
-                # absent from the automatically-resolved target collection;
-                # update its collection membership via PUT.
+                # An item with this (folder, name) already exists: sync any
+                # KeePass changes onto it (content, collection membership, and
+                # missing attachments) instead of blindly skipping it.
                 existing = bw.get_existing_item(folder, bw_item["name"])
                 if existing is not None:
-                    if fixed_coll_id:
-                        logger.log(
-                            VERBOSE,
-                            f"-- Entry {bw_item['name']!r} already in "
-                            f"target collection, skipping",
-                        )
+                    item_id = existing["id"]
+                    outcome, upload_atts, stale_by_name = self._reconcile_existing_item(
+                        bw,
+                        existing,
+                        folder,
+                        bw_item,
+                        attachments,
+                        fixed_coll_id=fixed_coll_id,
+                    )
+                    if outcome == "updated":
+                        n_updated += 1
+                    elif outcome == "collection":
+                        n_collection_update += 1
+                    elif outcome == "failed":
+                        n_update_failed += 1
+                    else:  # "skipped" — content unchanged (attachments, if any,
+                        # are reported separately via the attachment counters).
                         n_skipped += 1
-                    else:
-                        target_colls: list[str] = bw_item.get("collectionIds") or []
-                        existing_colls: list[str] = existing.get("collectionIds") or []
-                        missing = [c for c in target_colls if c not in existing_colls]
-                        if missing:
-                            updated_item = copy.copy(existing)
-                            updated_item["collectionIds"] = existing_colls + missing
-                            bw.update_item(existing["id"], updated_item)
-                            # Keep cache fresh so a second KeePass entry with
-                            # the same (folder, name) doesn't recompute stale
-                            # existing_colls and issue a redundant PUT.
-                            bw.update_dedup_entry(folder, bw_item["name"], updated_item)
-                            logger.log(
-                                VERBOSE,
-                                f"-- Entry {bw_item['name']!r}: added to "
-                                f"{len(missing)} collection(s)",
-                            )
-                            n_collection_update += 1
-                        else:
-                            logger.log(
-                                VERBOSE,
-                                f"-- Entry {bw_item['name']!r} already in "
-                                f"folder {folder!r}, skipping",
-                            )
-                            n_skipped += 1
+                    # Queue each file once per item, so two KeePass entries
+                    # collapsing to the same vault item don't upload a shared
+                    # file twice yet still contribute their unique files. A
+                    # changed file's stale copy is scheduled for deletion only
+                    # alongside the queued replacement upload.
+                    unique_atts: list[AttachmentItem] = []
+                    for att in upload_atts:
+                        fname = self._attachment_filename(att)
+                        pair = (item_id, fname)
+                        if pair not in queued_atts:
+                            queued_atts.add(pair)
+                            unique_atts.append(att)
+                            old_id = stale_by_name.get(fname)
+                            if old_id is not None:
+                                pending_deletes.append((item_id, old_id, fname))
+                    if unique_atts:
+                        existing_uploads.append((item_id, unique_atts))
                     progress.advance(task1)
                     continue
 
@@ -773,37 +1082,76 @@ class Converter:
                 key_to_id = {}
 
             # --- Phase 3: Parallel attachment uploads -----------------------
-            if attachment_map:
-                upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
-                for key, attachments in attachment_map.items():
-                    item_id = key_to_id.get(key)
-                    if not item_id:
-                        _folder, bw_item = import_entries[key]
-                        logger.warning(
-                            f"Could not find item ID for {bw_item['name']!r} "
-                            f"in folder {_folder!r} for attachment upload"
-                        )
-                        continue
+            # Newly-created items (resolve their server-assigned IDs) and
+            # existing items missing attachments share one upload pass.
+            upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
+            for key, new_atts in attachment_map.items():
+                item_id = key_to_id.get(key)
+                if not item_id:
+                    _folder, miss_item = import_entries[key]
+                    logger.warning(
+                        f"Could not find item ID for {miss_item['name']!r} "
+                        f"in folder {_folder!r} for attachment upload"
+                    )
+                    continue
+                upload_items.append((
+                    item_id,
+                    [self._materialise_attachment(a) for a in new_atts],
+                ))
+            for item_id, existing_atts in existing_uploads:
+                upload_items.append((
+                    item_id,
+                    [self._materialise_attachment(a) for a in existing_atts],
+                ))
 
-                    file_pairs = [
-                        self._materialise_attachment(att) for att in attachments
-                    ]
-                    upload_items.append((item_id, file_pairs))
-
-                n_attachments = sum(len(fps) for _, fps in upload_items)
+            if upload_items:
+                total_files = sum(len(fps) for _, fps in upload_items)
                 task3 = progress.add_task(
                     "Uploading attachments", total=len(upload_items)
                 )
-                bw.upload_attachments(upload_items)
+                failed = bw.upload_attachments(upload_items)
+                n_attach_failed = len(failed)
+                n_attachments = total_files - n_attach_failed
                 progress.update(task3, completed=len(upload_items))
+
+                # --- Phase 4: remove stale copies of refreshed attachments --
+                # Upload-then-delete: only drop the old copy once its
+                # replacement landed, so a failed re-upload never loses data. A
+                # failed delete is non-fatal (it just leaves a harmless extra
+                # copy that collapses on the next run).
+                if pending_deletes:
+                    failed_uploads = set(failed)
+                    for item_id, old_id, fname in pending_deletes:
+                        if (item_id, fname) in failed_uploads:
+                            continue
+                        try:
+                            bw.delete_attachment(item_id, old_id)
+                        except BitwardenClientError as exc:
+                            logger.warning(
+                                f"Could not remove the stale copy of {fname!r} "
+                                f"on item {item_id} (a duplicate may remain): "
+                                f"{exc}"
+                            )
 
         elapsed = time.monotonic() - t_start
         _print_summary(
-            elapsed, n_created, n_skipped, n_collection_update, n_attachments
+            elapsed,
+            n_created,
+            n_updated,
+            n_skipped,
+            n_collection_update,
+            n_attachments,
+            n_update_failed,
+            n_attach_failed,
         )
+        return n_update_failed + n_attach_failed
 
-    def convert(self) -> None:
-        """Run the full KeePass-to-Bitwarden migration pipeline."""
+    def convert(self) -> int:
+        """Run the full KeePass-to-Bitwarden migration pipeline.
+
+        Returns the number of non-fatal failures (rejected entry updates plus
+        rejected attachment uploads); ``0`` means everything succeeded.
+        """
         # load keepass data from database
         self._load_keepass_data()
 
@@ -811,4 +1159,4 @@ class Converter:
         self._resolve_entries_with_references()
 
         # store aggregated entries in bw
-        self._create_bitwarden_items_for_entries()
+        return self._create_bitwarden_items_for_entries()
