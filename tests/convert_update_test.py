@@ -11,7 +11,7 @@ Protected members are exercised through a ``Converter`` subclass (mirroring
 from typing import Any, cast
 
 from kp2bw.bw_serve import BitwardenServeClient
-from kp2bw.bw_types import BwItemCreate, BwItemResponse
+from kp2bw.bw_types import BwItemCreate, BwItemResponse, BwUri
 from kp2bw.convert import AttachmentItem, Converter
 from kp2bw.exceptions import BitwardenClientError
 
@@ -226,7 +226,8 @@ def assert_field_change_detected() -> None:
 def assert_uri_change_detected() -> None:
     conv = UpdateTestConverter()
     desired = _make_desired()
-    desired["login"]["uris"] = [{"uri": "https://b", "match": None}]
+    new_uris: list[BwUri] = [{"uri": "https://b", "match": None}]
+    desired["login"]["uris"] = new_uris
     if not conv.diff(_make_existing(), desired):
         raise AssertionError("changed URI was not detected")
 

@@ -56,6 +56,18 @@ BW_NOT_FOUND_MSG: str = (
 )
 
 
+def _is_missing_item_error(status_code: int, message: object) -> bool:
+    """True when an attachment upload failed because the item wasn't found.
+
+    A freshly created cipher can be momentarily unresolvable by ``bw serve``'s
+    attachment endpoint, which looks ``itemid`` up in its local vault cache
+    rather than on the server.  Such a failure surfaces as a ``404`` or a
+    ``message`` containing "not found", and warrants a sync-and-retry rather
+    than being treated as a permanent rejection.
+    """
+    return status_code == 404 or "not found" in str(message).lower()
+
+
 def ensure_bw_available() -> None:
     """Verify the ``bw`` CLI is on the PATH.
 
@@ -796,37 +808,62 @@ class BitwardenServeClient:
         filename: str,
         data: bytes,
     ) -> None:
-        """Upload one attachment via multipart ``POST /attachment``."""
-        resp = await client.post(
-            "/attachment",
-            params={"itemid": item_id},
-            files={"file": (filename, data)},
-        )
-        try:
-            parsed: Any = resp.json()
-        except ValueError:
-            parsed = None
-        # Guard against a non-object JSON body (array/string) so reading the
-        # envelope can't raise AttributeError instead of a clean error.
-        body: dict[str, Any] = (
-            cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
-        )
+        """Upload one attachment via multipart ``POST /attachment``.
 
-        # bw serve reports command-level failures (e.g. "Premium status is
-        # required", storage-quota or attachment-size limits) as HTTP 400 with
-        # the real reason in the body's ``message`` field.  Surface it instead
-        # of an opaque status code so the user knows *why* a file was rejected.
-        if resp.status_code >= 400 or not body.get("success", False):
+        A just-created item can be momentarily unresolvable by ``bw serve``'s
+        attachment endpoint, which resolves ``itemid`` from its local vault
+        cache rather than from the server.  On such a not-found failure, force a
+        vault sync (so freshly created IDs become visible) and retry once before
+        treating the upload as failed.
+        """
+        for attempt in range(2):
+            resp = await client.post(
+                "/attachment",
+                params={"itemid": item_id},
+                files={"file": (filename, data)},
+            )
+            try:
+                parsed: Any = resp.json()
+            except ValueError:
+                parsed = None
+            # Guard against a non-object JSON body (array/string) so reading the
+            # envelope can't raise AttributeError instead of a clean error.
+            body: dict[str, Any] = (
+                cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+            )
+
+            if resp.status_code < 400 and body.get("success", False):
+                logger.log(
+                    VERBOSE, f"Uploaded attachment {filename!r} to item {item_id}"
+                )
+                return
+
+            # bw serve reports command-level failures (e.g. "Premium status is
+            # required", storage-quota or attachment-size limits) as HTTP 400
+            # with the real reason in the body's ``message`` field.  Surface it
+            # instead of an opaque status code so the user knows *why* a file
+            # was rejected.
             message = body.get("message")
             if not message:
                 message = f"HTTP {resp.status_code}"
                 if parsed is None:
                     message += " (non-JSON response)"
+
+            # A freshly created item may not yet be in bw serve's local cache;
+            # sync once so its ID resolves, then retry the upload.
+            if attempt == 0 and _is_missing_item_error(resp.status_code, message):
+                logger.log(
+                    VERBOSE,
+                    f"Item {item_id} not yet resolvable for attachment "
+                    f"{filename!r}; syncing vault and retrying",
+                )
+                await client.post("/sync")
+                continue
+
             raise BitwardenClientError(
                 f"Attachment upload failed for {filename!r} on item {item_id}: "
                 f"{message}"
             )
-        logger.log(VERBOSE, f"Uploaded attachment {filename!r} to item {item_id}")
 
     async def upload_attachments_parallel(
         self,

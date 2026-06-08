@@ -1122,6 +1122,7 @@ class Converter:
             # Newly-created items (resolve their server-assigned IDs) and
             # existing items missing attachments share one upload pass.
             upload_items: list[tuple[str, list[tuple[str, bytes]]]] = []
+            new_item_uploads = False
             for key, new_atts in attachment_map.items():
                 item_id = key_to_id.get(key)
                 if not item_id:
@@ -1131,6 +1132,7 @@ class Converter:
                         f"in folder {_folder!r} for attachment upload"
                     )
                     continue
+                new_item_uploads = True
                 upload_items.append((
                     item_id,
                     [self._materialise_attachment(a) for a in new_atts],
@@ -1140,6 +1142,13 @@ class Converter:
                     item_id,
                     [self._materialise_attachment(a) for a in existing_atts],
                 ))
+
+            # A just-created item can be momentarily unresolvable by bw serve's
+            # attachment endpoint, which resolves `itemid` from its local vault
+            # cache; sync so freshly created IDs are visible before uploading to
+            # them. (upload_attachment also self-heals with a sync-and-retry.)
+            if new_item_uploads:
+                bw.sync()
 
             if upload_items:
                 total_files = sum(len(fps) for _, fps in upload_items)
