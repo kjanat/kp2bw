@@ -8,6 +8,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Windows npm `bw.cmd` support** -- An npm-installed Bitwarden CLI on Windows
+  exposes only a `bw.cmd` shim (no `bw.exe`), which `CreateProcess` cannot run
+  directly. `resolve_bw_command` now detects `.cmd`/`.bat` shims and routes them
+  through `cmd.exe /c` (invoked by basename from their own directory to avoid
+  shell-quoting issues), and `terminate_serve` tears the `bw serve` process tree
+  down with `taskkill /F /T` so the real server isn't orphaned behind the
+  `cmd.exe` wrapper. A `windows-bw-cmd` CI job installs `bw` via npm and runs a
+  live smoke test (`tests/windows_bw_cmd_smoke.py`) covering invocation and
+  teardown of the shim.
+
 ### Fixed
 
 - **Missing `bw` CLI traceback** -- When the Bitwarden CLI (`bw`) was not on
@@ -18,9 +30,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the same way instead of as a stack trace. `BitwardenServeClient` raises a
   `BitwardenClientError` rather than letting `FileNotFoundError` escape.
   Detection uses `shutil.which`, so Windows `bw.exe`/`bw.cmd` shims are found via
-  `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so even an
-  unexecutable shim (e.g. an npm `bw.cmd` that `CreateProcess` can't run) yields
-  the friendly message. Fixes #5.
+  `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so a
+  genuinely missing CLI still yields the friendly message. Fixes #5.
 
 ## [3.0.1] - 2026-06-08
 

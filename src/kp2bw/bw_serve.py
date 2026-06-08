@@ -4,6 +4,7 @@ import asyncio
 import atexit
 import copy
 import logging
+import ntpath
 import os
 import shutil
 import signal
@@ -53,6 +54,70 @@ def ensure_bw_available() -> None:
         raise BitwardenClientError(BW_NOT_FOUND_MSG)
 
 
+def resolve_bw_command() -> tuple[list[str], str | None]:
+    """Resolve how to launch the Bitwarden CLI as a subprocess.
+
+    Returns ``(argv_prefix, cwd)``: *argv_prefix* is prepended to the ``bw``
+    arguments for every subprocess call, and *cwd* is the working directory to
+    run from (``None`` keeps the caller's cwd).
+
+    On Windows an npm-installed ``bw`` exists only as a ``bw.cmd``/``bw.bat``
+    shim. ``CreateProcess`` (what ``subprocess`` uses with ``shell=False``)
+    cannot execute a batch file directly — it only runs real ``.exe`` images —
+    so such shims are routed through the command processor (``cmd.exe /c``).
+    The shim is invoked by basename from its own directory so that an install
+    path containing spaces never needs fragile ``cmd`` quoting.
+
+    Raises :class:`BitwardenClientError` if ``bw`` cannot be found.
+    """
+    path = shutil.which("bw")
+    if path is None:
+        raise BitwardenClientError(BW_NOT_FOUND_MSG)
+    if os.name == "nt" and path.lower().endswith((".cmd", ".bat")):
+        comspec = os.environ.get("COMSPEC", "cmd.exe")
+        # ntpath (not os.path) so the split is correct even when this is
+        # exercised on a non-Windows host in tests.
+        return [comspec, "/d", "/c", ntpath.basename(path)], ntpath.dirname(path)
+    return [path], None
+
+
+def terminate_serve(
+    process: subprocess.Popen[bytes],
+    *,
+    via_shell: bool = False,
+    timeout: float = 5.0,
+) -> None:
+    """Stop a running ``bw serve`` process together with its descendants.
+
+    When ``bw`` is launched through a Windows command shim (``cmd.exe`` running
+    a ``bw.cmd``), :meth:`subprocess.Popen.terminate` reaches only the shim and
+    orphans the real ``bw serve``, which keeps holding the port. In that case
+    the whole process tree is killed with ``taskkill /F /T`` instead.
+    """
+    if process.poll() is not None:
+        return
+    if via_shell and os.name == "nt":
+        # terminate() would only kill the cmd.exe wrapper; take down the tree.
+        _ = subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            check=False,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+        )
+        try:
+            _ = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            logger.warning("bw serve did not exit after taskkill /T")
+        return
+    process.terminate()
+    try:
+        _ = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        logger.warning("bw serve did not exit on SIGTERM, sending SIGKILL")
+        process.kill()
+        _ = process.wait(timeout=timeout)
+
+
 def sanitize_cli_output(
     output: str,
     *,
@@ -100,6 +165,9 @@ class BitwardenServeClient:
     _org_id: str | None
     _collection_id: str | None  # fixed target collection for dedup scoping
     _closed: bool
+    _bw_cmd: list[str]  # argv prefix for invoking bw (handles Windows shims)
+    _bw_cwd: str | None  # cwd for bw subprocess calls (set for shim invocation)
+    _bw_via_shell: bool  # True when bw runs through a cmd.exe wrapper
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -112,10 +180,12 @@ class BitwardenServeClient:
         org_id: str | None = None,
         collection_id: str | None = None,
     ) -> None:
-        # Fail fast with an actionable message if the Bitwarden CLI is missing,
-        # before binding sockets, installing signal handlers, or spawning a
-        # subprocess that would otherwise raise a raw FileNotFoundError.
-        ensure_bw_available()
+        # Resolve how to launch bw before binding sockets, installing signal
+        # handlers, or spawning anything. This fails fast with an actionable
+        # message when bw is missing, and transparently wraps Windows .cmd/.bat
+        # shims so an npm-installed CLI works rather than crashing later.
+        self._bw_cmd, self._bw_cwd = resolve_bw_command()
+        self._bw_via_shell = len(self._bw_cmd) > 1
 
         self._port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{self._port}"
@@ -174,18 +244,18 @@ class BitwardenServeClient:
         logger.log(VERBOSE, "Obtaining session key via bw unlock --raw")
         try:
             result = subprocess.run(
-                ["bw", "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
+                [*self._bw_cmd, "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
                 stdin=subprocess.DEVNULL,
+                cwd=self._bw_cwd,
                 env={**os.environ, "_KP2BW_BW_PW": password},
             )
         except FileNotFoundError as exc:
-            # `bw` resolved on PATH but could not actually be executed — e.g. a
-            # Windows npm install exposes `bw.cmd` (found by shutil.which via
-            # PATHEXT) which CreateProcess cannot run directly.
+            # The resolved command (bw, or cmd.exe for a shim) could not be
+            # executed — surface the actionable message, not a raw traceback.
             raise BitwardenClientError(BW_NOT_FOUND_MSG) from exc
         except subprocess.TimeoutExpired:
             logger.warning("bw unlock timed out while obtaining session key")
@@ -213,7 +283,14 @@ class BitwardenServeClient:
         Always passes an explicit *env* dict so a stale ``BW_SESSION`` in
         the parent process environment is never leaked to the child.
         """
-        cmd = ["bw", "serve", "--port", str(self._port), "--hostname", "127.0.0.1"]
+        cmd = [
+            *self._bw_cmd,
+            "serve",
+            "--port",
+            str(self._port),
+            "--hostname",
+            "127.0.0.1",
+        ]
         env = {**os.environ}
         if session:
             env["BW_SESSION"] = session
@@ -229,6 +306,7 @@ class BitwardenServeClient:
                 cmd,
                 stdin=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
+                cwd=self._bw_cwd,
                 env=env,
             )
         except FileNotFoundError as exc:
@@ -285,13 +363,7 @@ class BitwardenServeClient:
 
         if self._process is not None and self._process.poll() is None:
             logger.log(VERBOSE, "Terminating bw serve process")
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning("bw serve did not exit on SIGTERM, sending SIGKILL")
-                self._process.kill()
-                self._process.wait(timeout=5)
+            terminate_serve(self._process, via_shell=self._bw_via_shell)
 
         self._process = None
         try:

@@ -23,8 +23,20 @@ def test_bw_serve_bw_missing_script() -> None:
     _run_script_main("bw_serve_bw_missing_test.py")
 
 
+def test_bw_serve_command_script() -> None:
+    _run_script_main("bw_serve_command_test.py")
+
+
 def test_convert_ref_resolution_script() -> None:
     _run_script_main("convert_ref_resolution_test.py")
+
+
+def test_windows_bw_cmd_smoke_script() -> None:
+    if os.name != "nt":
+        pytest.skip("windows bw .cmd smoke runs on Windows only")
+    if os.environ.get("KP2BW_RUN_WIN_CMD_SMOKE") != "1":
+        pytest.skip("set KP2BW_RUN_WIN_CMD_SMOKE=1 to run the Windows bw .cmd smoke")
+    _run_script_main("windows_bw_cmd_smoke.py")
 
 
 def test_smoke_script() -> None:

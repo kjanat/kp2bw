@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Windows bw .cmd
+on:
+  workflow_call:
+  pull_request:
+  push: { branches: [master] }
+  workflow_dispatch:
+jobs:
+  npm-cmd-shim:
+    runs-on: windows-latest
+    permissions: { contents: read }
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      - name: Install Bitwarden CLI via npm (creates a bw.cmd shim, no bw.exe)
+        run: npm install -g @bitwarden/cli
+
+      - name: Confirm bw resolves to a .cmd shim
+        shell: pwsh
+        run: |
+          $bw = (Get-Command bw).Source
+          Write-Host "bw resolved to: $bw"
+          if (-not $bw.ToLower().EndsWith(".cmd")) {
+            Write-Error "expected an npm bw.cmd shim, got: $bw"
+            exit 1
+          }
+
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install project
+        run: uv sync
+
+      - name: Run Windows bw .cmd smoke test
+        env:
+          KP2BW_RUN_WIN_CMD_SMOKE: "1"
+        run: uv run python tests/windows_bw_cmd_smoke.py
