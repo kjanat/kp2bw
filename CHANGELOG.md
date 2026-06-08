@@ -8,6 +8,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Missing `bw` CLI traceback** -- When the Bitwarden CLI (`bw`) was not on
+  `PATH`, `kp2bw` crashed with a long, intimidating `FileNotFoundError`
+  traceback from `subprocess`. The CLI now checks for `bw` up front (before
+  prompting for passwords) and exits cleanly with an actionable message; any
+  `BitwardenClientError`/`ConversionError` raised during conversion is reported
+  the same way instead of as a stack trace. `BitwardenServeClient` raises a
+  `BitwardenClientError` rather than letting `FileNotFoundError` escape. Fixes #5.
+
 ## [3.0.1] - 2026-06-08
 
 ### Fixed

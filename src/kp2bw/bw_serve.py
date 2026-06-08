@@ -5,6 +5,7 @@ import atexit
 import copy
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -32,6 +33,24 @@ _HTTP_TIMEOUT_S: float = 60.0
 
 # Max length for sanitized CLI output snippets in logs/errors.
 _SANITIZED_OUTPUT_MAX_CHARS: int = 240
+
+# Actionable message shown when the Bitwarden CLI cannot be located.
+BW_NOT_FOUND_MSG: str = (
+    "Bitwarden CLI ('bw') not found on your PATH. Install it and make sure "
+    "'bw' is runnable from your shell, then try again. "
+    "See https://bitwarden.com/help/cli/ for installation instructions."
+)
+
+
+def ensure_bw_available() -> None:
+    """Verify the ``bw`` CLI is on the PATH.
+
+    Raises :class:`BitwardenClientError` with an actionable message instead of
+    letting ``subprocess`` raise a bare ``FileNotFoundError`` (and a long,
+    intimidating traceback) when ``bw`` cannot be located.
+    """
+    if shutil.which("bw") is None:
+        raise BitwardenClientError(BW_NOT_FOUND_MSG)
 
 
 def sanitize_cli_output(
@@ -93,6 +112,11 @@ class BitwardenServeClient:
         org_id: str | None = None,
         collection_id: str | None = None,
     ) -> None:
+        # Fail fast with an actionable message if the Bitwarden CLI is missing,
+        # before binding sockets, installing signal handlers, or spawning a
+        # subprocess that would otherwise raise a raw FileNotFoundError.
+        ensure_bw_available()
+
         self._port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{self._port}"
         self._process = None

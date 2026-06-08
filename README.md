@@ -100,6 +100,17 @@ Configuration precedence is always: CLI flag > environment variable > built-in d
 
 ## Troubleshooting
 
+### `bw` not found on `PATH`
+
+kp2bw shells out to the [Bitwarden CLI]. If `bw` isn't installed or isn't on
+your `PATH`, kp2bw stops before prompting for any passwords with:
+
+```text
+ERROR: Bitwarden CLI ('bw') not found on your PATH. ...
+```
+
+Install the CLI and make sure `bw --version` runs in the same shell, then retry.
+
 ### "Invalid master password" on `bw unlock`
 
 If your password contains special shell characters (`?`, `>`, `&`, etc.), wrap

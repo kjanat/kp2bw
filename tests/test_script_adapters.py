@@ -19,6 +19,10 @@ def test_bw_serve_sanitization_script() -> None:
     _run_script_main("bw_serve_sanitization_test.py")
 
 
+def test_bw_serve_bw_missing_script() -> None:
+    _run_script_main("bw_serve_bw_missing_test.py")
+
+
 def test_convert_ref_resolution_script() -> None:
     _run_script_main("convert_ref_resolution_test.py")
 

@@ -6,10 +6,13 @@ from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from typing import NoReturn
 
 from rich.logging import RichHandler
+from rich.markup import escape
 
 from . import VERBOSE, __version__
 from ._console import console
+from .bw_serve import ensure_bw_available
 from .convert import Converter
+from .exceptions import BitwardenClientError, ConversionError
 
 
 class MyArgParser(ArgumentParser):
@@ -193,6 +196,12 @@ def _read_password(arg: str | None, prompt: str) -> str:
     return arg
 
 
+def _fail(exc: BaseException) -> NoReturn:
+    """Print an actionable error and exit non-zero, without a stack trace."""
+    console.print(f"[red]ERROR:[/red] {escape(str(exc))}")
+    sys.exit(1)
+
+
 def main() -> None:
     """Entry point: parse arguments, resolve env vars, and run the converter."""
     args: Namespace = _argparser().parse_args()
@@ -310,6 +319,13 @@ def main() -> None:
         if verbose:
             logging.getLogger("kp2bw").setLevel(VERBOSE)
 
+    # Verify the Bitwarden CLI is available before prompting for secrets, so the
+    # user isn't asked for passwords only to hit a missing-`bw` failure later.
+    try:
+        ensure_bw_available()
+    except BitwardenClientError as exc:
+        _fail(exc)
+
     # bw confirmation
     if not skip_confirm:
         confirm: str | None = None
@@ -355,6 +371,8 @@ def main() -> None:
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
+    except (BitwardenClientError, ConversionError) as exc:
+        _fail(exc)
 
 
 if __name__ == "__main__":
