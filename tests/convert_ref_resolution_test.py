@@ -1,5 +1,4 @@
 import logging
-import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -259,29 +258,28 @@ def _run_chain_resolution(
     convert_logger.addHandler(capture)
     convert_logger.setLevel(logging.WARNING)
 
-    tmp_dir = tempfile.mkdtemp(prefix="kp2bw-chain-")
     try:
-        db_path = str(Path(tmp_dir) / "chain.kdbx")
-        kp = create_database(db_path, password="pw")
-        build(kp, kp.root_group)
-        kp.save()
+        with tempfile.TemporaryDirectory(prefix="kp2bw-chain-") as tmp_dir:
+            db_path = str(Path(tmp_dir) / "chain.kdbx")
+            kp = create_database(db_path, password="pw")
+            build(kp, kp.root_group)
+            kp.save()
 
-        converter = ChainResolutionTestConverter(
-            keepass_file_path=db_path,
-            keepass_password="pw",
-            keepass_keyfile_path=None,
-            bitwarden_password="pw",
-            bitwarden_organization_id=None,
-            bitwarden_coll_id=None,
-            path2name=False,
-            path2nameskip=1,
-            import_tags=None,
-        )
-        return converter.load_and_resolve(), capture.messages
+            converter = ChainResolutionTestConverter(
+                keepass_file_path=db_path,
+                keepass_password="pw",
+                keepass_keyfile_path=None,
+                bitwarden_password="pw",
+                bitwarden_organization_id=None,
+                bitwarden_coll_id=None,
+                path2name=False,
+                path2nameskip=1,
+                import_tags=None,
+            )
+            return converter.load_and_resolve(), capture.messages
     finally:
         convert_logger.removeHandler(capture)
         convert_logger.setLevel(previous_level)
-        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def assert_resolves_chain_with_merge() -> None:
@@ -384,8 +382,11 @@ def assert_reference_cycle_terminates() -> None:
         )
     if {"Entry A", "Entry B"} & set(items):
         raise AssertionError(f"Cyclic entries should not be imported: {sorted(items)}")
-    if not warnings:
-        raise AssertionError("Expected a warning for the unresolvable reference cycle")
+    if len(warnings) < 2:
+        raise AssertionError(
+            "Expected both cyclic entries (A and B) to warn for the unresolvable "
+            f"reference cycle, got {warnings}"
+        )
 
 
 def main() -> None:
