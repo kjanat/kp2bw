@@ -10,15 +10,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Windows npm `bw.cmd` support** -- An npm-installed Bitwarden CLI on Windows
-  exposes only a `bw.cmd` shim (no `bw.exe`), which `CreateProcess` cannot run
-  directly. `resolve_bw_command` now detects `.cmd`/`.bat` shims and routes them
-  through `cmd.exe /c` (invoked by basename from their own directory to avoid
-  shell-quoting issues), and `terminate_serve` tears the `bw serve` process tree
-  down with `taskkill /F /T` so the real server isn't orphaned behind the
-  `cmd.exe` wrapper. A `windows-bw-cmd` CI job installs `bw` via npm and runs a
-  live smoke test (`tests/windows_bw_cmd_smoke.py`) covering invocation and
-  teardown of the shim.
+- **Windows shim support (`bw.cmd`/`bw.bat`/`bw.ps1`)** -- Installer methods put
+  different shims on `PATH` and `CreateProcess` can only run real `.exe`/`.com`
+  images. `resolve_bw_command` now resolves all flavours, most-reliable first:
+  native `bw.exe`/`bw.com` run directly; `bw.cmd`/`bw.bat` are routed through
+  `cmd.exe /c` (invoked by basename from their own directory to avoid
+  shell-quoting issues); and a `bw.ps1` (which isn't in `PATHEXT`, so
+  `shutil.which` can't see it) is found on `PATH` and run through PowerShell. So
+  when npm ships both `bw.cmd` and `bw.ps1`, the `cmd` shim is preferred.
+  `terminate_serve` tears the `bw serve` process tree down with `taskkill /F /T`
+  so the real server isn't orphaned behind a `cmd.exe`/PowerShell wrapper. A
+  `windows-bw-cmd` CI job installs `bw` via npm and runs a live smoke test
+  (`tests/windows_bw_cmd_smoke.py`) covering invocation and teardown of the shim.
 
 ### Fixed
 

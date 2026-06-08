@@ -54,6 +54,63 @@ def ensure_bw_available() -> None:
         raise BitwardenClientError(BW_NOT_FOUND_MSG)
 
 
+def _find_on_path(filename: str) -> str | None:
+    """Return the first PATH directory entry containing *filename*, or ``None``.
+
+    Used for shims (``.ps1``) whose extension is not in ``PATHEXT`` and so are
+    invisible to :func:`shutil.which`.
+    """
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        candidate = ntpath.join(directory, filename)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _resolve_bw_command_windows() -> tuple[list[str], str | None]:
+    """Resolve the ``bw`` launch command on Windows across all shim flavours.
+
+    Install methods differ in what they put on ``PATH``:
+
+    * native download / scoop / choco → ``bw.exe`` (runnable directly)
+    * npm → ``bw.cmd`` **and** ``bw.ps1`` (no ``bw.exe``)
+
+    ``CreateProcess`` (``subprocess`` with ``shell=False``) only runs real
+    ``.exe``/``.com`` images, so a ``.cmd``/``.bat`` shim is routed through the
+    command processor and a ``.ps1`` shim through PowerShell. Variants are tried
+    most-reliable first, so when npm ships both we use ``bw.cmd`` rather than
+    paying PowerShell startup. ``.cmd``/``.bat`` is invoked by basename from its
+    own directory so an install path with spaces needs no ``cmd`` quoting.
+    """
+    for name in ("bw.exe", "bw.com"):
+        found = shutil.which(name)
+        if found:
+            return [found], None
+    for name in ("bw.cmd", "bw.bat"):
+        found = shutil.which(name)
+        if found:
+            comspec = os.environ.get("COMSPEC", "cmd.exe")
+            return [comspec, "/d", "/c", ntpath.basename(found)], ntpath.dirname(found)
+    # `.ps1` is not in PATHEXT, so shutil.which can't see it — search manually.
+    ps1 = _find_on_path("bw.ps1")
+    if ps1:
+        powershell = (
+            shutil.which("pwsh") or shutil.which("powershell") or "powershell.exe"
+        )
+        return [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            ps1,
+        ], None
+    raise BitwardenClientError(BW_NOT_FOUND_MSG)
+
+
 def resolve_bw_command() -> tuple[list[str], str | None]:
     """Resolve how to launch the Bitwarden CLI as a subprocess.
 
@@ -61,23 +118,17 @@ def resolve_bw_command() -> tuple[list[str], str | None]:
     arguments for every subprocess call, and *cwd* is the working directory to
     run from (``None`` keeps the caller's cwd).
 
-    On Windows an npm-installed ``bw`` exists only as a ``bw.cmd``/``bw.bat``
-    shim. ``CreateProcess`` (what ``subprocess`` uses with ``shell=False``)
-    cannot execute a batch file directly — it only runs real ``.exe`` images —
-    so such shims are routed through the command processor (``cmd.exe /c``).
-    The shim is invoked by basename from its own directory so that an install
-    path containing spaces never needs fragile ``cmd`` quoting.
+    On POSIX the resolved ``bw`` is executed directly. On Windows the various
+    shim flavours (``bw.exe``, ``bw.cmd``/``bw.bat``, ``bw.ps1``) are resolved
+    and wrapped appropriately — see :func:`_resolve_bw_command_windows`.
 
     Raises :class:`BitwardenClientError` if ``bw`` cannot be found.
     """
+    if os.name == "nt":
+        return _resolve_bw_command_windows()
     path = shutil.which("bw")
     if path is None:
         raise BitwardenClientError(BW_NOT_FOUND_MSG)
-    if os.name == "nt" and path.lower().endswith((".cmd", ".bat")):
-        comspec = os.environ.get("COMSPEC", "cmd.exe")
-        # ntpath (not os.path) so the split is correct even when this is
-        # exercised on a non-Windows host in tests.
-        return [comspec, "/d", "/c", ntpath.basename(path)], ntpath.dirname(path)
     return [path], None
 
 
@@ -89,10 +140,11 @@ def terminate_serve(
 ) -> None:
     """Stop a running ``bw serve`` process together with its descendants.
 
-    When ``bw`` is launched through a Windows command shim (``cmd.exe`` running
-    a ``bw.cmd``), :meth:`subprocess.Popen.terminate` reaches only the shim and
-    orphans the real ``bw serve``, which keeps holding the port. In that case
-    the whole process tree is killed with ``taskkill /F /T`` instead.
+    When ``bw`` is launched through a Windows shim wrapper (``cmd.exe`` for a
+    ``bw.cmd``/``bw.bat``, or PowerShell for a ``bw.ps1``),
+    :meth:`subprocess.Popen.terminate` reaches only the wrapper and orphans the
+    real ``bw serve``, which keeps holding the port. In that case the whole
+    process tree is killed with ``taskkill /F /T`` instead.
     """
     if process.poll() is not None:
         return
