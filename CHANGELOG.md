@@ -8,6 +8,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Reproducible snapshot-backed Vaultwarden e2e suite** (#20) -- the
+  integration test migrates a comprehensive KeePass seed (every TOTP shape, text
+  and hidden custom fields, real file/image attachments, nested folders,
+  unicode, empty password) into a real Vaultwarden and captures the result as
+  normalized golden snapshots under `tests/__snapshots__/`, so migration drift
+  surfaces as a reviewable diff; idempotency is proven at the snapshot level
+  (pass 1 == pass 2). CI runs a host-mode `@bitwarden/cli` version matrix via a
+  new `setup-bw` composite action -- the pinned leg gates the golden, `latest`
+  is a behavioral-only canary -- with Vaultwarden and `bw` version-pinned and
+  Dependabot-managed.
+- **`--include-oversize-secrets` to recover over-limit secret fields** (#21) --
+  a hidden OTP secret (e.g. an HOTP `HmacOtp-Secret`) or passkey attribute whose
+  value tops the 10k inline limit survives nowhere else, so it was dropped. The
+  new flag (env: `KP2BW_INCLUDE_OVERSIZE_SECRETS`, default off) offloads it to a
+  `<key>.txt` attachment like any other long field. Off by default so a secret
+  is never written to a readable attachment without consent.
+
+### Fixed
+
+- **Oversize custom fields routed to their attachment, not inline** (#21) -- a
+  custom field whose value exceeds the 10k inline limit is offloaded to its
+  `<key>.txt` attachment only, decided at the source when the Bitwarden item is
+  built (symmetric with how a long note goes to `notes.txt`), instead of being
+  left among the inline fields. Regression coverage locks the long-field →
+  `<key>.txt` path into the golden e2e snapshots.
+- **Over-limit secret custom fields were dropped silently** (#21) -- a hidden
+  OTP secret or passkey attribute longer than the 10k inline limit was filtered
+  out of the inline fields and excluded from the `.txt` attachment offload,
+  vanishing with no log line. Such a field is now warned-and-dropped by default
+  (pointing at `--include-oversize-secrets` to keep it), so data is never lost
+  without notice. A consumed OTP key over the limit is still dropped silently --
+  it is already preserved in `login.totp`, so dropping the raw field is
+  deduplication, not loss.
+
 ## [3.3.0] - 2026-06-08
 
 ### Added

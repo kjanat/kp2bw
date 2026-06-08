@@ -116,6 +116,7 @@ class Converter:
     _include_recyclebin: bool
     _migrate_metadata: bool
     _update_existing: bool
+    _include_oversize_secrets: bool
     _kp_ref_entries: list[Entry]
     _entries: dict[str, EntryValue]
     _member_reference_resolving_dict: dict[str, str]
@@ -139,6 +140,7 @@ class Converter:
         include_recyclebin: bool = False,
         migrate_metadata: bool = True,
         update_existing: bool = True,
+        include_oversize_secrets: bool = False,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._keepass_file_path = keepass_file_path
@@ -154,6 +156,7 @@ class Converter:
         self._include_recyclebin = include_recyclebin
         self._migrate_metadata = migrate_metadata
         self._update_existing = update_existing
+        self._include_oversize_secrets = include_oversize_secrets
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -380,17 +383,41 @@ class Converter:
             fido2_credentials=fido2_credentials,
         )
 
-        # get attachments to store later on -- never materialise a passkey or an
-        # OTP secret (consumed or hidden) as a plaintext .txt attachment.
-        attachments: list[AttachmentItem] = [
-            (key, value)
-            for key, value in custom_props.items()
-            if value is not None
-            and len(value) > MAX_BW_ITEM_LENGTH
-            and not key.startswith(KPEX_PASSKEY_PREFIX)
-            and key not in otp_result.consumed_keys
-            and key not in otp_result.hidden_keys
-        ]
+        # get attachments to store later on. A value over the inline size limit
+        # is offloaded to a <key>.txt attachment, with three exceptions:
+        #   * consumed OTP keys are already folded into login.totp, so dropping
+        #     the raw field is deduplication, not loss -- skip it silently.
+        #   * a passkey attribute or hidden OTP secret survives nowhere else, so
+        #     dropping it IS data loss. By default it is not written to a
+        #     plaintext attachment (a secret in a readable .txt file); we warn
+        #     instead of dropping it silently. Opting in via
+        #     ``--include-oversize-secrets`` offloads it to its attachment too.
+        # The value itself is never logged in either branch.
+        label = entry.title or "_untitled"
+        attachments: list[AttachmentItem] = []
+        for key, value in custom_props.items():
+            if value is None or len(value) <= MAX_BW_ITEM_LENGTH:
+                continue
+            if key in otp_result.consumed_keys:
+                continue
+            if key.startswith(KPEX_PASSKEY_PREFIX) or key in otp_result.hidden_keys:
+                if self._include_oversize_secrets:
+                    logger.warning(
+                        f"{label}: secret field '{key}' exceeds the "
+                        f"{MAX_BW_ITEM_LENGTH}-character inline limit; offloading "
+                        f"it to the attachment '{key}.txt' "
+                        "(--include-oversize-secrets)."
+                    )
+                    attachments.append((key, value))
+                else:
+                    logger.warning(
+                        f"{label}: secret field '{key}' exceeds the "
+                        f"{MAX_BW_ITEM_LENGTH}-character inline limit and was not "
+                        "migrated; re-run with --include-oversize-secrets to "
+                        "offload it to an attachment."
+                    )
+                continue
+            attachments.append((key, value))
 
         if entry.notes and len(entry.notes) > MAX_BW_ITEM_LENGTH:
             attachments.append(("notes", entry.notes))

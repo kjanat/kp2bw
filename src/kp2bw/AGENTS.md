@@ -70,6 +70,15 @@ src/kp2bw/
   counted; `convert()` returns the failure count, and the CLI exits non-zero when
   it is non-zero. `--no-update` restores skip-only behavior (collection-
   membership sync still applies).
+- Oversize custom fields (value over `MAX_BW_ITEM_LENGTH`, 10k) are offloaded to
+  a `<key>.txt` attachment instead of an inline field (mirrors long notes →
+  `notes.txt`), decided in `_add_bw_entry_to_entries_dict()`. Three carve-outs:
+  a consumed OTP key is already in `login.totp`, so its raw field is dropped as a
+  dedup (no warning); a hidden OTP secret or passkey attribute survives nowhere
+  else, so it is **not** written to a plaintext attachment by default — it is
+  warned-and-dropped to avoid silent data loss. `--include-oversize-secrets`
+  (`KP2BW_INCLUDE_OVERSIZE_SECRETS`, `Converter(include_oversize_secrets=...)`,
+  default off) opts into offloading those secrets to their attachment too.
 - Dedup index is org-scoped when `--bitwarden-org` is set: `_build_dedup_index()` passes `organization_id=self._org_id` to `list_items()`, which appends `organizationId` as a query param to `/list/object/items`. When `org_id` is `None` (personal vault), no filter is applied and all vault items are indexed. This prevents personal vault entries from shadowing an empty org vault during migration.
 - When a fixed `--bitwarden-collection` is given, the dedup index is further scoped to that collection via `collection_id`. Items in other collections are treated as new.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via `codegen-check.yml`.

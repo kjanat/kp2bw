@@ -172,6 +172,19 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--include-oversize-secrets",
+        dest="include_oversize_secrets",
+        help=(
+            "Offload secret custom fields (hidden OTP secrets, passkey "
+            "attributes) that exceed the inline size limit to a plaintext "
+            ".txt attachment instead of dropping them; off by default so a "
+            "secret is never written to a readable attachment without consent "
+            "(env: KP2BW_INCLUDE_OVERSIZE_SECRETS)"
+        ),
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
         "-y",
         "--yes",
         dest="skip_confirm",
@@ -267,6 +280,14 @@ def main() -> None:
                 env_var="KP2BW_UPDATE",
             )
         )
+        include_oversize_secrets = (
+            args.include_oversize_secrets
+            if args.include_oversize_secrets is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_INCLUDE_OVERSIZE_SECRETS"),
+                env_var="KP2BW_INCLUDE_OVERSIZE_SECRETS",
+            )
+        )
         skip_confirm = (
             args.skip_confirm
             if args.skip_confirm is not None
@@ -309,6 +330,9 @@ def main() -> None:
     include_recyclebin = include_recyclebin if include_recyclebin is not None else False
     migrate_metadata = migrate_metadata if migrate_metadata is not None else True
     update_existing = update_existing if update_existing is not None else True
+    include_oversize_secrets = (
+        include_oversize_secrets if include_oversize_secrets is not None else False
+    )
     skip_confirm = skip_confirm if skip_confirm is not None else False
     verbose = verbose if verbose is not None else False
     debug = debug if debug is not None else False
@@ -386,6 +410,7 @@ def main() -> None:
         include_recyclebin=include_recyclebin,
         migrate_metadata=migrate_metadata,
         update_existing=update_existing,
+        include_oversize_secrets=include_oversize_secrets,
     )
     try:
         failures = c.convert()
