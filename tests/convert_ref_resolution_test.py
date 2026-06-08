@@ -389,12 +389,38 @@ def assert_reference_cycle_terminates() -> None:
         )
 
 
+def assert_malformed_reference_does_not_abort() -> None:
+    """A malformed ``{REF:...}`` token is warned-and-skipped, never fatal.
+
+    A token missing the ``@`` separator made ``_parse_kp_ref_string`` raise an
+    uncaught ``ValueError`` that aborted the whole migration; it must now be
+    reported and skipped while unrelated entries still import.
+    """
+
+    def build(kp: PyKeePass, root: Group) -> None:
+        """Add an entry with a malformed REF token plus a normal entry."""
+        kp.add_entry(root, "Broken", "userB", "{REF:UI:DEADBEEF}")
+        kp.add_entry(root, "Normal", "userN", "passN")
+
+    items, warnings = _run_chain_resolution(build)
+
+    if "Normal" not in items:
+        raise AssertionError("Normal entry was dropped due to a malformed REF token")
+    if "Broken" in items:
+        raise AssertionError("Malformed-REF entry should be skipped, not imported")
+    if not any("Could not resolve entry for" in w and "Broken" in w for w in warnings):
+        raise AssertionError(
+            f"Expected a warning for the malformed REF, got: {warnings}"
+        )
+
+
 def main() -> None:
     """Run the script-style assertions and report success."""
     assert_resolves_none_fields_with_references()
     assert_resolves_chain_with_merge()
     assert_resolves_chain_into_distinct_items()
     assert_reference_cycle_terminates()
+    assert_malformed_reference_does_not_abort()
     print("convert reference resolution test passed")
 
 

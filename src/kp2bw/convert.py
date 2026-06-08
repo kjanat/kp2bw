@@ -356,7 +356,13 @@ class Converter:
             raise ConversionError("Invalid REF string found")
 
         ref_compare_string = tokens[2][:-1]
-        field_referenced, lookup_mode = tokens[1].split("@")
+        try:
+            field_referenced, lookup_mode = tokens[1].split("@")
+        except ValueError as exc:
+            # Malformed token, e.g. "{REF:UI:...}" with no '@' separator. Surface
+            # it the same way as the length check so the entry-level handler warns
+            # and skips just this entry instead of aborting the whole run.
+            raise ConversionError("Invalid REF string found") from exc
 
         return (field_referenced, lookup_mode, ref_compare_string)
 

@@ -18,6 +18,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   themselves REF entries are now resolved transitively and on demand, with
   memoization and cycle detection, so the chain collapses onto whatever it
   ultimately maps to. Fixes #6.
+- **Malformed `{REF:...}` tokens no longer abort the run** -- a reference whose
+  field/lookup part lacked the `@` separator (e.g. `{REF:UI:...}`) raised an
+  uncaught `ValueError` in `_parse_kp_ref_string` that stopped the whole
+  migration. Such tokens are now reported and the offending entry is skipped,
+  consistent with other unresolvable references.
 
 ## [3.0.1] - 2026-06-08
 
