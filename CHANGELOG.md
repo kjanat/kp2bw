@@ -8,6 +8,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`FileNotFoundError: [WinError 2]` with an npm-installed `bw` on Windows**
+  (#8) -- an npm-global Bitwarden CLI ships only a `bw.cmd` shim (plus `bw.ps1`),
+  with no `bw.exe`. `subprocess` with `shell=False` uses `CreateProcess`, which
+  resolves bare names only to real `.exe`/`.com` images and ignores `PATHEXT`,
+  so `bw login` worked in PowerShell but `kp2bw`'s `bw unlock`/`bw serve` calls
+  crashed with `FileNotFoundError: [WinError 2]`. A new `resolve_bw_command`
+  resolves every shim flavour (`PATHEXT`-aware via `shutil.which`): native
+  `bw.exe`/`bw.com` run directly, `bw.cmd`/`bw.bat` are routed through
+  `cmd.exe /d /c` (invoked by basename from their own directory so install paths
+  with spaces need no quoting), and a `bw.ps1` is run through PowerShell. When a
+  shim is wrapped, `terminate_serve` tears the `bw serve` process tree down with
+  `taskkill /F /T` so the real server isn't orphaned behind the wrapper. A
+  genuinely missing CLI now raises a `BitwardenClientError` with an actionable
+  message instead of a raw `subprocess` traceback.
+
 ## [3.1.0] - 2026-06-08
 
 ### Added

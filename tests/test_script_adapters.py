@@ -19,6 +19,10 @@ def test_bw_serve_sanitization_script() -> None:
     _run_script_main("bw_serve_sanitization_test.py")
 
 
+def test_bw_serve_command_script() -> None:
+    _run_script_main("bw_serve_command_test.py")
+
+
 def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 
