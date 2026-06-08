@@ -21,7 +21,7 @@ jobs:
           $spec = (gc package.json | ConvertFrom-Json).devDependencies.'@bitwarden/cli'
           $version = $spec -replace '^[\^~]', ''
           if ($version -notmatch '\A\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?\z') {
-          	write "::error::Unexpected @bitwarden/cli version in package.json: '$spec'"; exit 1
+          	Write-Host "::error::Unexpected @bitwarden/cli version in package.json: '$spec'"; exit 1
           }
           $matrix = @{
           	include = @(
@@ -29,8 +29,8 @@ jobs:
           		@{ experimental = $true; 'bw-version' = 'latest' }
           	)
           } | ConvertTo-Json -Compress -Depth 4
-          write "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          write "Matrix:"; $matrix | yq . -P
+          "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Matrix:"; $matrix | yq . -P
 
   e2e:
     needs: config
@@ -64,15 +64,15 @@ jobs:
         run: |
           curl --retry 30 --retry-connrefused --retry-delay 2 -fsk $env:BW_SERVER_URL | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            write @"
+            Write-Host @"
           ::error::Vaultwarden did not become healthy
           ::group::Vaultwarden logs
           "@
             docker logs vaultwarden
-            write ::endgroup::
+            Write-Host ::endgroup::
             exit 1
           }
-          write "Vaultwarden is healthy"
+          Write-Host "Vaultwarden is healthy"
 
       - uses: astral-sh/setup-uv@v8.2.0
       - run: uv sync --frozen
@@ -87,9 +87,9 @@ jobs:
       - name: Show Vaultwarden logs on failure
         if: failure() || cancelled()
         run: |
-          write ::group::Vaultwarden` logs
+          Write-Host ::group::Vaultwarden` logs
           docker logs vaultwarden
-          write ::endgroup::
+          Write-Host ::endgroup::
 
       - name: Cleanup
         if: always()
