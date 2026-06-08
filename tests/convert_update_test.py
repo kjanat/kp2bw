@@ -392,6 +392,26 @@ def assert_no_update_flag_restores_skip() -> None:
         raise AssertionError("--no-update must not issue any PUT")
 
 
+def assert_non_login_collision_is_not_mutated() -> None:
+    conv = UpdateTestConverter()
+    bw = FakeBw(existing_attachments=[])
+    atts: list[AttachmentItem] = [("notes", "y" * 20000)]
+    # A secure note (type 2) sharing the (folder, name) must not receive the
+    # KeePass login's content or attachments.
+    outcome, missing = conv.reconcile(
+        _as_bw(bw),
+        _make_existing(type=2, notes="old"),
+        "folder-1",
+        _make_desired(notes="new recovery keys"),
+        atts,
+        fixed_coll_id=None,
+    )
+    if outcome != "skipped" or missing:
+        raise AssertionError("non-login collision must be skipped with no uploads")
+    if bw.updates:
+        raise AssertionError("non-login collision must not issue a PUT")
+
+
 def main() -> None:
     """Run the script-style assertions and report success."""
     assert_identical_content_is_idempotent()
@@ -410,6 +430,7 @@ def main() -> None:
     assert_attachment_sync_safe_on_get_failure()
     assert_rejected_update_is_non_fatal()
     assert_no_update_flag_restores_skip()
+    assert_non_login_collision_is_not_mutated()
     print("convert update test passed")
 
 

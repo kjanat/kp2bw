@@ -190,9 +190,12 @@ def _update_keepass_snapshot(path: Path, password: str) -> None:
     """
     kp = PyKeePass(str(path), password=password)
 
-    # find_entries(first=True) is typed list|Entry|None; the snapshot always
-    # contains Example, so narrow to Entry for the field assignments below.
-    example = cast(Entry, kp.find_entries(title="Example", first=True))
+    # find_entries(first=True) is typed list|Entry|None. Fail fast with a clear
+    # message if the snapshot's Example entry is missing, then narrow to Entry.
+    found = kp.find_entries(title="Example", first=True)
+    if found is None:
+        raise AssertionError("Fixture contract broken: 'Example' entry not found")
+    example = cast(Entry, found)
     example.notes = "updated recovery keys"
     example.password = "demo-pass-v2"
 
@@ -444,7 +447,7 @@ def main() -> None:
             raise AssertionError(
                 f"Long note was not uploaded as a notes.txt attachment: {attachments}"
             )
-        if len(big_full.get("notes", "")) > 10 * 1000:
+        if len(big_full.get("notes") or "") > 10 * 1000:
             raise AssertionError("Long note should be offloaded to the attachment")
 
         # Re-running with no further edits must be idempotent (no duplicates).

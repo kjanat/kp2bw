@@ -835,17 +835,23 @@ class Converter:
         item_id = existing["id"]
         outcome: Literal["updated", "collection", "skipped", "failed"] = "skipped"
 
+        # kp2bw only ever creates login items, so a non-login vault item sharing
+        # this (folder, name) is a name collision we must not mutate -- neither
+        # its content/collections nor (further down) its attachments.
+        if existing.get("type") != BW_ITEM_TYPE_LOGIN:
+            logger.log(
+                VERBOSE,
+                f"-- Entry {name!r}: matched a non-login item, skipping",
+            )
+            return outcome, []
+
         # Content/collection sync. A rejected PUT here is non-fatal: one
         # problematic entry must not abort the whole re-run and strand every
         # entry after it (the same robustness the attachment phase has).
         try:
-            # Content sync: PUT only login-type items we own, and only when the
-            # KeePass-derived content changed (keeps re-runs idempotent).
-            if (
-                self._update_existing
-                and existing.get("type") == BW_ITEM_TYPE_LOGIN
-                and self._content_differs(existing, bw_item)
-            ):
+            # Content sync: PUT only when the KeePass-derived content changed
+            # (keeps re-runs idempotent).
+            if self._update_existing and self._content_differs(existing, bw_item):
                 payload = self._build_update_payload(existing, bw_item)
                 bw.update_item(item_id, payload)
                 bw.update_dedup_entry(folder, name, payload)
