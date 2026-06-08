@@ -490,9 +490,10 @@ class Converter:
                 replaced_entries: list[BwItemCreate] = []
                 ref_entry: BwItemCreate | None = None
                 for member in self._member_reference_resolving_dict:
-                    if KP_REF_IDENTIFIER in getattr(kp_entry, member):
+                    val = getattr(kp_entry, member)
+                    if val and KP_REF_IDENTIFIER in val:
                         field_referenced, lookup_mode, ref_compare_string = (
-                            self._parse_kp_ref_string(getattr(kp_entry, member))
+                            self._parse_kp_ref_string(val)
                         )
                         ref_result = self._get_referenced_entry(
                             lookup_mode, ref_compare_string
@@ -506,10 +507,12 @@ class Converter:
 
                 # handle storing bitwarden style
                 username_and_password_match = True
+                kp_username = kp_entry.username or ""
+                kp_password = kp_entry.password or ""
                 for ref_entry in replaced_entries:
                     if (
-                        ref_entry["login"]["username"] != kp_entry.username
-                        or ref_entry["login"]["password"] != kp_entry.password
+                        ref_entry["login"]["username"] != kp_username
+                        or ref_entry["login"]["password"] != kp_password
                     ):
                         username_and_password_match = False
                         break

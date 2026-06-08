@@ -18,10 +18,10 @@ jobs:
       pypi_url: ${{ fromJson(steps.check.outputs.result).pypi_url }}
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v8.2.0
       - run: uv sync
 
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@v9
         id: check
         with:
           result-encoding: json
@@ -36,7 +36,7 @@ jobs:
     permissions: { id-token: write, contents: read }
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v8.2.0
       - run: uv sync
       - run: uv build --package pykeepass-stubs --no-sources --out-dir dist-stubs
 

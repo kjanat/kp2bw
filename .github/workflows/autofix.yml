@@ -1,0 +1,21 @@
+name: autofix.ci
+on:
+  push: { branches: [master] }
+  pull_request:
+  workflow_call:
+permissions: { contents: read }
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v8.2.0
+      - uses: kjanat/runner@master
+      - uses: kjanat/install-dprint@v1
+      - run: runner install --frozen --keep-going fmt:ci ruff:check:fix
+
+      - if: ${{ github.event_name != 'pull_request' }}
+        run: run dprint:update
+
+      - uses: autofix-ci/action@v1

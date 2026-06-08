@@ -17,7 +17,15 @@ jobs:
       - name: Run Vaultwarden end-to-end migration test
         run: |
           echo "::group::Build Docker images"
-          docker compose -f tests/docker-compose.yml build
+          for attempt in 1 2 3; do
+            if docker compose -f tests/docker-compose.yml build; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           echo "::endgroup::"
           docker compose -f tests/docker-compose.yml up \
             --abort-on-container-exit --exit-code-from test

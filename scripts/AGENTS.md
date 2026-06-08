@@ -6,14 +6,14 @@ JavaScript helper modules for release-time version checks inside `actions/github
 
 ## WHERE TO LOOK
 
-| Task                              | Location                           | Notes                                       |
-| --------------------------------- | ---------------------------------- | ------------------------------------------- |
-| Shared version parsing/validation | `scripts/version-check-shared.mjs` | Prefix normalization + mismatch errors      |
-| Main package release check        | `scripts/uv-version.mjs`           | Accepts `v`-prefixed release tags           |
-| Stubs package release check       | `scripts/stubs-version.mjs`        | Accepts `stubs-v` and `v` prefixes          |
+| Task                              | Location                           | Notes                                          |
+| --------------------------------- | ---------------------------------- | ---------------------------------------------- |
+| Shared version parsing/validation | `scripts/version-check-shared.mjs` | Prefix normalization + mismatch errors         |
+| Main package release check        | `scripts/uv-version.mjs`           | Accepts `v`-prefixed release tags              |
+| Stubs package release check       | `scripts/stubs-version.mjs`        | Accepts `stubs-v` and `v` prefixes             |
 | Regenerate API types              | `scripts/generate-bw-types.sh`     | Codegen from `specs/vault-management-api.json` |
-| Tooling config                    | `scripts/package.json`             | `tsgo --noEmit` for typecheck-only workflow |
-| Typecheck config                  | `scripts/tsconfig.json`            | JS-check setup for github-script modules    |
+| Tooling config                    | `package.json`                     | Root Bun tooling for typecheck-only workflow   |
+| Typecheck config                  | `tsconfig.json`                    | JS-check setup for github-script modules       |
 
 ## CONVENTIONS
 
@@ -26,11 +26,11 @@ JavaScript helper modules for release-time version checks inside `actions/github
 
 - Changing release tag normalization in one script only.
 - Adding Node/Bun runtime assumptions not available in `github-script` context.
-- Relying on local-only type behavior without running `bun --cwd=scripts typecheck`.
+- Relying on local-only type behavior without running `bun run typecheck`.
 
 ## COMMANDS
 
 ```bash
-bun --cwd=scripts install
-bun --cwd=scripts typecheck
+bun install
+bun run typecheck
 ```

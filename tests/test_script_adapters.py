@@ -23,6 +23,10 @@ def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 
 
+def test_convert_ref_resolution_script() -> None:
+    _run_script_main("convert_ref_resolution_test.py")
+
+
 def test_smoke_script() -> None:
     if os.environ.get("KP2BW_RUN_PACKAGING_TESTS") != "1":
         pytest.skip("set KP2BW_RUN_PACKAGING_TESTS=1 to run packaging smoke tests")
