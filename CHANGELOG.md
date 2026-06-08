@@ -22,7 +22,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   so the real server isn't orphaned behind a `cmd.exe`/PowerShell wrapper. A
   `windows-bw-cmd` CI job installs `bw` via npm and runs a live smoke test
   (`tests/windows_bw_cmd_smoke.py`) covering shim invocation (`bw --version`) and
-  `cmd.exe`-wrapped process-tree teardown.
+  `cmd.exe`-wrapped process-tree teardown. Fixes #8.
 
 ### Fixed
 
@@ -36,9 +36,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Detection uses `shutil.which`, so Windows `bw.exe`/`bw.cmd` shims are found via
   `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so a
   genuinely missing CLI still yields the friendly message. Fixes #5.
-
-### Fixed
-
 - **Chained `{REF:...}` references** -- a reference whose target was itself
   another reference entry (a chain `A -> B -> C`) raised `KeyError` in
   `_resolve_entries_with_references`, logged a `Could not resolve entry`
