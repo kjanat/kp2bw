@@ -158,7 +158,16 @@ class FakeBw:
     def get_attachment(self, item_id: str, attachment_id: str) -> bytes:
         if self._fail_get_attachment:
             raise BitwardenClientError("simulated attachment download failure")
-        return self._attachment_bytes.get(attachment_id, b"")
+        # Fail loudly on an unexpected id: returning b"" would make a wrong-id
+        # fetch look like "stale content" and let a refresh-path test pass even
+        # if the converter asked for the wrong attachment. AssertionError (not
+        # BitwardenClientError) so it isn't swallowed by the differ's guard.
+        try:
+            return self._attachment_bytes[attachment_id]
+        except KeyError as exc:
+            raise AssertionError(
+                f"Fixture contract broken: unexpected attachment id {attachment_id!r}"
+            ) from exc
 
     def delete_attachment(self, item_id: str, attachment_id: str) -> None:
         self.deletes.append((item_id, attachment_id))
@@ -433,18 +442,25 @@ def assert_attachment_sync_safe_on_get_failure() -> None:
 
 def assert_rejected_update_is_non_fatal() -> None:
     conv = UpdateTestConverter()
-    bw = FakeBw(fail_update=True)
-    outcome, _, _ = conv.reconcile(
+    # Item has no attachments yet, so without the early return the rejected
+    # update would still queue this one — proving the guard, not just the label.
+    bw = FakeBw(fail_update=True, existing_attachments=[])
+    atts: list[AttachmentItem] = [("notes", "y" * 20000)]
+    outcome, upload, stale = conv.reconcile(
         _as_bw(bw),
         _make_existing(notes="old"),
         "folder-1",
         _make_desired(notes="new recovery keys"),
-        [],
+        atts,
         fixed_coll_id=None,
     )
     if outcome != "failed":
         raise AssertionError(
             f"a rejected update PUT must be reported as 'failed', got {outcome!r}"
+        )
+    if upload or stale:
+        raise AssertionError(
+            "a failed update must not sync attachments (no half-mutated item)"
         )
 
 

@@ -26,7 +26,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   re-import. Existing items are now updated in place on re-run.
 - **Long notes not attached to (or refreshed on) already-imported entries**
   (#11) -- notes over 10k chars migrate to a `notes.txt` attachment, but
-  previously-imported (skipped) entries never received it, and an edited
+  previously imported (skipped) entries never received it, and an edited
   attachment that kept the same filename was never updated. Re-runs now upload
   any attachment an existing item is missing **and** refresh one whose content
   changed (the stale copy is removed only after the replacement uploads), all

@@ -917,7 +917,10 @@ class Converter:
                 f"-- Entry {name!r}: update failed, leaving the existing "
                 f"item unchanged: {exc}"
             )
-            outcome = "failed"
+            # The content/collection PUT was rejected, so leave the item wholly
+            # untouched: syncing attachments now would half-mutate it (stale
+            # login fields beside a freshly refreshed notes.txt).
+            return "failed", [], {}
 
         # Attachment sync: upload files the item is missing (so a
         # previously-skipped entry finally gets its notes.txt / long-field / file

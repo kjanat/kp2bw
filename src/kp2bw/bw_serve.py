@@ -35,6 +35,19 @@ _HTTP_TIMEOUT_S: float = 60.0
 # Max length for sanitized CLI output snippets in logs/errors.
 _SANITIZED_OUTPUT_MAX_CHARS: int = 240
 
+# Response-only keys returned by ``GET``/``list`` that must never be sent back in
+# a ``PUT`` body: the API expects a create-shaped object (``BwItemCreate``), and
+# echoing server-managed fields (notably ``attachments``) risks rejection or
+# clobbering state.  The item id travels in the URL, not the body.
+_RESPONSE_ONLY_ITEM_KEYS: frozenset[str] = frozenset({
+    "object",
+    "id",
+    "revisionDate",
+    "creationDate",
+    "deletedDate",
+    "attachments",
+})
+
 # Actionable message shown when the Bitwarden CLI cannot be located.
 BW_NOT_FOUND_MSG: str = (
     "Bitwarden CLI ('bw') not found on your PATH. Install it and make sure "
@@ -578,9 +591,19 @@ class BitwardenServeClient:
         """Replace an existing vault item via ``PUT /object/item/{id}``.
 
         The API requires the full object in the request body — partial updates
-        are not supported.
+        are not supported.  Callers may pass an item read back from the vault
+        (a ``BwItemResponse``); response-only keys (``id``, ``object``,
+        ``revisionDate``, ``attachments``, …) are stripped here so the wire body
+        is the create-shaped object the endpoint expects.  Stripping happens on a
+        copy, so a caller can still hand the original (id-bearing) object to
+        :meth:`update_dedup_entry`.
         """
-        self._request("PUT", f"/object/item/{item_id}", json_body=item)
+        body: dict[str, Any] = {
+            k: v
+            for k, v in cast(dict[str, Any], item).items()
+            if k not in _RESPONSE_ONLY_ITEM_KEYS
+        }
+        self._request("PUT", f"/object/item/{item_id}", json_body=body)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
 
     def create_items_batch(

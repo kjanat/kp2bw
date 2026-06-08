@@ -64,10 +64,10 @@ src/kp2bw/
   (`_attachment_content_differs()` downloads via `get_attachment()` and compares;
   an unreadable existing copy is treated as unchanged to avoid data loss). The
   stale copy is deleted only after its replacement uploads (upload-then-delete),
-  so `upload_attachments()` returns failed `(item_id, filename)` pairs and a
-  delete is skipped when its replacement upload failed. Uploads are deduped per
+  so `upload_attachments()` returns failed `(item_id, filename)` pairs and the
+  deletion is skipped when its replacement upload failed. Uploads are deduped per
   `(item_id, filename)`. Content and attachment failures are non-fatal and
-  counted; `convert()` returns the failure count and the CLI exits non-zero when
+  counted; `convert()` returns the failure count, and the CLI exits non-zero when
   it is non-zero. `--no-update` restores skip-only behavior (collection-
   membership sync still applies).
 - Dedup index is org-scoped when `--bitwarden-org` is set: `_build_dedup_index()` passes `organization_id=self._org_id` to `list_items()`, which appends `organizationId` as a query param to `/list/object/items`. When `org_id` is `None` (personal vault), no filter is applied and all vault items are indexed. This prevents personal vault entries from shadowing an empty org vault during migration.

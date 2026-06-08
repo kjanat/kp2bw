@@ -504,6 +504,19 @@ def main() -> None:
         session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
 
+        # The refresh re-run must update in place, not spawn a second item:
+        # re-list by name and confirm there's still exactly one 'Big Note' with
+        # the same id (otherwise the attachment checks below could pass on the
+        # original item while a duplicate sinks idempotency). `items` is reused
+        # for the final idempotency check.
+        items = _bw_json(env, "list", "items", "--session", session)
+        big_after_refresh = [i for i in items if i.get("name") == "Big Note"]
+        if len(big_after_refresh) != 1 or str(big_after_refresh[0]["id"]) != big_id:
+            raise AssertionError(
+                f"Attachment-refresh re-run must not duplicate 'Big Note': "
+                f"{big_after_refresh}"
+            )
+
         big_full = json.loads(
             _run(["bw", "get", "item", big_id, "--session", session], env=env)
         )
@@ -521,10 +534,6 @@ def main() -> None:
             raise AssertionError(
                 "notes.txt attachment was not refreshed with the edited long note"
             )
-
-        # Re-capture the post-refresh item list so the final idempotency check
-        # compares against the refreshed state.
-        items = _bw_json(env, "list", "items", "--session", session)
 
         # Re-running with no further edits must be idempotent (no duplicates).
         _ = _run_migration(snapshot_path, kp_password, bw_password, env)
