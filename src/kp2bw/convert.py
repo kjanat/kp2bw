@@ -28,6 +28,7 @@ from .bw_types import (
     BwUri,
 )
 from .exceptions import ConversionError
+from .otp import resolve_otp
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,9 @@ class Converter:
     _kp_ref_entries: list[Entry]
     _entries: dict[str, EntryValue]
     _member_reference_resolving_dict: dict[str, str]
+    _ref_entries_by_uuid: dict[str, Entry]
+    _resolved_ref_items: dict[str, EntryValue | None]
+    _refs_in_progress: set[str]
 
     def __init__(
         self,
@@ -117,6 +121,9 @@ class Converter:
         self._migrate_metadata = migrate_metadata
         self._kp_ref_entries = []
         self._entries = {}
+        self._ref_entries_by_uuid = {}
+        self._resolved_ref_items = {}
+        self._refs_in_progress = set()
 
         self._member_reference_resolving_dict = {"username": "U", "password": "P"}
 
@@ -280,12 +287,23 @@ class Converter:
         if custom_protected is None:
             custom_protected = []
 
+        custom_props = entry.custom_properties
+
+        # Resolve TOTP/HOTP from entry.otp or the KeePass TimeOtp-*/HmacOtp-*
+        # custom fields.  This decides which fields are folded into login.totp
+        # (and must be dropped here) and which secrets must remain hidden.
+        otp_result = resolve_otp(
+            entry.otp, custom_props, entry_label=entry.title or "_untitled"
+        )
+        for warning in otp_result.warnings:
+            logger.warning(f"{entry.title or '_untitled'}: {warning}")
+
         custom_properties: dict[str, FieldSpec] = {}
-        for key, value in entry.custom_properties.items():
-            # Skip KeePassXC passkey attributes -- handled separately
-            if key.startswith(KPEX_PASSKEY_PREFIX):
+        for key, value in custom_props.items():
+            # Skip passkey attributes and OTP fields folded into login.totp.
+            if key.startswith(KPEX_PASSKEY_PREFIX) or key in otp_result.consumed_keys:
                 continue
-            if key in custom_protected:
+            if key in otp_result.hidden_keys or key in custom_protected:
                 custom_properties[key] = (value, 1)
             else:
                 custom_properties[key] = (value, 0)
@@ -309,22 +327,28 @@ class Converter:
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
         firstlevel = self._get_folder_firstlevel(entry)
+
         bw_item_object = self._create_bw_python_object(
             title=title,
             notes=notes,
             url=entry.url if entry.url else "",
-            totp=entry.otp if entry.otp else "",
+            totp=otp_result.totp or "",
             username=entry.username if entry.username else "",
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
             fido2_credentials=fido2_credentials,
         )
 
-        # get attachments to store later on
+        # get attachments to store later on -- never materialise a passkey or an
+        # OTP secret (consumed or hidden) as a plaintext .txt attachment.
         attachments: list[AttachmentItem] = [
             (key, value)
-            for key, value in entry.custom_properties.items()
-            if value is not None and len(value) > MAX_BW_ITEM_LENGTH
+            for key, value in custom_props.items()
+            if value is not None
+            and len(value) > MAX_BW_ITEM_LENGTH
+            and not key.startswith(KPEX_PASSKEY_PREFIX)
+            and key not in otp_result.consumed_keys
+            and key not in otp_result.hidden_keys
         ]
 
         if entry.notes and len(entry.notes) > MAX_BW_ITEM_LENGTH:
@@ -350,23 +374,46 @@ class Converter:
             raise ConversionError("Invalid REF string found")
 
         ref_compare_string = tokens[2][:-1]
-        field_referenced, lookup_mode = tokens[1].split("@")
+        try:
+            field_referenced, lookup_mode = tokens[1].split("@")
+        except ValueError as exc:
+            # Malformed token, e.g. "{REF:UI:...}" with no '@' separator. Surface
+            # it the same way as the length check so the entry-level handler warns
+            # and skips just this entry instead of aborting the whole run.
+            raise ConversionError("Invalid REF string found") from exc
 
         return (field_referenced, lookup_mode, ref_compare_string)
 
     def _get_referenced_entry(
         self, lookup_mode: str, ref_compare_string: str
     ) -> EntryValue:
-        """Look up a previously parsed entry by UUID or other reference mode."""
-        if lookup_mode == "I":
-            # KP_ID lookup
-            try:
-                return self._entries[ref_compare_string.upper()]
-            except KeyError:
-                logger.warning(f"!! - Could not resolve REF to {ref_compare_string} !!")
-                raise
-        else:
+        """Look up a referenced entry by UUID, resolving REF chains on demand.
+
+        A reference may point at a normal entry (already in ``_entries``) or at
+        another REF entry that has not been resolved yet -- a chain such as
+        ``A -> B -> C``. In the latter case the target REF entry is resolved
+        first so the chain collapses onto whatever it ultimately maps to,
+        instead of raising a ``KeyError`` and dropping the rest of the chain.
+        """
+        if lookup_mode != "I":
             raise ConversionError("Unsupported REF lookup_mode")
+
+        # KP_ID lookup: fast path for an already-parsed normal entry.
+        key = ref_compare_string.upper()
+        entry = self._entries.get(key)
+        if entry is not None:
+            return entry
+
+        # Target is itself a pending REF entry; resolve it (recursively) so the
+        # chain maps onto its eventual item rather than failing here.
+        ref_kp_entry = self._ref_entries_by_uuid.get(key)
+        if ref_kp_entry is not None:
+            resolved = self._resolve_single_ref_entry(ref_kp_entry)
+            if resolved is not None:
+                return resolved
+
+        logger.warning(f"!! - Could not resolve REF to {ref_compare_string} !!")
+        raise KeyError(key)
 
     def _find_referenced_value(
         self, ref_entry: BwItemCreate, field_referenced: str
@@ -466,57 +513,103 @@ class Converter:
             return
 
         logger.info(f"Resolving {ref_entries_length} REF entries now...")
+
+        # Index pending REF entries by UUID so a reference whose target is itself
+        # a REF entry (a chain ``A -> B -> C``) can be resolved on demand rather
+        # than failing with a KeyError because the target isn't in ``_entries``.
+        self._ref_entries_by_uuid = {
+            str(entry.uuid).replace("-", "").upper(): entry
+            for entry in self._kp_ref_entries
+        }
+        # Memoise each REF entry's resolved item so it is processed exactly once
+        # even when reached early through a chain, and track the in-progress set
+        # to break reference cycles.
+        self._resolved_ref_items = {}
+        self._refs_in_progress = set()
+
         for kp_entry in self._kp_ref_entries:
-            try:
-                # replace values
-                replaced_entries: list[BwItemCreate] = []
-                ref_entry: BwItemCreate | None = None
-                for member in self._member_reference_resolving_dict:
-                    val = getattr(kp_entry, member)
-                    if val and KP_REF_IDENTIFIER in val:
-                        field_referenced, lookup_mode, ref_compare_string = (
-                            self._parse_kp_ref_string(val)
-                        )
-                        ref_result = self._get_referenced_entry(
-                            lookup_mode, ref_compare_string
-                        )
-                        _, _, ref_entry, _ = self._unpack_entry(ref_result)
-
-                        value = self._find_referenced_value(ref_entry, field_referenced)
-                        setattr(kp_entry, member, value)
-
-                        replaced_entries.append(ref_entry)
-
-                # handle storing bitwarden style
-                username_and_password_match = True
-                kp_username = kp_entry.username or ""
-                kp_password = kp_entry.password or ""
-                for ref_entry in replaced_entries:
-                    if (
-                        ref_entry["login"]["username"] != kp_username
-                        or ref_entry["login"]["password"] != kp_password
-                    ):
-                        username_and_password_match = False
-                        break
-
-                if username_and_password_match and ref_entry is not None:
-                    # => add url to bw_item => username / pw identical
-                    if kp_entry.url:
-                        ref_entry["login"]["uris"].append(
-                            BwUri(uri=kp_entry.url, match=None)
-                        )
-                else:
-                    # => create new bitwarden item
-                    self._add_bw_entry_to_entries_dict(kp_entry, None)
-
-            except ConversionError, KeyError, AttributeError:
-                group = kp_entry.group
-                group_path = group.path if group is not None else []
-                logger.warning(
-                    f"!! Could not resolve entry for {group_path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
-                )
+            self._resolve_single_ref_entry(kp_entry)
 
         logger.log(VERBOSE, f"Resolved {ref_entries_length} REF entries")
+
+    def _resolve_single_ref_entry(self, kp_entry: Entry) -> EntryValue | None:
+        """Resolve one REF entry, returning the item references to it should target.
+
+        Returns the merged-into item when *kp_entry*'s resolved credentials match
+        its referent, the newly created item when they differ, or ``None`` when
+        the entry's references cannot be resolved (missing target or a reference
+        cycle). The result is memoised so a chain that resolves this entry early
+        does not process it a second time.
+        """
+        entry_key: str = str(kp_entry.uuid).replace("-", "").upper()
+
+        # Resolve each REF entry once; a chain may have resolved it already.
+        if entry_key in self._resolved_ref_items:
+            return self._resolved_ref_items[entry_key]
+        # Reference cycle (e.g. ``A -> B -> A``): stop so recursion terminates.
+        # The originating entry then fails to resolve and is reported below.
+        if entry_key in self._refs_in_progress:
+            return None
+
+        self._refs_in_progress.add(entry_key)
+        try:
+            # replace values
+            replaced_entries: list[BwItemCreate] = []
+            ref_result: EntryValue | None = None
+            for member in self._member_reference_resolving_dict:
+                val = getattr(kp_entry, member)
+                if val and KP_REF_IDENTIFIER in val:
+                    field_referenced, lookup_mode, ref_compare_string = (
+                        self._parse_kp_ref_string(val)
+                    )
+                    ref_result = self._get_referenced_entry(
+                        lookup_mode, ref_compare_string
+                    )
+                    _, _, ref_entry, _ = self._unpack_entry(ref_result)
+
+                    value = self._find_referenced_value(ref_entry, field_referenced)
+                    setattr(kp_entry, member, value)
+
+                    replaced_entries.append(ref_entry)
+
+            # handle storing bitwarden style
+            username_and_password_match = True
+            kp_username = kp_entry.username or ""
+            kp_password = kp_entry.password or ""
+            for ref_item in replaced_entries:
+                if (
+                    ref_item["login"]["username"] != kp_username
+                    or ref_item["login"]["password"] != kp_password
+                ):
+                    username_and_password_match = False
+                    break
+
+            if username_and_password_match and ref_result is not None:
+                # => add url to bw_item => username / pw identical
+                _, _, ref_item, _ = self._unpack_entry(ref_result)
+                if kp_entry.url:
+                    ref_item["login"]["uris"].append(
+                        BwUri(uri=kp_entry.url, match=None)
+                    )
+                canonical = ref_result
+            else:
+                # => create new bitwarden item
+                self._add_bw_entry_to_entries_dict(kp_entry, None)
+                canonical = self._entries.get(entry_key)
+
+            self._resolved_ref_items[entry_key] = canonical
+            return canonical
+
+        except ConversionError, KeyError, AttributeError:
+            group = kp_entry.group
+            group_path = group.path if group is not None else []
+            logger.warning(
+                f"!! Could not resolve entry for {group_path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
+            )
+            self._resolved_ref_items[entry_key] = None
+            return None
+        finally:
+            self._refs_in_progress.discard(entry_key)
 
     @staticmethod
     def _unpack_entry(

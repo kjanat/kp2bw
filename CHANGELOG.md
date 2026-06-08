@@ -37,6 +37,50 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so a
   genuinely missing CLI still yields the friendly message. Fixes #5.
 
+### Fixed
+
+- **Chained `{REF:...}` references** -- a reference whose target was itself
+  another reference entry (a chain `A -> B -> C`) raised `KeyError` in
+  `_resolve_entries_with_references`, logged a `Could not resolve entry`
+  warning, and dropped the referencing entry from the import even though
+  KeePass resolves such chains correctly. Unresolved targets that are
+  themselves REF entries are now resolved transitively and on demand, with
+  memoization and cycle detection, so the chain collapses onto whatever it
+  ultimately maps to. Fixes #6.
+- **Malformed `{REF:...}` tokens no longer abort the run** -- a reference whose
+  field/lookup part lacked the `@` separator (e.g. `{REF:UI:...}`) raised an
+  uncaught `ValueError` in `_parse_kp_ref_string` that stopped the whole
+  migration. Such tokens are now reported and the offending entry is skipped,
+  consistent with other unresolvable references.
+
+## [3.1.0] - 2026-06-08
+
+### Added
+
+- **KeePass2/KeePassXC native TOTP migration** -- entries that store TOTP in the
+  `TimeOtp-*` custom fields (rather than the `otp` field) now migrate to
+  Bitwarden's `login.totp`. All four KeePass secret encodings are supported
+  (`TimeOtp-Secret` UTF-8, `-Hex`, `-Base32`, `-Base64`), and non-default
+  `TimeOtp-Length` / `-Period` / `-Algorithm` settings are emitted as a full
+  `otpauth://` URI so Bitwarden generates correct codes instead of silently
+  defaulting to 6 digits / 30 s / SHA-1. A default-config Base32 secret still
+  migrates as a bare secret; `entry.otp` keeps precedence when both are present.
+  Logic lives in a new pure, unit-tested `kp2bw/otp.py` module.
+
+### Fixed
+
+- **Lossy/leaky TOTP fallback** -- the initial `TimeOtp-Secret-Base32` fallback
+  dropped non-default OTP configuration (producing wrong 2FA codes), ignored the
+  other three secret encodings, and stripped the Base32 secret from custom
+  fields even when it was not the value migrated. Secrets are now removed from
+  custom fields only when actually folded into `login.totp`; any OTP secret left
+  behind (HOTP, an undecodable value, or one shadowed by `entry.otp`) is
+  preserved as a *hidden* custom field rather than dropped or exposed.
+- **Silent HOTP loss** -- counter-based HOTP (`HmacOtp-Secret*`) has no
+  time-based target in Bitwarden. It is now reported with a warning and its
+  secret kept as a hidden field, instead of silently becoming a visible
+  plaintext custom field.
+
 ## [3.0.1] - 2026-06-08
 
 ### Fixed
