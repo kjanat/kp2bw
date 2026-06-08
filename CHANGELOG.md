@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-06-08
+
 ### Added
 
 - **Windows shim support (`bw.cmd`/`bw.bat`/`bw.ps1`)** -- Installer methods put
@@ -436,7 +438,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/kjanat/kp2bw/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/kjanat/kp2bw/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/kjanat/kp2bw/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/kjanat/kp2bw/compare/v3.0.0a1...v3.0.0
