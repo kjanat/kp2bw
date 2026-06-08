@@ -8,6 +8,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Chained `{REF:...}` references** -- a reference whose target was itself
+  another reference entry (a chain `A -> B -> C`) raised `KeyError` in
+  `_resolve_entries_with_references`, logged a `Could not resolve entry`
+  warning, and dropped the referencing entry from the import even though
+  KeePass resolves such chains correctly. Unresolved targets that are
+  themselves REF entries are now resolved transitively and on demand, with
+  memoization and cycle detection, so the chain collapses onto whatever it
+  ultimately maps to. Fixes #6.
+- **Malformed `{REF:...}` tokens no longer abort the run** -- a reference whose
+  field/lookup part lacked the `@` separator (e.g. `{REF:UI:...}`) raised an
+  uncaught `ValueError` in `_parse_kp_ref_string` that stopped the whole
+  migration. Such tokens are now reported and the offending entry is skipped,
+  consistent with other unresolvable references.
+
+## [3.1.0] - 2026-06-08
+
 ### Added
 
 - **KeePass2/KeePassXC native TOTP migration** -- entries that store TOTP in the
@@ -33,19 +51,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   time-based target in Bitwarden. It is now reported with a warning and its
   secret kept as a hidden field, instead of silently becoming a visible
   plaintext custom field.
-- **Chained `{REF:...}` references** -- a reference whose target was itself
-  another reference entry (a chain `A -> B -> C`) raised `KeyError` in
-  `_resolve_entries_with_references`, logged a `Could not resolve entry`
-  warning, and dropped the referencing entry from the import even though
-  KeePass resolves such chains correctly. Unresolved targets that are
-  themselves REF entries are now resolved transitively and on demand, with
-  memoization and cycle detection, so the chain collapses onto whatever it
-  ultimately maps to. Fixes #6.
-- **Malformed `{REF:...}` tokens no longer abort the run** -- a reference whose
-  field/lookup part lacked the `@` separator (e.g. `{REF:UI:...}`) raised an
-  uncaught `ValueError` in `_parse_kp_ref_string` that stopped the whole
-  migration. Such tokens are now reported and the offending entry is skipped,
-  consistent with other unresolvable references.
 
 ## [3.0.1] - 2026-06-08
 
