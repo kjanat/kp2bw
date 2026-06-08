@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-action.json
+---
+name: Setup Bitwarden CLI
+description: Install the Bitwarden CLI from npm.
+author: Kaj Kowalski
+branding: { icon: lock, color: blue }
+
+inputs:
+  version:
+    description: "Bitwarden CLI version to install: `latest` (default), exact pin (`v?2026.5.0`), or npm dist-tag."
+    default: latest
+
+outputs:
+  version:
+    description: "Concrete installed Bitwarden CLI version."
+    value: ${{ steps.install.outputs.version }}
+  bin-dir:
+    description: "npm global bin directory containing `bw` (added to PATH)."
+    value: ${{ steps.install.outputs.bin-dir }}
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      name: Install Bitwarden CLI
+      shell: pwsh
+      env: { BW_VERSION: "${{ inputs.version }}" }
+      run: |
+        $requested = $env:BW_VERSION
+        if ([string]::IsNullOrWhiteSpace($requested) -or $requested -eq "latest") {
+          $package = "@bitwarden/cli"
+        } else {
+          $package = "@bitwarden/cli@$($requested -replace '^v', '')"
+        }
+
+        $cacheRoot = if ($env:RUNNER_TOOL_CACHE) { $env:RUNNER_TOOL_CACHE } else { $env:RUNNER_TEMP }
+        $prefix = Join-Path $cacheRoot "bitwarden-cli"
+        New-Item -ItemType Directory -Force -Path $prefix | Out-Null
+
+        npm install --global --ignore-scripts --prefix $prefix $package
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        $binDir = if ($IsWindows) { $prefix } else { Join-Path $prefix "bin" }
+        $bw = if ($IsWindows) { Join-Path $binDir "bw.cmd" } else { Join-Path $binDir "bw" }
+        $versionOutput = & $bw --version
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $version = [string]$versionOutput
+
+        $binDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+        @"
+        version=$version
+        bin-dir=$binDir
+        "@ | Tee-Object -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+        "Bitwarden CLI $version installed at $binDir"
