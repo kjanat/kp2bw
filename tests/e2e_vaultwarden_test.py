@@ -4,8 +4,9 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import cast
 
-from pykeepass import PyKeePass, create_database
+from pykeepass import Entry, PyKeePass, create_database
 
 logger = logging.getLogger("e2e")
 
@@ -175,6 +176,64 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
     kp.save()
 
 
+# Notes longer than this migrate to a notes.txt attachment (see convert.py).
+LONG_NOTE = "RECOVERY-KEY-" * 1000  # ~13k chars, comfortably over the 10k limit
+
+
+def _update_keepass_snapshot(path: Path, password: str) -> None:
+    """Edit an existing snapshot to exercise the re-run update path (issue #11).
+
+    Changes the Example entry's notes and password (credentials otherwise
+    unchanged in spirit) and adds an entry whose notes exceed the attachment
+    threshold, so a second migration must update the existing item and upload
+    the long note as a notes.txt attachment.
+    """
+    kp = PyKeePass(str(path), password=password)
+
+    # find_entries(first=True) is typed list|Entry|None; the snapshot always
+    # contains Example, so narrow to Entry for the field assignments below.
+    example = cast(Entry, kp.find_entries(title="Example", first=True))
+    example.notes = "updated recovery keys"
+    example.password = "demo-pass-v2"
+
+    _ = kp.add_entry(
+        kp.root_group,
+        "Big Note",
+        "big-user",
+        "big-pass",
+        notes=LONG_NOTE,
+    )
+
+    kp.save()
+
+
+def _run_migration(
+    snapshot_path: Path,
+    kp_password: str,
+    bw_password: str,
+    env: dict[str, str],
+) -> str:
+    """Run a single kp2bw migration pass against the snapshot."""
+    return _run(
+        [
+            "uv",
+            "run",
+            "kp2bw",
+            str(snapshot_path),
+            "--keepass-password",
+            kp_password,
+            "--bitwarden-password",
+            bw_password,
+            "--path-to-name-skip",
+            "999",
+            "--no-metadata",
+            "-y",
+            "-v",
+        ],
+        env=env,
+    )
+
+
 def _assert_bw_serve_available(env: dict[str, str]) -> None:
     """Verify the bw CLI supports ``bw serve`` (required by the new transport)."""
     result = subprocess.run(
@@ -236,45 +295,11 @@ def main() -> None:
         logger.info("Created KeePass snapshot")
 
         logger.info("Running kp2bw migration (first pass)")
-        _ = _run(
-            [
-                "uv",
-                "run",
-                "kp2bw",
-                str(snapshot_path),
-                "--keepass-password",
-                kp_password,
-                "--bitwarden-password",
-                bw_password,
-                "--path-to-name-skip",
-                "999",
-                "--no-metadata",
-                "-y",
-                "-v",
-            ],
-            env=env,
-        )
+        _ = _run_migration(snapshot_path, kp_password, bw_password, env)
         logger.info("First migration pass complete")
 
         logger.info("Running kp2bw migration (idempotency pass)")
-        _ = _run(
-            [
-                "uv",
-                "run",
-                "kp2bw",
-                str(snapshot_path),
-                "--keepass-password",
-                kp_password,
-                "--bitwarden-password",
-                bw_password,
-                "--path-to-name-skip",
-                "999",
-                "--no-metadata",
-                "-y",
-                "-v",
-            ],
-            env=env,
-        )
+        _ = _run_migration(snapshot_path, kp_password, bw_password, env)
         logger.info("Second migration pass complete")
 
         session = _get_session(env, bw_password)
@@ -370,6 +395,67 @@ def main() -> None:
         if len(items) < len(before_items) + 2:
             raise AssertionError(
                 "Expected at least two new items after migration, but item count did not grow"
+            )
+
+        # --- Update pass: edit KeePass, re-run, and verify the changes sync ---
+        logger.info("Editing KeePass snapshot and running update pass")
+        _update_keepass_snapshot(snapshot_path, kp_password)
+        _ = _run_migration(snapshot_path, kp_password, bw_password, env)
+        logger.info("Update migration pass complete")
+
+        session = _get_session(env, bw_password)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+        items = _bw_json(env, "list", "items", "--session", session)
+
+        # Existing "Example" entry must be updated in place, not duplicated.
+        examples = [i for i in items if i.get("name") == "Example"]
+        if len(examples) != 1:
+            raise AssertionError(
+                f"Update must not duplicate entries; found {len(examples)} 'Example'"
+            )
+
+        example_full = json.loads(
+            _run(
+                ["bw", "get", "item", str(examples[0]["id"]), "--session", session],
+                env=env,
+            )
+        )
+        if example_full.get("notes") != "updated recovery keys":
+            raise AssertionError(
+                f"Edited notes were not synced to Bitwarden: {example_full.get('notes')!r}"
+            )
+        if example_full["login"]["password"] != "demo-pass-v2":
+            raise AssertionError("Edited password was not synced to Bitwarden")
+
+        # The long-note entry must store its note as a notes.txt attachment.
+        big_notes = [i for i in items if i.get("name") == "Big Note"]
+        if len(big_notes) != 1:
+            raise AssertionError(
+                f"Expected exactly one 'Big Note' entry, found {len(big_notes)}"
+            )
+        big_full = json.loads(
+            _run(
+                ["bw", "get", "item", str(big_notes[0]["id"]), "--session", session],
+                env=env,
+            )
+        )
+        attachments = big_full.get("attachments", [])
+        if not any(a.get("fileName") == "notes.txt" for a in attachments):
+            raise AssertionError(
+                f"Long note was not uploaded as a notes.txt attachment: {attachments}"
+            )
+        if len(big_full.get("notes", "")) > 10 * 1000:
+            raise AssertionError("Long note should be offloaded to the attachment")
+
+        # Re-running with no further edits must be idempotent (no duplicates).
+        _ = _run_migration(snapshot_path, kp_password, bw_password, env)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+        items_after = _bw_json(env, "list", "items", "--session", session)
+        if len([i for i in items_after if i.get("name") == "Example"]) != 1:
+            raise AssertionError("Idempotent re-run duplicated the 'Example' entry")
+        if len(items_after) != len(items):
+            raise AssertionError(
+                f"Idempotent re-run changed item count: {len(items)} -> {len(items_after)}"
             )
 
     print("vaultwarden end-to-end integration test passed")

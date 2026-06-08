@@ -158,6 +158,17 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--update",
+        dest="update_existing",
+        help=(
+            "Update existing Bitwarden entries when their KeePass content "
+            "changed; --no-update restores skip-only behavior "
+            "(default: on, env: KP2BW_UPDATE)"
+        ),
+        action=BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
         "-y",
         "--yes",
         dest="skip_confirm",
@@ -239,6 +250,14 @@ def main() -> None:
                 env_var="KP2BW_MIGRATE_METADATA",
             )
         )
+        update_existing = (
+            args.update_existing
+            if args.update_existing is not None
+            else _parse_bool_env(
+                os.environ.get("KP2BW_UPDATE"),
+                env_var="KP2BW_UPDATE",
+            )
+        )
         skip_confirm = (
             args.skip_confirm
             if args.skip_confirm is not None
@@ -280,6 +299,7 @@ def main() -> None:
     skip_expired = skip_expired if skip_expired is not None else False
     include_recyclebin = include_recyclebin if include_recyclebin is not None else False
     migrate_metadata = migrate_metadata if migrate_metadata is not None else True
+    update_existing = update_existing if update_existing is not None else True
     skip_confirm = skip_confirm if skip_confirm is not None else False
     verbose = verbose if verbose is not None else False
     debug = debug if debug is not None else False
@@ -349,6 +369,7 @@ def main() -> None:
         skip_expired=skip_expired,
         include_recyclebin=include_recyclebin,
         migrate_metadata=migrate_metadata,
+        update_existing=update_existing,
     )
     try:
         c.convert()

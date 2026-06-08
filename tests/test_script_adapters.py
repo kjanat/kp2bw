@@ -19,12 +19,20 @@ def test_bw_serve_sanitization_script() -> None:
     _run_script_main("bw_serve_sanitization_test.py")
 
 
+def test_bw_serve_attachment_script() -> None:
+    _run_script_main("bw_serve_attachment_test.py")
+
+
 def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 
 
 def test_convert_ref_resolution_script() -> None:
     _run_script_main("convert_ref_resolution_test.py")
+
+
+def test_convert_update_script() -> None:
+    _run_script_main("convert_update_test.py")
 
 
 def test_smoke_script() -> None:

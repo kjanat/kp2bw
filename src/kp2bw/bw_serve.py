@@ -11,7 +11,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from types import FrameType, TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 
 import httpx
 
@@ -405,6 +405,16 @@ class BitwardenServeClient:
         logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
 
+    def get_item(self, item_id: str) -> BwItemResponse:
+        """Fetch a single full item (including ``attachments``) via ``GET``.
+
+        The list endpoint is enough for content dedup, but its ``attachments``
+        array is only consulted for upload-if-missing reconciliation, so this
+        authoritative fetch is used to avoid creating duplicate attachments.
+        """
+        data = self._request("GET", f"/object/item/{item_id}")
+        return cast(BwItemResponse, data)
+
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
         """Replace an existing vault item via ``PUT /object/item/{id}``.
 
@@ -573,24 +583,20 @@ class BitwardenServeClient:
             params={"itemid": item_id},
             files={"file": (filename, data)},
         )
-        if resp.status_code >= 400:
-            raise BitwardenClientError(
-                f"Attachment upload failed for {filename!r} on item {item_id}: "
-                f"HTTP {resp.status_code}"
-            )
-
         try:
             body: dict[str, Any] = resp.json()
-        except ValueError as exc:
-            raise BitwardenClientError(
-                f"Attachment upload returned non-JSON response "
-                f"(HTTP {resp.status_code}) for {filename!r} on item {item_id}"
-            ) from exc
+        except ValueError:
+            body = {}
 
-        if not body.get("success", False):
-            msg = body.get("message", "unknown error")
+        # bw serve reports command-level failures (e.g. "Premium status is
+        # required", storage-quota or attachment-size limits) as HTTP 400 with
+        # the real reason in the body's ``message`` field.  Surface it instead
+        # of an opaque status code so the user knows *why* a file was rejected.
+        if resp.status_code >= 400 or not body.get("success", False):
+            message = body.get("message") or f"HTTP {resp.status_code}"
             raise BitwardenClientError(
-                f"Attachment upload error for {filename!r}: {msg}"
+                f"Attachment upload failed for {filename!r} on item {item_id}: "
+                f"{message}"
             )
         logger.log(VERBOSE, f"Uploaded attachment {filename!r} to item {item_id}")
 
@@ -599,14 +605,18 @@ class BitwardenServeClient:
         items: list[tuple[str, list[tuple[str, bytes]]]],
         *,
         max_concurrency: int = 4,
-    ) -> None:
+    ) -> list[str]:
         """Upload all attachments with bounded parallelism.
 
         *items* is a list of ``(item_id, [(filename, data), ...])`` tuples.
+
+        Returns the labels of any uploads that failed (empty list when all
+        succeed).  Failures are **non-fatal**: a single rejected file must not
+        abort the whole migration and discard every other entry's progress.
         """
         total = sum(len(atts) for _, atts in items)
         if total == 0:
-            return
+            return []
 
         logger.info(f"Uploading {total} attachments (concurrency={max_concurrency})")
         sem = asyncio.Semaphore(max_concurrency)
@@ -641,24 +651,28 @@ class BitwardenServeClient:
             if isinstance(result, BaseException):
                 logger.error(f"Attachment upload failed for {label}: {result}")
                 failed_labels.append(label)
-        if failed_labels:
-            summary = ", ".join(failed_labels[:5])
-            if len(failed_labels) > 5:
-                summary += f", ... (+{len(failed_labels) - 5} more)"
-            raise BitwardenClientError(
-                f"{len(failed_labels)}/{total} attachment uploads failed: {summary}"
-            )
 
-        logger.info(f"Uploaded {total} attachments")
+        succeeded = total - len(failed_labels)
+        if failed_labels:
+            logger.warning(
+                f"{len(failed_labels)}/{total} attachment upload(s) failed; "
+                f"continuing with the remaining entries"
+            )
+        logger.info(f"Uploaded {succeeded}/{total} attachments")
+        return failed_labels
 
     def upload_attachments(
         self,
         items: list[tuple[str, list[tuple[str, bytes]]]],
         *,
         max_concurrency: int = 4,
-    ) -> None:
-        """Synchronous wrapper for :meth:`upload_attachments_parallel`."""
-        asyncio.run(
+    ) -> list[str]:
+        """Synchronous wrapper for :meth:`upload_attachments_parallel`.
+
+        Returns the labels of failed uploads (empty when all succeed); failures
+        are non-fatal so the migration completes and the caller can summarise.
+        """
+        return asyncio.run(
             self.upload_attachments_parallel(items, max_concurrency=max_concurrency)
         )
 

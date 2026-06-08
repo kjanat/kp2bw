@@ -8,6 +8,33 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **In-place updates for changed entries** -- re-running `kp2bw` now syncs
+  KeePass edits onto existing Bitwarden items instead of skipping them. Changed
+  notes, passwords, usernames, URIs and custom fields are written via an
+  idempotent `PUT` (an unchanged entry issues no request). Collection
+  membership is only ever added, never removed, and a Bitwarden-side `favorite`
+  flag or a passkey absent from KeePass is preserved. Opt out with `--no-update`
+  (env: `KP2BW_UPDATE=0`) to restore the previous skip-only behavior.
+
+### Fixed
+
+- **Updated KeePass notes never reached Bitwarden** (#11) -- editing an entry's
+  notes (e.g. pasting in new recovery keys) without touching credentials left
+  the existing Bitwarden item unchanged, forcing a full vault purge to
+  re-import. Existing items are now updated in place on re-run.
+- **Long notes not attached to already-imported entries** (#11) -- notes over
+  10k chars migrate to a `notes.txt` attachment, but previously-imported
+  (skipped) entries never received it. Re-runs now upload any attachment an
+  existing item is missing, without creating duplicates.
+- **A single rejected attachment aborted the whole migration** (#11) -- an
+  attachment the server refused (for example a `.jpg` rejected for premium or
+  storage-quota reasons) raised an opaque `HTTP 400` that stopped everything.
+  Upload failures are now non-fatal: the real server message is surfaced
+  instead of just the status code, and the migration continues with the
+  remaining entries.
+
 ## [3.1.0] - 2026-06-08
 
 ### Added
