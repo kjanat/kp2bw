@@ -28,6 +28,7 @@ from .bw_types import (
     BwUri,
 )
 from .exceptions import ConversionError
+from .otp import resolve_otp
 
 logger = logging.getLogger(__name__)
 
@@ -280,12 +281,23 @@ class Converter:
         if custom_protected is None:
             custom_protected = []
 
+        custom_props = entry.custom_properties
+
+        # Resolve TOTP/HOTP from entry.otp or the KeePass TimeOtp-*/HmacOtp-*
+        # custom fields.  This decides which fields are folded into login.totp
+        # (and must be dropped here) and which secrets must remain hidden.
+        otp_result = resolve_otp(
+            entry.otp, custom_props, entry_label=entry.title or "_untitled"
+        )
+        for warning in otp_result.warnings:
+            logger.warning(f"{entry.title or '_untitled'}: {warning}")
+
         custom_properties: dict[str, FieldSpec] = {}
-        for key, value in entry.custom_properties.items():
-            # Skip KeePassXC passkey attributes and TOTP secret -- handled separately
-            if key.startswith(KPEX_PASSKEY_PREFIX) or key == "TimeOtp-Secret-Base32":
+        for key, value in custom_props.items():
+            # Skip passkey attributes and OTP fields folded into login.totp.
+            if key.startswith(KPEX_PASSKEY_PREFIX) or key in otp_result.consumed_keys:
                 continue
-            if key in custom_protected:
+            if key in otp_result.hidden_keys or key in custom_protected:
                 custom_properties[key] = (value, 1)
             else:
                 custom_properties[key] = (value, 0)
@@ -310,30 +322,27 @@ class Converter:
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
         firstlevel = self._get_folder_firstlevel(entry)
 
-        # Use entry.otp if set; otherwise fall back to TimeOtp-Secret-Base32
-        # (KeePassXC stores TOTP secrets as this custom property)
-        totp: str = (
-            entry.otp
-            if entry.otp
-            else entry.custom_properties.get("TimeOtp-Secret-Base32") or ""
-        )
-
         bw_item_object = self._create_bw_python_object(
             title=title,
             notes=notes,
             url=entry.url if entry.url else "",
-            totp=totp,
+            totp=otp_result.totp or "",
             username=entry.username if entry.username else "",
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
             fido2_credentials=fido2_credentials,
         )
 
-        # get attachments to store later on
+        # get attachments to store later on -- never materialise a passkey or an
+        # OTP secret (consumed or hidden) as a plaintext .txt attachment.
         attachments: list[AttachmentItem] = [
             (key, value)
-            for key, value in entry.custom_properties.items()
-            if value is not None and len(value) > MAX_BW_ITEM_LENGTH
+            for key, value in custom_props.items()
+            if value is not None
+            and len(value) > MAX_BW_ITEM_LENGTH
+            and not key.startswith(KPEX_PASSKEY_PREFIX)
+            and key not in otp_result.consumed_keys
+            and key not in otp_result.hidden_keys
         ]
 
         if entry.notes and len(entry.notes) > MAX_BW_ITEM_LENGTH:

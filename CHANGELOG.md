@@ -8,6 +8,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **KeePass2/KeePassXC native TOTP migration** -- entries that store TOTP in the
+  `TimeOtp-*` custom fields (rather than the `otp` field) now migrate to
+  Bitwarden's `login.totp`. All four KeePass secret encodings are supported
+  (`TimeOtp-Secret` UTF-8, `-Hex`, `-Base32`, `-Base64`), and non-default
+  `TimeOtp-Length` / `-Period` / `-Algorithm` settings are emitted as a full
+  `otpauth://` URI so Bitwarden generates correct codes instead of silently
+  defaulting to 6 digits / 30 s / SHA-1. A default-config Base32 secret still
+  migrates as a bare secret; `entry.otp` keeps precedence when both are present.
+  Logic lives in a new pure, unit-tested `kp2bw/otp.py` module.
+
+### Fixed
+
+- **Lossy/leaky TOTP fallback** -- the initial `TimeOtp-Secret-Base32` fallback
+  dropped non-default OTP configuration (producing wrong 2FA codes), ignored the
+  other three secret encodings, and stripped the Base32 secret from custom
+  fields even when it was not the value migrated. Secrets are now removed from
+  custom fields only when actually folded into `login.totp`; any OTP secret left
+  behind (HOTP, an undecodable value, or one shadowed by `entry.otp`) is
+  preserved as a *hidden* custom field rather than dropped or exposed.
+- **Silent HOTP loss** -- counter-based HOTP (`HmacOtp-Secret*`) has no
+  time-based target in Bitwarden. It is now reported with a warning and its
+  secret kept as a hidden field, instead of silently becoming a visible
+  plaintext custom field.
+
 ## [3.0.0] - 2026-02-26
 
 ### Added

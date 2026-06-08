@@ -159,6 +159,10 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
         notes="seed note",
     )
     example.set_custom_property("api_token", "abc123")
+    # KeePassXC-native TOTP with a non-default period: must migrate to login.totp
+    # as an otpauth:// URI (not a bare secret) and not leak into custom fields.
+    example.set_custom_property("TimeOtp-Secret-Base32", "JBSWY3DPEHPK3PXP")
+    example.set_custom_property("TimeOtp-Period", "60")
 
     _ = kp.add_entry(
         kp.root_group,
@@ -329,6 +333,32 @@ def main() -> None:
             for field in fields
         ):
             raise AssertionError("Expected custom field api_token=abc123 not found")
+
+        # KeePassXC-native TOTP (non-default period) must land in login.totp as an
+        # otpauth:// URI carrying the secret + period, never as a bare secret.
+        example_totp = example_login.get("totp")
+        if not example_totp or not str(example_totp).startswith("otpauth://totp/"):
+            raise AssertionError(
+                f"Expected an otpauth TOTP URI on Example, got {example_totp!r}"
+            )
+        if (
+            "secret=JBSWY3DPEHPK3PXP" not in example_totp
+            or "period=60" not in example_totp
+        ):
+            raise AssertionError(
+                f"TOTP URI missing expected secret/period: {example_totp!r}"
+            )
+
+        # The consumed TimeOtp-* fields must NOT linger as custom fields (no leak).
+        leaked = [
+            field.get("name")
+            for field in fields
+            if field.get("name") in {"TimeOtp-Secret-Base32", "TimeOtp-Period"}
+        ]
+        if leaked:
+            raise AssertionError(
+                f"TOTP fields leaked into custom fields instead of login.totp: {leaked}"
+            )
 
         root_login = root_entry_full["login"]
         if (
