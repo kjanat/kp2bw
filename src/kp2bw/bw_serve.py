@@ -167,7 +167,10 @@ def terminate_serve(
     except subprocess.TimeoutExpired:
         logger.warning("bw serve did not exit on SIGTERM, sending SIGKILL")
         process.kill()
-        _ = process.wait(timeout=timeout)
+        try:
+            _ = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            logger.warning("bw serve did not exit after SIGKILL")
 
 
 def sanitize_cli_output(

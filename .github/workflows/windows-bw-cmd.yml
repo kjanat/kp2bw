@@ -13,19 +13,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-
+        with: { persist-credentials: false }
       - uses: astral-sh/setup-uv@v8.2.0
-
-      - name: Install project
-        run: uv sync
+      - run: uv sync
 
       # windows-latest ships Node + npm preinstalled, so no setup-node action is
       # needed. npm global installs ship bw.cmd + bw.ps1 (no bw.exe).
       - name: Install Bitwarden CLI via npm
-        run: |
-          node --version
-          npm --version
-          npm install -g @bitwarden/cli
+        run: npm install -g @bitwarden/cli
 
       # Diagnostic only: PowerShell's Get-Command prefers bw.ps1, but kp2bw uses
       # Python's shutil.which (PATHEXT-aware), which resolves bw.cmd. The smoke
@@ -38,6 +33,5 @@ jobs:
           uv run python -c "import shutil; print('shutil.which(bw) =', shutil.which('bw'))"
 
       - name: Run Windows bw .cmd smoke test
-        env:
-          KP2BW_RUN_WIN_CMD_SMOKE: "1"
+        env: { KP2BW_RUN_WIN_CMD_SMOKE: "1" }
         run: uv run python tests/windows_bw_cmd_smoke.py
