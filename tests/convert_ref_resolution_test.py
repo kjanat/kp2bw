@@ -347,52 +347,61 @@ def _run_oversize(
 
 
 def assert_oversize_secret_field_is_not_lost_silently() -> None:
-    """An over-limit hidden OTP secret is never silently dropped (#21 follow-up).
+    """An over-limit secret-class field is never silently dropped (#21 follow-up).
 
-    Default: the secret is warned-and-dropped (not written to a plaintext
-    attachment without consent) while a non-secret over-limit field is offloaded
-    to its ``.txt`` attachment as usual. Opt-in (``--include-oversize-secrets``):
-    the secret is offloaded to its attachment too, so no data is lost.
+    Covers both secret kinds that survive nowhere but a hidden inline field: a
+    hidden OTP secret (``HmacOtp-Secret``) and a KeePass-protected custom field.
+    Default: each is warned-and-dropped (not written to a plaintext attachment
+    without consent) while a non-secret over-limit field is offloaded to its
+    ``.txt`` attachment as usual. Opt-in (``--include-oversize-secrets``): each
+    secret is offloaded to its attachment too, so no data is lost.
     """
     big = "Z" * (MAX_BW_ITEM_LENGTH + 64)
+    secret_keys = ("HmacOtp-Secret", "protected_codes")
 
     def build(kp: PyKeePass, root: Group) -> None:
-        """One entry with an over-limit hidden OTP secret beside an over-limit field."""
+        """One entry with two over-limit secret-class fields beside a plain one."""
         entry = kp.add_entry(root, "Big Secret", "user", "pw")
         # HmacOtp-Secret: HOTP cannot migrate to Bitwarden's TOTP, so it would
         # otherwise survive only as a hidden inline field -- over the limit it is
         # dropped entirely, the data-loss edge under test.
         entry.set_custom_property("HmacOtp-Secret", big)
+        # A KeePass-protected (Protected="True") field is a secret too, so it
+        # must be gated behind the opt-in -- never spilled to a plaintext
+        # attachment by default.
+        entry.set_custom_property("protected_codes", big, protect=True)
         # Control: a non-secret over-limit field is always offloaded.
         entry.set_custom_property("recovery_codes", big)
 
-    # Default: secret dropped-with-warning, non-secret still offloaded.
+    # Default: secrets dropped-with-warning, non-secret still offloaded.
     items, warnings = _run_oversize(build, include_oversize_secrets=False)
     item, att_names = items["Big Secret"]
-    if "HmacOtp-Secret.txt" in att_names:
-        raise AssertionError("Secret was offloaded to an attachment without opt-in")
     if "recovery_codes.txt" not in att_names:
         raise AssertionError("Non-secret over-limit field should always be offloaded")
-    if any(field["name"] == "HmacOtp-Secret" for field in item["fields"]):
-        raise AssertionError("Over-limit secret must not be stored inline")
-    if not any("HmacOtp-Secret" in w and "not migrated" in w for w in warnings):
-        raise AssertionError(
-            f"Expected a not-migrated warning for the dropped secret, got {warnings}"
-        )
+    for key in secret_keys:
+        if f"{key}.txt" in att_names:
+            raise AssertionError(f"Secret '{key}' was offloaded without opt-in")
+        if any(field["name"] == key for field in item["fields"]):
+            raise AssertionError(f"Over-limit secret '{key}' must not be stored inline")
+        if not any(key in w and "not migrated" in w for w in warnings):
+            raise AssertionError(
+                f"Expected a not-migrated warning for dropped '{key}', got {warnings}"
+            )
 
-    # Opt-in: the secret is recovered into its attachment, no data lost.
+    # Opt-in: each secret is recovered into its attachment, no data lost.
     items, warnings = _run_oversize(build, include_oversize_secrets=True)
     item, att_names = items["Big Secret"]
-    if "HmacOtp-Secret.txt" not in att_names:
-        raise AssertionError(
-            "--include-oversize-secrets should offload the secret to an attachment"
-        )
-    if any(field["name"] == "HmacOtp-Secret" for field in item["fields"]):
-        raise AssertionError("Offloaded secret must not also be stored inline")
-    if not any("HmacOtp-Secret" in w and "offloading" in w for w in warnings):
-        raise AssertionError(
-            f"Expected an offload warning under opt-in, got {warnings}"
-        )
+    for key in secret_keys:
+        if f"{key}.txt" not in att_names:
+            raise AssertionError(
+                f"--include-oversize-secrets should offload secret '{key}'"
+            )
+        if any(field["name"] == key for field in item["fields"]):
+            raise AssertionError(f"Offloaded secret '{key}' must not also be inline")
+        if not any(key in w and "offloading" in w for w in warnings):
+            raise AssertionError(
+                f"Expected an offload warning for '{key}' under opt-in, got {warnings}"
+            )
 
 
 def assert_resolves_chain_with_merge() -> None:

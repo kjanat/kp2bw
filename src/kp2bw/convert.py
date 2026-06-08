@@ -387,11 +387,11 @@ class Converter:
         # is offloaded to a <key>.txt attachment, with three exceptions:
         #   * consumed OTP keys are already folded into login.totp, so dropping
         #     the raw field is deduplication, not loss -- skip it silently.
-        #   * a passkey attribute or hidden OTP secret survives nowhere else, so
-        #     dropping it IS data loss. By default it is not written to a
-        #     plaintext attachment (a secret in a readable .txt file); we warn
-        #     instead of dropping it silently. Opting in via
-        #     ``--include-oversize-secrets`` offloads it to its attachment too.
+        #   * a passkey attribute, hidden OTP secret, or KeePass-protected field
+        #     survives nowhere else and is a secret, so dropping it IS data loss.
+        #     By default it is not written to a plaintext attachment (a secret in
+        #     a readable .txt file); we warn instead of dropping it silently.
+        #     Opting in via ``--include-oversize-secrets`` offloads it too.
         # The value itself is never logged in either branch.
         label = entry.title or "_untitled"
         attachments: list[AttachmentItem] = []
@@ -400,7 +400,11 @@ class Converter:
                 continue
             if key in otp_result.consumed_keys:
                 continue
-            if key.startswith(KPEX_PASSKEY_PREFIX) or key in otp_result.hidden_keys:
+            if (
+                key.startswith(KPEX_PASSKEY_PREFIX)
+                or key in otp_result.hidden_keys
+                or key in custom_protected
+            ):
                 if self._include_oversize_secrets:
                     logger.warning(
                         f"{label}: secret field '{key}' exceeds the "

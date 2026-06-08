@@ -21,11 +21,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is a behavioral-only canary -- with Vaultwarden and `bw` version-pinned and
   Dependabot-managed.
 - **`--include-oversize-secrets` to recover over-limit secret fields** (#21) --
-  a hidden OTP secret (e.g. an HOTP `HmacOtp-Secret`) or passkey attribute whose
-  value tops the 10k inline limit survives nowhere else, so it was dropped. The
-  new flag (env: `KP2BW_INCLUDE_OVERSIZE_SECRETS`, default off) offloads it to a
-  `<key>.txt` attachment like any other long field. Off by default so a secret
-  is never written to a readable attachment without consent.
+  a hidden OTP secret (e.g. an HOTP `HmacOtp-Secret`), a passkey attribute, or a
+  KeePass-protected custom field whose value tops the 10k inline limit survives
+  nowhere else, so it was dropped. The new flag (env:
+  `KP2BW_INCLUDE_OVERSIZE_SECRETS`, default off) offloads it to a `<key>.txt`
+  attachment like any other long field. Off by default so a secret is never
+  written to a readable attachment without consent.
 
 ### Fixed
 
@@ -36,9 +37,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   left among the inline fields. Regression coverage locks the long-field →
   `<key>.txt` path into the golden e2e snapshots.
 - **Over-limit secret custom fields were dropped silently** (#21) -- a hidden
-  OTP secret or passkey attribute longer than the 10k inline limit was filtered
-  out of the inline fields and excluded from the `.txt` attachment offload,
-  vanishing with no log line. Such a field is now warned-and-dropped by default
+  OTP secret, passkey attribute, or KeePass-protected field longer than the 10k
+  inline limit was filtered out of the inline fields and excluded from the
+  `.txt` attachment offload, vanishing with no log line. Such a field is now
+  warned-and-dropped by default
   (pointing at `--include-oversize-secrets` to keep it), so data is never lost
   without notice. A consumed OTP key over the limit is still dropped silently --
   it is already preserved in `login.totp`, so dropping the raw field is

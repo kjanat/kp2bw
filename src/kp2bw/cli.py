@@ -176,8 +176,9 @@ def _argparser() -> MyArgParser:
         dest="include_oversize_secrets",
         help=(
             "Offload secret custom fields (hidden OTP secrets, passkey "
-            "attributes) that exceed the inline size limit to a plaintext "
-            ".txt attachment instead of dropping them; off by default so a "
+            "attributes, KeePass-protected fields) that exceed the inline size "
+            "limit to a plaintext .txt attachment instead of dropping them; off "
+            "by default so a "
             "secret is never written to a readable attachment without consent "
             "(env: KP2BW_INCLUDE_OVERSIZE_SECRETS)"
         ),
