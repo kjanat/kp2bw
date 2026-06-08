@@ -449,6 +449,9 @@ def main() -> None:
 
         # Re-running with no further edits must be idempotent (no duplicates).
         _ = _run_migration(snapshot_path, kp_password, bw_password, env)
+        # kp2bw's `bw serve` rotates the shared CLI session, so re-acquire one
+        # before querying again (a stale token returns an empty item list).
+        session = _get_session(env, bw_password)
         _ = _run(["bw", "sync", "--session", session], env=env)
         items_after = _bw_json(env, "list", "items", "--session", session)
         if len([i for i in items_after if i.get("name") == "Example"]) != 1:

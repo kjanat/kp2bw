@@ -93,11 +93,25 @@ def assert_success_does_not_raise() -> None:
         raise AssertionError(f"unexpected attachment request: {path} {params}")
 
 
+def assert_command_error_on_2xx_is_surfaced() -> None:
+    # bw serve can report a command-level failure as HTTP 200 with
+    # success:false; the message must still be surfaced.
+    resp = _FakeResponse(200, {"success": False, "message": "attachment rejected"})
+    try:
+        _run_upload(resp)
+    except BitwardenClientError as exc:
+        if "attachment rejected" not in str(exc):
+            raise AssertionError(f"server message not surfaced: {exc}") from None
+        return
+    raise AssertionError("a success:false response must raise even on HTTP 200")
+
+
 def main() -> None:
     """Run the script-style assertions and report success."""
     assert_server_message_is_surfaced()
     assert_opaque_status_when_no_message()
     assert_success_does_not_raise()
+    assert_command_error_on_2xx_is_surfaced()
     print("bw serve attachment test passed")
 
 

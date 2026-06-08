@@ -46,13 +46,23 @@ src/kp2bw/
 
 - Reintroducing subprocess-per-op transport for new work.
 - Logging decrypted vault content or credential-bearing command strings.
-- Breaking idempotency by bypassing existing-item dedup checks.
+- Breaking idempotency: a re-run with no KeePass changes must issue no `PUT`
+  and upload no attachment (`_content_differs` / upload-if-missing gate this).
 - Changing conversion behavior without updating e2e expectations in `tests/e2e_vaultwarden_test.py`.
 
 ## NOTES
 
 - `bw_serve.py` is the active transport path; `bw_import.py` and `bitwardenclient.py` are legacy/reference.
 - Maintain behavior parity for `kp2bw.cli:main` and `python -m kp2bw`.
+- Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on,
+  `Converter(update_existing=...)`): `convert._reconcile_existing_item()` diffs
+  a matched login item via `_content_differs()` and, when changed, `PUT`s a
+  payload built by `_build_update_payload()` (preserves id/favorite/folder/org,
+  unions collectionIds, keeps a Bitwarden-side passkey absent from KeePass).
+  Missing attachments are uploaded, deduped per `(item_id, filename)`. Content
+  and attachment failures are non-fatal and counted; `convert()` returns the
+  failure count and the CLI exits non-zero when it is non-zero. `--no-update`
+  restores skip-only behavior (collection-membership sync still applies).
 - Dedup index is org-scoped when `--bitwarden-org` is set: `_build_dedup_index()` passes `organization_id=self._org_id` to `list_items()`, which appends `organizationId` as a query param to `/list/object/items`. When `org_id` is `None` (personal vault), no filter is applied and all vault items are indexed. This prevents personal vault entries from shadowing an empty org vault during migration.
 - When a fixed `--bitwarden-collection` is given, the dedup index is further scoped to that collection via `collection_id`. Items in other collections are treated as new.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via `codegen-check.yml`.
