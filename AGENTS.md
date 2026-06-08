@@ -86,7 +86,7 @@ KP2BW_RUN_E2E_TESTS=1 uv run pytest -q tests/test_script_adapters.py -k e2e
 uv run python tests/e2e_vaultwarden_test.py
 
 # When touching scripts/
-bun --cwd=scripts typecheck
+bun run typecheck
 
 # Version bumping (multiple --bump flags allowed; order matters)
 uv version --bump major --bump alpha [--dry-run]

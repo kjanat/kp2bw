@@ -36,7 +36,7 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 
 ```bash
 # Validate script side of workflow contracts
-bun --cwd=scripts typecheck
+bun run typecheck
 
 # Run same docker e2e used by integration workflow
 docker compose -f tests/docker-compose.yml build

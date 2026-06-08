@@ -1,0 +1,18 @@
+{
+	"extends": "https://github.com/kjanat/kjanat/raw/886a886/configs/dprint.remote.json",
+	"dockerfile": { "associations": ["!*.ts"] },
+	"excludes": ["**/fixtures/**"],
+	"markdown": {
+		"lineWidth": 150,
+		"textWrap": "maintain",
+	},
+	"exec": {
+		"commands": [{
+			"command": "uvx tombi format - --stdin-filename {{file_path}}",
+			"exts": ["toml"],
+		}],
+	},
+	"plugins": [
+		"https://plugins.dprint.dev/exec-0.6.2.json@df98f54ffd3092b8a841aedd6d098a2651f16d0a796a40535774f1a8b4b9d463",
+	],
+}

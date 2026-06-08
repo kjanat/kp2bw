@@ -28,7 +28,7 @@ Issues     = "https://github.com/kjanat/kp2bw/issues"
 Repository = "https://github.com/kjanat/kp2bw/tree/master/packages/pykeepass-stubs"
 
 [build-system]
-requires      = ["uv_build>=0.10.4,<0.11.0"]
+requires      = ["uv_build>=0.11.19,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.pyright]

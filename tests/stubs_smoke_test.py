@@ -1,17 +1,73 @@
 import pathlib
 import subprocess
 import tempfile
-from importlib.metadata import files
+from importlib.metadata import PackagePath, files
 
 
-def assert_distribution_files() -> None:
+def _distribution_files() -> list[PackagePath]:
     dist_files = files("pykeepass-stubs")
     if dist_files is None:
         raise AssertionError(
             "Could not read installed distribution files for pykeepass-stubs"
         )
 
+    return list(dist_files)
+
+
+def _editable_source_roots(dist_files: list[PackagePath]) -> list[pathlib.Path]:
+    source_roots: list[pathlib.Path] = []
+
+    for dist_file in dist_files:
+        if not str(dist_file).endswith(".pth"):
+            continue
+
+        pth_path = pathlib.Path(dist_file.locate())
+        for raw_line in pth_path.read_text(encoding="utf8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith(("#", "import ")):
+                continue
+
+            source_root = pathlib.Path(line)
+            if not source_root.is_absolute():
+                source_root = pth_path.parent / source_root
+            if source_root.is_dir():
+                source_roots.append(source_root)
+
+    return source_roots
+
+
+def _available_files(dist_files: list[PackagePath]) -> set[str]:
     available = {str(path) for path in dist_files}
+
+    for source_root in _editable_source_roots(dist_files):
+        available.update(
+            path.relative_to(source_root).as_posix()
+            for path in source_root.rglob("*")
+            if path.is_file()
+        )
+
+    return available
+
+
+def _locate_distribution_file(file_name: str) -> pathlib.Path | None:
+    dist_files = _distribution_files()
+
+    for dist_file in dist_files:
+        if str(dist_file) == file_name:
+            located_file = pathlib.Path(dist_file.locate())
+            if located_file.is_file():
+                return located_file
+
+    for source_root in _editable_source_roots(dist_files):
+        located_file = source_root / file_name
+        if located_file.is_file():
+            return located_file
+
+    return None
+
+
+def assert_distribution_files() -> None:
+    available = _available_files(_distribution_files())
     required = {
         "pykeepass-stubs/__init__.pyi",
         "pykeepass-stubs/attachment.pyi",
@@ -27,24 +83,11 @@ def assert_distribution_files() -> None:
 
 
 def assert_partial_marker() -> None:
-    dist_files = files("pykeepass-stubs")
-    if dist_files is None:
-        raise AssertionError(
-            "Could not read installed distribution files for pykeepass-stubs"
-        )
-
-    marker_path = next(
-        (
-            path.locate()
-            for path in dist_files
-            if str(path) == "pykeepass-stubs/py.typed"
-        ),
-        None,
-    )
+    marker_path = _locate_distribution_file("pykeepass-stubs/py.typed")
     if marker_path is None:
         raise AssertionError("Could not locate pykeepass-stubs/py.typed")
 
-    marker = pathlib.Path(marker_path).read_text(encoding="utf8")
+    marker = marker_path.read_text(encoding="utf8")
 
     if "partial" not in marker:
         raise AssertionError(

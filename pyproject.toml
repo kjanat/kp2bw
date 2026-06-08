@@ -39,6 +39,7 @@ dev     = [
 codegen = ["datamodel-code-generator[ruff]>=0.31"]
 lint    = [
   "basedpyright>=1.38.1",
+  "dprint-py>=0.53.1.0",
   "ruff>=0.15.2",
   "tombi>=0.7.32",
   "ty>=0.0.18",
@@ -51,7 +52,7 @@ test    = [
 ]
 
 [build-system]
-requires      = ["uv_build>=0.10.4,<0.11.0"]
+requires      = ["uv_build>=0.11.19,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.pyright]
@@ -65,7 +66,7 @@ preview        = true
 target-version = "py314"
 
 [tool.uv.sources]
-pykeepass-stubs = { workspace = true }
+pykeepass-stubs.workspace = true
 
 [tool.uv.workspace]
 members = ["packages/*"]
