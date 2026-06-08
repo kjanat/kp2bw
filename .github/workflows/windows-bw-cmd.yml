@@ -20,20 +20,20 @@ jobs:
       - name: Install Bitwarden CLI via npm (creates a bw.cmd shim, no bw.exe)
         run: npm install -g @bitwarden/cli
 
-      - name: Confirm bw resolves to a .cmd shim
-        shell: pwsh
-        run: |
-          $bw = (Get-Command bw).Source
-          Write-Host "bw resolved to: $bw"
-          if (-not $bw.ToLower().EndsWith(".cmd")) {
-            Write-Error "expected an npm bw.cmd shim, got: $bw"
-            exit 1
-          }
-
       - uses: astral-sh/setup-uv@v8.2.0
 
       - name: Install project
         run: uv sync
+
+      # Diagnostic only: PowerShell's Get-Command prefers bw.ps1, but kp2bw uses
+      # Python's shutil.which, which honours PATHEXT (.CMD, not .PS1) and resolves
+      # bw.cmd. The smoke test below is the actual gate via resolve_bw_command.
+      - name: Diagnose how bw resolves
+        shell: pwsh
+        run: |
+          Write-Host "PATHEXT = $env:PATHEXT"
+          Get-Command bw -All | Format-Table CommandType, Name, Source -AutoSize
+          uv run python -c "import shutil; print('shutil.which(bw) =', shutil.which('bw'))"
 
       - name: Run Windows bw .cmd smoke test
         env:
