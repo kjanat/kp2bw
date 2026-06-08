@@ -338,6 +338,12 @@ class Converter:
             # Skip passkey attributes and OTP fields folded into login.totp.
             if key.startswith(KPEX_PASSKEY_PREFIX) or key in otp_result.consumed_keys:
                 continue
+            # A value over the item-size limit is offloaded to a <key>.txt
+            # attachment below (mirroring the notes handling); keep it out of the
+            # inline fields entirely so it is not also stored inline, which would
+            # duplicate it and can hit Bitwarden's field-size limit.
+            if value is not None and len(value) > MAX_BW_ITEM_LENGTH:
+                continue
             if key in otp_result.hidden_keys or key in custom_protected:
                 custom_properties[key] = (value, 1)
             else:

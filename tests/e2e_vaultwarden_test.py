@@ -233,6 +233,11 @@ def _png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
 _LOGO_PNG = _png(4, 4, (10, 132, 255))
 _BLOB = bytes(range(256)) * 4
 
+# A custom-field value longer than this offloads to a <key>.txt attachment
+# instead of an inline field (see convert.py); the seed exercises that path so a
+# long field is never emitted both inline and as an attachment (#21).
+LONG_FIELD = "BACKUP-CODE-" * 1000  # ~12k chars, comfortably over the 10k limit
+
 
 def _create_keepass_snapshot(path: Path, password: str) -> None:
     """Build a comprehensive, deterministic KeePass vault exercising every path.
@@ -322,6 +327,14 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
     files.add_attachment(logo_id, "logo.png")
     blob_id = kp.add_binary(_BLOB)
     files.add_attachment(blob_id, "payload.bin")
+
+    # Long Field: a custom field whose value tops the 10k inline limit must be
+    # offloaded to a <key>.txt attachment *only*, never duplicated as an inline
+    # field (#21). The short "hint" field beside it proves only the oversized
+    # value is offloaded.
+    long_field = kp.add_entry(internet, "Long Field", "long-user", "long-pass")
+    long_field.set_custom_property("recovery_codes", LONG_FIELD)
+    long_field.set_custom_property("hint", "see recovery_codes.txt")
 
     # Empty Password: a login with a username but no password.
     _ = kp.add_entry(kp.root_group, "Empty Password", "lonely-user", "")
@@ -628,6 +641,25 @@ def _assert_comprehensive_seed(vault: NormVault) -> None:
     cafe = _login(_item_by_name(vault, "Café ☕ Ünïcødé"))
     if cafe["username"] != "café-user" or cafe["password"] != "naïve-pø$$wörd":
         raise AssertionError("Unicode credentials were corrupted in migration")
+
+    # A >10k custom field is offloaded to a <key>.txt attachment *only* -- never
+    # also stored inline, which would duplicate it and can hit the field-size
+    # limit (#21). The short field beside it still migrates inline.
+    long_field = _item_by_name(vault, "Long Field")
+    long_atts = {att["fileName"]: att["sha256"] for att in long_field["attachments"]}
+    if (
+        long_atts.get("recovery_codes.txt")
+        != hashlib.sha256(LONG_FIELD.encode("UTF-8")).hexdigest()
+    ):
+        raise AssertionError(
+            "Long custom field was not offloaded to recovery_codes.txt intact"
+        )
+    if any(field["name"] == "recovery_codes" for field in long_field["fields"]):
+        raise AssertionError(
+            "Long custom field must not also be emitted as an inline field (#21)"
+        )
+    if _field(long_field, "hint")["value"] != "see recovery_codes.txt":
+        raise AssertionError("Short field beside the long one should stay inline")
 
 
 def main() -> None:

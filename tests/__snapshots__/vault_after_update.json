@@ -162,6 +162,34 @@
       "type": 1
     },
     {
+      "attachments": [
+        {
+          "fileName": "recovery_codes.txt",
+          "sha256": "505e27a81d329ba804b9bc99b7b95da5d1d5c4420b7f776a4f89bd0e556afeca"
+        }
+      ],
+      "favorite": false,
+      "fields": [
+        {
+          "name": "hint",
+          "type": 0,
+          "value": "see recovery_codes.txt"
+        }
+      ],
+      "folder": "Internet",
+      "login": {
+        "fido2Credentials": [],
+        "password": "long-pass",
+        "totp": null,
+        "uris": [],
+        "username": "long-user"
+      },
+      "name": "Long Field",
+      "notes": "",
+      "token": "Internet/Long Field",
+      "type": 1
+    },
+    {
       "attachments": [],
       "favorite": false,
       "fields": [
