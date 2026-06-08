@@ -182,6 +182,11 @@ class BitwardenServeClient:
                 stdin=subprocess.DEVNULL,
                 env={**os.environ, "_KP2BW_BW_PW": password},
             )
+        except FileNotFoundError as exc:
+            # `bw` resolved on PATH but could not actually be executed — e.g. a
+            # Windows npm install exposes `bw.cmd` (found by shutil.which via
+            # PATHEXT) which CreateProcess cannot run directly.
+            raise BitwardenClientError(BW_NOT_FOUND_MSG) from exc
         except subprocess.TimeoutExpired:
             logger.warning("bw unlock timed out while obtaining session key")
             return None
@@ -219,12 +224,15 @@ class BitwardenServeClient:
             f"Starting bw serve on port {self._port} "
             f"(BW_SESSION={'set' if session else 'not set'})",
         )
-        self._process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            env=env,
-        )
+        try:
+            self._process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+        except FileNotFoundError as exc:
+            raise BitwardenClientError(BW_NOT_FOUND_MSG) from exc
 
     def _wait_for_ready(self) -> None:
         """Poll ``GET /status`` until the server is responsive."""

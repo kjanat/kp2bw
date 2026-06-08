@@ -16,7 +16,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   prompting for passwords) and exits cleanly with an actionable message; any
   `BitwardenClientError`/`ConversionError` raised during conversion is reported
   the same way instead of as a stack trace. `BitwardenServeClient` raises a
-  `BitwardenClientError` rather than letting `FileNotFoundError` escape. Fixes #5.
+  `BitwardenClientError` rather than letting `FileNotFoundError` escape.
+  Detection uses `shutil.which`, so Windows `bw.exe`/`bw.cmd` shims are found via
+  `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so even an
+  unexecutable shim (e.g. an npm `bw.cmd` that `CreateProcess` can't run) yields
+  the friendly message. Fixes #5.
 
 ## [3.0.1] - 2026-06-08
 
