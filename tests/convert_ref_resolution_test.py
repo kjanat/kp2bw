@@ -97,7 +97,7 @@ class ReferenceEntry(Entry):
 class ReferenceResolutionTestConverter(Converter):
     """Converter wired with stubbed lookups to exercise REF resolution alone."""
 
-    duplicate_creates: int
+    duplicate_creates: list[tuple[str | None, list[str] | None]]
     referenced_item: BwItemCreate
 
     def __init__(self, referenced_item: BwItemCreate) -> None:
@@ -113,7 +113,7 @@ class ReferenceResolutionTestConverter(Converter):
             path2nameskip=1,
             import_tags=None,
         )
-        self.duplicate_creates = 0
+        self.duplicate_creates = []
         self.referenced_item = referenced_item
 
     def add_ref_entry(self, entry: Entry) -> None:
@@ -127,7 +127,11 @@ class ReferenceResolutionTestConverter(Converter):
     def _get_referenced_entry(
         self, lookup_mode: str, ref_compare_string: str
     ) -> EntryValue:
-        """Return the fixed referenced item, bypassing real lookup."""
+        """Return the fixed referent, asserting the REF was parsed and dispatched."""
+        if lookup_mode != "I":
+            raise AssertionError(f"Unexpected REF lookup_mode: {lookup_mode}")
+        if ref_compare_string != REFERENCE_ENTRY_UUID_REF:
+            raise AssertionError(f"Unexpected REF target: {ref_compare_string}")
         return (None, None, self.referenced_item, [])
 
     def _find_referenced_value(
@@ -141,8 +145,8 @@ class ReferenceResolutionTestConverter(Converter):
     def _add_bw_entry_to_entries_dict(
         self, entry: Entry, custom_protected: list[str] | None
     ) -> None:
-        """Count duplicate creations instead of mutating the entries dict."""
-        self.duplicate_creates += 1
+        """Record each duplicate creation (title, protected) for diagnostics."""
+        self.duplicate_creates.append((entry.title, custom_protected))
 
 
 def _make_referenced_item() -> BwItemCreate:
@@ -194,9 +198,10 @@ def assert_resolves_none_fields_with_references() -> None:
     if entry.password != "resolved_value":
         raise AssertionError("REF password was not resolved to referenced value")
 
-    if converter.duplicate_creates != 0:
+    if converter.duplicate_creates:
         raise AssertionError(
-            "Resolved REF entry should merge URI, not create duplicate"
+            f"Resolved REF entry should merge URI, not create duplicate: "
+            f"{converter.duplicate_creates}"
         )
 
     uris = referenced_item["login"]["uris"]
