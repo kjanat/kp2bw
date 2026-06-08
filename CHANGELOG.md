@@ -8,6 +8,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-06-09
+
+### Fixed
+
+- **A newly created item could lose an attachment on re-run** -- when `kp2bw`
+  created a fresh Bitwarden item and immediately uploaded its attachment,
+  `bw serve` could fail to resolve the just-created item (it looks the id up in
+  its local vault cache, not on the server), report `Not found`, and silently
+  drop that one attachment. The vault is now synced after items are created and
+  before attachments upload, and an upload that still hits a not-found error
+  syncs and retries once.
+
 ## [3.4.0] - 2026-06-08
 
 ### Added
@@ -511,7 +523,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.4.1...HEAD
+[3.4.1]: https://github.com/kjanat/kp2bw/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/kjanat/kp2bw/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/kjanat/kp2bw/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/kjanat/kp2bw/compare/v3.1.0...v3.2.0
