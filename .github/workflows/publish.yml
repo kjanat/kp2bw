@@ -17,7 +17,7 @@ jobs:
       version: ${{ fromJson(steps.check.outputs.result).version }}
       pypi_url: ${{ fromJson(steps.check.outputs.result).pypi_url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.2.0
       - run: uv sync
 
@@ -40,7 +40,7 @@ jobs:
     environment: { name: pypi-kp2bw, url: "${{ needs.check.outputs.pypi_url }}" }
     permissions: { id-token: write, contents: read }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.2.0
       - run: uv sync
       - run: uv build --no-sources

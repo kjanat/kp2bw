@@ -12,7 +12,7 @@ jobs:
     permissions: { contents: read }
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6.0.2
 
       - name: Run Vaultwarden end-to-end migration test
         run: |
