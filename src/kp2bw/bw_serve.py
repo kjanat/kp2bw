@@ -584,16 +584,25 @@ class BitwardenServeClient:
             files={"file": (filename, data)},
         )
         try:
-            body: dict[str, Any] = resp.json()
+            parsed: Any = resp.json()
         except ValueError:
-            body = {}
+            parsed = None
+        # Guard against a non-object JSON body (array/string) so reading the
+        # envelope can't raise AttributeError instead of a clean error.
+        body: dict[str, Any] = (
+            cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+        )
 
         # bw serve reports command-level failures (e.g. "Premium status is
         # required", storage-quota or attachment-size limits) as HTTP 400 with
         # the real reason in the body's ``message`` field.  Surface it instead
         # of an opaque status code so the user knows *why* a file was rejected.
         if resp.status_code >= 400 or not body.get("success", False):
-            message = body.get("message") or f"HTTP {resp.status_code}"
+            message = body.get("message")
+            if not message:
+                message = f"HTTP {resp.status_code}"
+                if parsed is None:
+                    message += " (non-JSON response)"
             raise BitwardenClientError(
                 f"Attachment upload failed for {filename!r} on item {item_id}: "
                 f"{message}"

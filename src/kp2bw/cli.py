@@ -161,9 +161,9 @@ def _argparser() -> MyArgParser:
         "--update",
         dest="update_existing",
         help=(
-            "Update existing Bitwarden entries when their KeePass content "
-            "changed; --no-update restores skip-only behavior "
-            "(default: on, env: KP2BW_UPDATE)"
+            "Sync changed KeePass content (and missing attachments) onto "
+            "existing Bitwarden entries; --no-update leaves their content "
+            "untouched (default: on, env: KP2BW_UPDATE)"
         ),
         action=BooleanOptionalAction,
         default=None,
@@ -372,10 +372,15 @@ def main() -> None:
         update_existing=update_existing,
     )
     try:
-        c.convert()
+        failures = c.convert()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
+
+    # Exit non-zero on non-fatal failures (rejected updates/attachment uploads)
+    # so wrappers and CI can tell a partial migration from a clean one.
+    if failures:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

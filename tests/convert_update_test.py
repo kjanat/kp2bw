@@ -127,13 +127,17 @@ class FakeBw:
         *,
         existing_attachments: list[dict[str, str]] | None = None,
         fail_get: bool = False,
+        fail_update: bool = False,
     ) -> None:
         self.updates: list[tuple[str, BwItemResponse]] = []
         self.dedup_updates: list[tuple[str | None, str]] = []
         self._attachments = existing_attachments or []
         self._fail_get = fail_get
+        self._fail_update = fail_update
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
+        if self._fail_update:
+            raise BitwardenClientError("simulated update rejection")
         self.updates.append((item_id, item))
 
     def update_dedup_entry(
@@ -353,6 +357,23 @@ def assert_attachment_sync_safe_on_get_failure() -> None:
         raise AssertionError("on GET failure, must not upload (avoid duplicates)")
 
 
+def assert_rejected_update_is_non_fatal() -> None:
+    conv = UpdateTestConverter()
+    bw = FakeBw(fail_update=True)
+    outcome, _ = conv.reconcile(
+        _as_bw(bw),
+        _make_existing(notes="old"),
+        "folder-1",
+        _make_desired(notes="new recovery keys"),
+        [],
+        fixed_coll_id=None,
+    )
+    if outcome != "failed":
+        raise AssertionError(
+            f"a rejected update PUT must be reported as 'failed', got {outcome!r}"
+        )
+
+
 def assert_no_update_flag_restores_skip() -> None:
     conv = UpdateTestConverter(update_existing=False)
     bw = FakeBw(existing_attachments=[])
@@ -387,6 +408,7 @@ def main() -> None:
     assert_missing_attachment_is_uploaded()
     assert_present_attachment_not_reuploaded()
     assert_attachment_sync_safe_on_get_failure()
+    assert_rejected_update_is_non_fatal()
     assert_no_update_flag_restores_skip()
     print("convert update test passed")
 
