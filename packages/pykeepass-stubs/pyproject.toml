@@ -4,7 +4,11 @@ version         = "0.1.1"
 description     = "Type stubs for pykeepass"
 readme          = "README.md"
 requires-python = ">=3.11"
+license         = "MIT"
+license-files   = ["LICENSE"]
+keywords        = ["keepass", "pep561", "pykeepass", "stubs", "type-stubs", "typing"]
 classifiers     = [
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
@@ -24,6 +28,7 @@ name  = "Kaj Kowalski"
 email = "info@kajkowalski.nl"
 
 [project.urls]
+Homepage   = "https://github.com/kjanat/kp2bw"
 Issues     = "https://github.com/kjanat/kp2bw/issues"
 Repository = "https://github.com/kjanat/kp2bw/tree/master/packages/pykeepass-stubs"
 
