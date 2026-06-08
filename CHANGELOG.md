@@ -21,7 +21,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `terminate_serve` tears the `bw serve` process tree down with `taskkill /F /T`
   so the real server isn't orphaned behind a `cmd.exe`/PowerShell wrapper. A
   `windows-bw-cmd` CI job installs `bw` via npm and runs a live smoke test
-  (`tests/windows_bw_cmd_smoke.py`) covering invocation and teardown of the shim.
+  (`tests/windows_bw_cmd_smoke.py`) covering shim invocation (`bw --version`) and
+  `cmd.exe`-wrapped process-tree teardown.
 
 ### Fixed
 

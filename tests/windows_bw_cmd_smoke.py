@@ -1,17 +1,19 @@
-"""Live smoke test for invoking an npm-installed ``bw.cmd`` shim on Windows.
+"""Live smoke test for invoking an npm-installed ``bw`` shim on Windows.
 
 Run by the ``windows-bw-cmd`` CI job, which installs the Bitwarden CLI via npm
-(producing a ``bw.cmd`` shim with no ``bw.exe``). It proves the two things that
-cannot be checked off-Windows:
+(producing ``bw.cmd`` + ``bw.ps1`` with no ``bw.exe``). It proves the two
+Windows-specific mechanisms kp2bw relies on, neither of which can be checked
+off-Windows:
 
-1. ``resolve_bw_command`` detects the shim and routes it through ``cmd.exe``,
-   and that wrapped command actually runs (``bw --version``).
-2. A ``bw serve`` launched through the shim can be torn down cleanly by
-   ``terminate_serve`` without orphaning the real process on its port.
+1. ``resolve_bw_command`` resolves the npm shim and the wrapped command actually
+   runs (``bw --version``).
+2. ``terminate_serve`` tears down a process launched through a ``cmd.exe``
+   wrapper together with its descendants (``taskkill /F /T``), freeing the port
+   — a plain ``terminate()`` would orphan the real child behind the wrapper.
 
-No vault credentials are required: ``bw serve`` binds its port and answers
-``/status`` regardless of auth state, so the lifecycle can be exercised on a
-fresh, logged-out CLI.
+``bw serve`` itself requires a logged-in vault ("You are not logged in."), which
+isn't available on CI, so the teardown is exercised against a ``cmd.exe -> node``
+tree that holds a port — the same process shape ``bw.cmd -> node`` produces.
 
 On non-Windows hosts this is a no-op so the pytest adapter can import it safely.
 """
@@ -20,8 +22,6 @@ import os
 import socket
 import subprocess
 import time
-
-import httpx
 
 from kp2bw.bw_serve import resolve_bw_command, terminate_serve
 
@@ -32,8 +32,19 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+def _port_accepting(port: int) -> bool:
+    """True if something is listening on *port* (a TCP connect succeeds)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        try:
+            s.connect(("127.0.0.1", port))
+        except OSError:
+            return False
+        return True
+
+
 def _port_is_free(port: int) -> bool:
-    """True if nothing is listening on *port* (i.e. it can be bound again)."""
+    """True if nothing holds *port* (i.e. it can be bound again)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
         try:
@@ -43,16 +54,17 @@ def _port_is_free(port: int) -> bool:
         return True
 
 
-def assert_resolves_cmd_shim() -> tuple[list[str], str | None]:
+def assert_resolves_and_runs() -> None:
     argv, cwd = resolve_bw_command()
-    if len(argv) <= 1 or not argv[-1].lower().endswith((".cmd", ".bat")):
-        raise AssertionError(
-            f"expected an npm bw.cmd shim routed through cmd.exe, got {argv!r}"
-        )
-    return argv, cwd
+    print(f"resolve_bw_command -> {argv!r} (cwd={cwd!r})")
+    # npm provides bw.cmd (+ bw.ps1, no bw.exe), so we expect a wrapped shim;
+    # accept a native exe too in case the runner image ever ships one.
+    runnable = (len(argv) == 1 and argv[0].lower().endswith((".exe", ".com"))) or (
+        len(argv) > 1 and argv[-1].lower().endswith((".cmd", ".bat", ".ps1"))
+    )
+    if not runnable:
+        raise AssertionError(f"unexpected bw resolution: {argv!r}")
 
-
-def assert_version_runs_via_cmd(argv: list[str], cwd: str | None) -> None:
     result = subprocess.run(
         [*argv, "--version"],
         check=False,
@@ -69,58 +81,58 @@ def assert_version_runs_via_cmd(argv: list[str], cwd: str | None) -> None:
         )
     if not result.stdout.strip():
         raise AssertionError("bw --version via shim produced no output")
+    print(f"bw --version -> {result.stdout.strip()}")
 
 
-def assert_serve_starts_and_tears_down(argv: list[str], cwd: str | None) -> None:
+def assert_wrapped_teardown_frees_port() -> None:
     port = _free_port()
-    base_url = f"http://127.0.0.1:{port}"
+    comspec = os.environ.get("COMSPEC", "cmd.exe")
+    # cmd.exe -> node holding a port mirrors how bw.cmd -> node would behave.
+    # A naive terminate() kills only cmd.exe and leaves node holding the port;
+    # terminate_serve(via_shell=True) must take the whole tree down.
+    node_script = (
+        "const net=require('net');"
+        "const srv=net.createServer();"
+        f"srv.listen({port}, '127.0.0.1');"
+        "setTimeout(()=>{}, 600000);"
+    )
     proc = subprocess.Popen(
-        [*argv, "serve", "--port", str(port), "--hostname", "127.0.0.1"],
+        [comspec, "/d", "/c", "node", "-e", node_script],
         stdin=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-        cwd=cwd,
-        env={**os.environ},
     )
 
     try:
-        deadline = time.monotonic() + 60
-        ready = False
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 stderr = b""
                 if proc.stderr is not None:
                     stderr = proc.stderr.read()
                 raise AssertionError(
-                    f"bw serve exited early (code {proc.returncode}): "
+                    f"wrapped child exited before binding (code {proc.returncode}): "
                     f"{stderr.decode('utf-8', 'replace').strip()!r}"
                 )
-            try:
-                # Any HTTP response means the server is up; status is fine even
-                # when the vault is locked/unauthenticated.
-                _ = httpx.get(f"{base_url}/status", timeout=5)
-                ready = True
+            if _port_accepting(port):
                 break
-            except httpx.ConnectError:
-                time.sleep(0.25)
-        if not ready:
-            raise AssertionError("bw serve did not become reachable within 60s")
+            time.sleep(0.25)
+        else:
+            raise AssertionError("wrapped child never started listening within 30s")
     finally:
-        # Exercise the real teardown: a cmd.exe-wrapped serve must take the
-        # whole tree down, not just the wrapper.
-        terminate_serve(proc, via_shell=len(argv) > 1, timeout=10)
+        terminate_serve(proc, via_shell=True, timeout=15)
 
     if proc.poll() is None:
-        raise AssertionError("terminate_serve left the bw serve wrapper running")
+        raise AssertionError("terminate_serve left the cmd.exe wrapper running")
 
-    # The decisive check: if the real `bw serve` were orphaned it would still
-    # hold the port, so a fresh bind would fail.
-    deadline = time.monotonic() + 10
+    # The decisive check: taskkill /T must have killed node too. If it were
+    # orphaned it would still hold the port and a fresh bind would fail.
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if _port_is_free(port):
             return
         time.sleep(0.25)
     raise AssertionError(
-        f"port {port} still held after teardown — bw serve was orphaned"
+        f"port {port} still held after teardown — the wrapped child was orphaned"
     )
 
 
@@ -128,9 +140,8 @@ def main() -> None:
     if os.name != "nt":
         print("windows bw .cmd smoke: skipped (not Windows)")
         return
-    argv, cwd = assert_resolves_cmd_shim()
-    assert_version_runs_via_cmd(argv, cwd)
-    assert_serve_starts_and_tears_down(argv, cwd)
+    assert_resolves_and_runs()
+    assert_wrapped_teardown_frees_port()
     print("windows bw .cmd smoke passed")
 
 
