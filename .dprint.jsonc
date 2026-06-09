@@ -3,8 +3,8 @@
 	"dockerfile": { "associations": ["!*.ts"] },
 	"excludes": ["**/*fixtures*/**", "**/*snapshots*/**"],
 	"markdown": {
-		"lineWidth": 150,
-		"textWrap": "maintain",
+		"lineWidth": 120,
+		"textWrap": "always",
 	},
 	"exec": {
 		"commands": [{
