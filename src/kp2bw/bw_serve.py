@@ -94,6 +94,19 @@ BW_NOT_FOUND_MSG: str = (
     "See https://bitwarden.com/help/cli/ for installation instructions."
 )
 
+# Pointer shown when `bw unlock` fails. kp2bw never runs `bw login` itself
+# (that is the user's step), so the unlock failure is the earliest point it can
+# flag the most common unfixable cause: a self-hosted server older than the
+# `bw` CLI. Recent CLIs log in via `/identity/accounts/prelogin/password`, a
+# route servers before Vaultwarden 1.36.0 answer with 404, so login never
+# succeeds and the subsequent unlock cannot find a session.
+BW_LOGIN_COMPAT_HINT: str = (
+    "If you cannot log in at all -- e.g. `bw login` returns HTTP 404 on "
+    "/identity/accounts/prelogin/password -- your self-hosted server is likely "
+    "older than your `bw` CLI. See TROUBLESHOOTING.md "
+    '("Login fails with a 404") for the server/CLI compatibility cutoff.'
+)
+
 
 def _is_missing_item_error(status_code: int, message: object) -> bool:
     """True when an attachment upload failed because the item wasn't found.
@@ -527,6 +540,7 @@ class BitwardenServeClient:
             if stderr_text:
                 message += f"; stderr: {stderr_text}"
             logger.warning(message)
+            logger.warning(BW_LOGIN_COMPAT_HINT)
             return None
         session = result.stdout.strip()
         if session:

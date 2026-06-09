@@ -393,3 +393,5 @@ $RECYCLE.BIN/
 # End of https://gitignore.kjanat.com/api/python,node,linux,macos,windows
 
 .envrc
+.env
+!.env.example

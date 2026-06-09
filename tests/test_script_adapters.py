@@ -35,6 +35,10 @@ def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 
 
+def test_cli_env_script() -> None:
+    _run_script_main("cli_env_test.py")
+
+
 def test_convert_ref_resolution_script() -> None:
     _run_script_main("convert_ref_resolution_test.py")
 

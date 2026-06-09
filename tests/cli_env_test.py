@@ -1,0 +1,99 @@
+import logging
+import os
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+from typing import ClassVar
+from unittest import mock
+
+from kp2bw import cli
+
+# Environment kp2bw reads; every key is saved and restored around the run.
+_MANAGED_ENV = (
+    "KP2BW_KEEPASS_FILE",
+    "KP2BW_KEEPASS_PASSWORD",
+    "KP2BW_BITWARDEN_PASSWORD",
+    "KP2BW_YES",
+    "KP2BW_LOG_DIR",
+)
+
+
+class _CapturingConverter:
+    """Stand-in for the real Converter that records its constructor kwargs."""
+
+    captured: ClassVar[dict[str, object]] = {}
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).captured = dict(kwargs)
+
+    def convert(self) -> int:
+        return 0
+
+
+def _reset_root_logging() -> None:
+    """Detach and close the file handler main() left on the root logger."""
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        handler.close()
+
+
+def assert_dotenv_supplies_keepass_file() -> None:
+    """A `.env` in the CWD auto-loads and its KP2BW_KEEPASS_FILE drives the run.
+
+    Exercises the whole new path end to end through the public entry point:
+    dotenv autoload -> KP2BW_KEEPASS_FILE -> optional positional fallback ->
+    Converter(keepass_file_path=...).
+    """
+    original_cwd = Path.cwd()
+    original_argv = sys.argv
+    saved_env = {key: os.environ.get(key) for key in _MANAGED_ENV}
+
+    tmp = tempfile.mkdtemp()
+    try:
+        # The db path comes ONLY from .env; secrets/flags go through the real
+        # environment so getpass, the confirm prompt and the bw availability
+        # check never block. KP2BW_KEEPASS_FILE must be absent so .env supplies it.
+        _ = os.environ.pop("KP2BW_KEEPASS_FILE", None)
+        os.environ["KP2BW_KEEPASS_PASSWORD"] = "kp-pw"
+        os.environ["KP2BW_BITWARDEN_PASSWORD"] = "bw-pw"
+        os.environ["KP2BW_YES"] = "1"
+        os.environ["KP2BW_LOG_DIR"] = tmp  # keep the run's log inside the temp dir
+
+        _ = (Path(tmp) / ".env").write_text(
+            "KP2BW_KEEPASS_FILE=from-dotenv.kdbx\n", encoding="utf-8"
+        )
+        os.chdir(tmp)
+
+        sys.argv = ["kp2bw"]
+        # Neutralize the side-effecting downstream: no real bw, no real migration.
+        # patch.object auto-restores both names when the block exits.
+        with (
+            mock.patch.object(cli, "ensure_bw_available", lambda: None),
+            mock.patch.object(cli, "Converter", _CapturingConverter),
+        ):
+            cli.main()
+
+        db_path = _CapturingConverter.captured.get("keepass_file_path")
+        if db_path != "from-dotenv.kdbx":
+            raise AssertionError(f"expected db path from .env, got {db_path!r}")
+    finally:
+        sys.argv = original_argv
+        _reset_root_logging()  # release the log file before removing the temp dir
+        os.chdir(original_cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+        for key, value in saved_env.items():
+            if value is None:
+                _ = os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def main() -> None:
+    assert_dotenv_supplies_keepass_file()
+    print("cli env test passed")
+
+
+if __name__ == "__main__":
+    main()

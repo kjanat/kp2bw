@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
+from dotenv import find_dotenv, load_dotenv
 from rich.logging import RichHandler
 from rich.markup import escape
 
@@ -65,6 +66,24 @@ def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
     return os.environ.get(env_var)
 
 
+def _load_dotenv() -> str | None:
+    """Load a ``.env`` file (searched upward from the CWD) into ``os.environ``.
+
+    Returns the path that was loaded, or ``None`` when no ``.env`` is found.
+    ``usecwd=True`` anchors the search at the user's working directory rather
+    than this module's install location, so an installed ``kp2bw`` still picks
+    up the project ``.env``.  ``override`` is left at its default of ``False``
+    so a real shell environment variable always wins over a file entry: a
+    ``.env`` value simply occupies the env tier of the documented
+    CLI flag > env var > default precedence.
+    """
+    dotenv_path = find_dotenv(usecwd=True)
+    if not dotenv_path:
+        return None
+    _ = load_dotenv(dotenv_path)
+    return dotenv_path
+
+
 def _argparser() -> MyArgParser:
     """Build and return the CLI argument parser with all flags and env-var support."""
     parser = MyArgParser(description="KeePass to Bitwarden converter")
@@ -77,7 +96,11 @@ def _argparser() -> MyArgParser:
     )
 
     parser.add_argument(
-        "keepass_file", metavar="FILE", help="Path to your KeePass 2.x db."
+        "keepass_file",
+        metavar="FILE",
+        nargs="?",
+        default=None,
+        help="Path to your KeePass 2.x db (env: KP2BW_KEEPASS_FILE)",
     )
     parser.add_argument(
         "-k",
@@ -330,9 +353,14 @@ def _configure_logging(*, verbose: bool, debug: bool) -> Path | None:
 
 def main() -> None:
     """Entry point: parse arguments, resolve env vars, and run the converter."""
+    # Load .env before reading any environment variable so file-provided values
+    # are visible to the resolution below; a real shell env var still wins.
+    dotenv_path = _load_dotenv()
+
     args: Namespace = _argparser().parse_args()
 
     # string options: CLI > env > None/default
+    args.keepass_file = _with_env(args.keepass_file, "KP2BW_KEEPASS_FILE")
     args.kp_pw = _with_env(args.kp_pw, "KP2BW_KEEPASS_PASSWORD")
     args.kp_keyfile = _with_env(args.kp_keyfile, "KP2BW_KEEPASS_KEYFILE")
     args.bw_pw = _with_env(args.bw_pw, "KP2BW_BITWARDEN_PASSWORD")
@@ -439,6 +467,14 @@ def main() -> None:
     verbose = verbose if verbose is not None else False
     debug = debug if debug is not None else False
 
+    if not args.keepass_file:
+        _ = sys.stderr.write(
+            "ERROR: KeePass database path is required "
+            "(positional FILE or KP2BW_KEEPASS_FILE)\n\n"
+        )
+        _argparser().print_help()
+        sys.exit(2)
+
     if args.bw_coll and not args.bw_org:
         _ = sys.stderr.write(
             "ERROR: --bitwarden-collection requires --bitwarden-org\n\n"
@@ -452,6 +488,8 @@ def main() -> None:
     #   -d      : DEBUG for everything  — raw format, httpx included on console
     # A full-detail DEBUG log is always written to a file regardless of the above.
     log_path = _configure_logging(verbose=verbose, debug=debug)
+    if dotenv_path:
+        logger.info(f"Loaded environment from {dotenv_path}")
     if log_path is not None:
         logger.info(f"Writing full debug log to {log_path}")
 
@@ -486,6 +524,9 @@ def main() -> None:
         args.kp_pw, "Please enter your KeePass 2.x db password: "
     )
     bw_pw: str = _read_password(args.bw_pw, "Please enter your Bitwarden password: ")
+
+    # The CLI/env validation above guarantees a database path.
+    assert args.keepass_file is not None
 
     # call converter
     c = Converter(
