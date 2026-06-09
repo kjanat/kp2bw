@@ -80,6 +80,29 @@ src/kp2bw/
   loss. `--include-oversize-secrets` (`KP2BW_INCLUDE_OVERSIZE_SECRETS`,
   `Converter(include_oversize_secrets=...)`, default off) opts into offloading
   those secrets to their attachment too.
-- Dedup index is org-scoped when `--bitwarden-org` is set: `_build_dedup_index()` passes `organization_id=self._org_id` to `list_items()`, which appends `organizationId` as a query param to `/list/object/items`. When `org_id` is `None` (personal vault), no filter is applied and all vault items are indexed. This prevents personal vault entries from shadowing an empty org vault during migration.
-- When a fixed `--bitwarden-collection` is given, the dedup index is further scoped to that collection via `collection_id`. Items in other collections are treated as new.
+- Dedup keys on a **stable identity**, not `(folder, title)`. Every migrated
+  item carries a hidden `KP2BW_ID` custom field holding the source KeePass entry
+  UUID (stamped in `_add_bw_entry_to_entries_dict`, read by
+  `bw_serve.item_kp2bw_id`, and excluded from `_fields_signature` so it never
+  triggers a spurious update). `_build_dedup_index()` builds `_by_uuid` (stamped
+  items) plus `_legacy_by_folder_name` (unstamped **login** items only).
+  Per entry, `convert` matches by UUID (`get_item_by_uuid`); failing that it
+  claims one unstamped legacy item by `(folder, name)` (`claim_legacy_item`) and
+  `force_update`s it to backfill the stamp; failing that it creates a new item.
+  This stops distinct same-titled entries from collapsing onto one item (data
+  loss) and keeps re-runs idempotent across title/folder edits. The legacy
+  adoption is a one-time path for vaults imported before stable identity.
+- Dedup is org-scoped when `--bitwarden-org` is set and collection-scoped when a
+  fixed `--bitwarden-collection` is given: `_build_dedup_index()` /
+  `list_items()` pass `organization_id` / `collection_id`. Personal vault
+  (both `None`) indexes all visible items.
+- `bw serve` teardown is **port-based** on Windows: a shim-launched serve runs as
+  a `node` grandchild that `taskkill /T` does not reliably reap, so
+  `terminate_serve(port=)` / `close()` also kill whatever still `LISTEN`s on the
+  serve port (`parse_listening_pids` → `_kill_port_listeners`). Without this,
+  orphaned serves accumulate and deadlock the shared `bw` app-data on later runs.
+- A full DEBUG log is always written to a per-user file (`_configure_logging` in
+  `cli.py`; `%LOCALAPPDATA%/kp2bw/logs`, override `KP2BW_LOG_FILE` /
+  `KP2BW_LOG_DIR`) independent of console verbosity. `bw serve` HTTP errors carry
+  the response body via `format_http_error` (no more opaque `HTTP 400`).
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via `codegen-check.yml`.

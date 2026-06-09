@@ -48,6 +48,31 @@ _RESPONSE_ONLY_ITEM_KEYS: frozenset[str] = frozenset({
     "attachments",
 })
 
+# Bitwarden item type for login entries (1=login, 2=secureNote, 3=card,
+# 4=identity).  kp2bw only ever creates/adopts login items, so non-login items
+# sharing a name are a user's own data and must never be adopted.
+_BW_ITEM_TYPE_LOGIN: int = 1
+
+# Hidden custom-field name kp2bw stamps on every item it creates, carrying the
+# source KeePass entry UUID.  This is the *stable identity key*: dedup matches on
+# it so two distinct entries that merely share a ``(folder, title)`` never
+# collapse onto one item, and re-runs stay idempotent across title/folder edits.
+KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
+
+
+def item_kp2bw_id(item: BwItemResponse) -> str | None:
+    """Return *item*'s KeePass-UUID stamp, or ``None`` if it is unstamped.
+
+    Reads the hidden ``KP2BW_ID`` custom field written by :mod:`kp2bw.convert`.
+    An unstamped item is a legacy import (pre-stable-identity) eligible for a
+    one-time ``(folder, name)`` adoption that backfills the stamp.
+    """
+    for field in item.get("fields") or []:
+        if field.get("name") == KP2BW_ID_FIELD_NAME:
+            return field.get("value") or None
+    return None
+
+
 # Actionable message shown when the Bitwarden CLI cannot be located.
 BW_NOT_FOUND_MSG: str = (
     "Bitwarden CLI ('bw') not found on your PATH. Install it and make sure "
@@ -271,9 +296,10 @@ class BitwardenServeClient:
     _previous_sigterm: Callable[[int, FrameType | None], Any] | int | None
     _previous_sigint: Callable[[int, FrameType | None], Any] | int | None
     _folders: dict[str, str]  # name → id cache
-    _existing_entries: dict[
-        str | None, dict[str, BwItemResponse]
-    ]  # folder_name → {name → item}
+    _by_uuid: dict[str, BwItemResponse]  # KP2BW_ID stamp → item (stable identity)
+    _legacy_by_folder_name: dict[
+        str | None, dict[str, list[BwItemResponse]]
+    ]  # unstamped login items: folder → name → [items], for one-time adoption
     _collections: dict[str, str] | None  # name → id cache (None if no org)
     _org_id: str | None
     _collection_id: str | None  # fixed target collection for dedup scoping
@@ -312,7 +338,8 @@ class BitwardenServeClient:
         self._collection_id = collection_id
 
         self._folders = {}
-        self._existing_entries = {}
+        self._by_uuid = {}
+        self._legacy_by_folder_name = {}
         self._collections = None
 
         # Register cleanup handlers early so close() is safe to call at
@@ -329,9 +356,9 @@ class BitwardenServeClient:
         self._unlock(password)
         self._sync()
 
-        # Populate folder cache and dedup index from existing vault state.
+        # Populate folder cache and dedup indexes from existing vault state.
         self._folders = self.list_folders()
-        self._existing_entries = self._build_dedup_index()
+        self._build_dedup_index()
 
         # Load existing org collections if an org ID was provided.
         if self._org_id:
@@ -689,66 +716,92 @@ class BitwardenServeClient:
     # Deduplication
     # ------------------------------------------------------------------
 
-    def _build_dedup_index(self) -> dict[str | None, dict[str, BwItemResponse]]:
-        """Build a ``{folder_name: {item_name: item}}`` index for O(1) dedup.
+    def _build_dedup_index(self) -> None:
+        """Build the stable-identity dedup indexes from existing vault state.
 
-        Stores the full item response so callers can inspect ``collectionIds``
-        and call :meth:`update_item` without an extra GET.
+        Populates two structures:
 
-        Scoping rules (most-specific filter wins):
+        * :attr:`_by_uuid` — ``{KP2BW_ID stamp: item}`` for every item kp2bw has
+          already stamped.  This is the authoritative identity map: a KeePass
+          entry is matched to its Bitwarden item by UUID, so distinct entries
+          sharing a ``(folder, title)`` never collapse and re-runs are idempotent.
+        * :attr:`_legacy_by_folder_name` — ``{folder: {name: [items]}}`` of
+          *unstamped login* items (legacy imports made before stable identity).
+          A KeePass entry with no UUID match claims one of these by
+          ``(folder, name)`` and backfills the stamp — a one-time adoption that
+          avoids re-creating the whole vault on the first post-upgrade run.
+
+        Items are stored in full so callers can inspect ``collectionIds`` and
+        call :meth:`update_item` without an extra GET.  Scoping (most-specific
+        filter wins) is unchanged from the previous ``(folder, name)`` index:
 
         * **Fixed collection** (``collection_id`` set): only items already in
-          that collection are indexed.  Items in other collections are treated
-          as new, so they are created — not silently skipped — when the user
-          imports into a specific target collection.
+          that collection are indexed.
         * **Org-only** (``org_id`` set, no ``collection_id``): items belonging
-          to the organisation are indexed.  Personal-vault entries don't shadow
-          an empty org vault.  Collection membership of existing items can be
-          updated via :meth:`update_item` (collection-aware dedup).
-        * **Personal vault** (both ``None``): all visible items are indexed.
-          Org-shared items visible to the user may produce false positives
-          (pre-existing limitation, intentionally asymmetric).
+          to the organisation; personal entries don't shadow an empty org vault.
+        * **Personal vault** (both ``None``): all visible items.
+
+        Non-login items are excluded from the legacy index: kp2bw only ever
+        creates login items, so a non-login item sharing a name is a user's own
+        item and must never be adopted or mutated.
         """
         id_to_name: dict[str, str] = {
             fid: fname for fname, fid in self._folders.items()
         }
-        index: dict[str | None, dict[str, BwItemResponse]] = {}
+        by_uuid: dict[str, BwItemResponse] = {}
+        legacy: dict[str | None, dict[str, list[BwItemResponse]]] = {}
         for item in self.list_items(
             organization_id=self._org_id,
             collection_id=self._collection_id,
         ):
-            folder_id: str | None = item.get("folderId") or None
-            folder_name = id_to_name.get(folder_id) if folder_id else None
+            kp_uuid = item_kp2bw_id(item)
+            if kp_uuid:
+                by_uuid[kp_uuid] = item
+                continue
+            # Unstamped legacy item — index for one-time (folder, name) adoption,
+            # but only login items (kp2bw never touches a user's other items).
+            if item.get("type") != _BW_ITEM_TYPE_LOGIN:
+                continue
             name: str = item.get("name", "")
             if not name:
                 continue
-            index.setdefault(folder_name, {})[name] = item
-        return index
+            folder_id: str | None = item.get("folderId") or None
+            folder_name = id_to_name.get(folder_id) if folder_id else None
+            legacy.setdefault(folder_name, {}).setdefault(name, []).append(item)
+        self._by_uuid = by_uuid
+        self._legacy_by_folder_name = legacy
 
-    def entry_exists(self, folder: str | None, name: str) -> bool:
-        """Check whether an entry with *name* already exists in *folder*."""
-        return name in self._existing_entries.get(folder, {})
+    def get_item_by_uuid(self, kp_uuid: str) -> BwItemResponse | None:
+        """Return the item stamped with *kp_uuid*, or ``None`` (stable identity)."""
+        return self._by_uuid.get(kp_uuid)
 
-    def get_existing_item(self, folder: str | None, name: str) -> BwItemResponse | None:
-        """Return the cached item response for *name* in *folder*, or ``None``."""
-        return self._existing_entries.get(folder, {}).get(name)
+    def claim_legacy_item(self, folder: str | None, name: str) -> BwItemResponse | None:
+        """Claim one unstamped legacy item matching ``(folder, name)``, or ``None``.
+
+        Pops the item so a second KeePass entry sharing the ``(folder, name)``
+        cannot claim it too — that sibling falls through to creation instead,
+        recovering an item the old ``(folder, title)`` dedup would have collapsed.
+        The caller backfills the ``KP2BW_ID`` stamp onto the claimed item.
+        """
+        bucket = self._legacy_by_folder_name.get(folder, {}).get(name)
+        if not bucket:
+            return None
+        return bucket.pop()
 
     def refresh_dedup_index(self) -> None:
-        """Re-query the vault and rebuild the dedup index."""
+        """Re-query the vault and rebuild the dedup indexes."""
         self._folders = self.list_folders()
-        self._existing_entries = self._build_dedup_index()
+        self._build_dedup_index()
 
-    def update_dedup_entry(
-        self, folder: str | None, name: str, item: BwItemResponse
-    ) -> None:
-        """Update a single cached entry after an in-place :meth:`update_item` call.
+    def update_dedup_entry(self, kp_uuid: str, item: BwItemResponse) -> None:
+        """Refresh the cached item for *kp_uuid* after an in-place update.
 
-        Avoids a full :meth:`refresh_dedup_index` round-trip when only one
-        item's metadata (e.g. ``collectionIds``) has changed.  Must be called
-        after every :meth:`update_item` so subsequent ``get_existing_item``
-        lookups on the same ``(folder, name)`` key return fresh data.
+        Keeps :attr:`_by_uuid` current after :meth:`update_item` so a later
+        lookup of the same stamp returns fresh data.  Each KeePass entry has a
+        unique UUID and is processed once per run, so this is defensive — it
+        matters only if a future flow revisits a stamp within a single run.
         """
-        self._existing_entries.setdefault(folder, {})[name] = item
+        self._by_uuid[kp_uuid] = item
 
     # ------------------------------------------------------------------
     # CRUD — org collections

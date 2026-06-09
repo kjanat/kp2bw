@@ -30,6 +30,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
+from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME
+
 # A concrete recursive type for parsed JSON. Laundering ``json.loads``'s ``Any``
 # into this once (``as_object`` / ``parse_object``) means every later
 # ``isinstance`` narrows to a fully-known type (e.g. ``dict[str, JsonValue]``)
@@ -242,7 +244,14 @@ def _norm_item(
     login = _norm_login(login_raw) if isinstance(login_raw, dict) else None
 
     fields = sorted(
-        (_norm_field(f) for f in _objects(raw, "fields")),
+        (
+            _norm_field(f)
+            for f in _objects(raw, "fields")
+            # kp2bw's stable-identity stamp is volatile per run (a KeePass UUID)
+            # and is implementation metadata, not migrated content -- drop it so
+            # the golden stays deterministic across runs.
+            if f.get("name") != KP2BW_ID_FIELD_NAME
+        ),
         key=lambda f: (f["name"] or "", f["type"], f["value"] or ""),
     )
     attachments = _norm_attachments(

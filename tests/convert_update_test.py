@@ -57,10 +57,19 @@ class UpdateTestConverter(Converter):
         attachments: list[AttachmentItem],
         *,
         fixed_coll_id: str | None,
+        kp_uuid: str = "kp-test-uuid",
+        force_update: bool = False,
     ) -> tuple[str, list[AttachmentItem], dict[str, str]]:
         """Public shim for existing-item reconciliation."""
         return self._reconcile_existing_item(
-            bw, existing, folder, bw_item, attachments, fixed_coll_id=fixed_coll_id
+            bw,
+            existing,
+            folder,
+            bw_item,
+            attachments,
+            fixed_coll_id=fixed_coll_id,
+            kp_uuid=kp_uuid,
+            force_update=force_update,
         )
 
 
@@ -132,7 +141,7 @@ class FakeBw:
         fail_get_attachment: bool = False,
     ) -> None:
         self.updates: list[tuple[str, BwItemResponse]] = []
-        self.dedup_updates: list[tuple[str | None, str]] = []
+        self.dedup_updates: list[str] = []
         self.deletes: list[tuple[str, str]] = []
         self._attachments = existing_attachments or []
         self._attachment_bytes = attachment_bytes or {}
@@ -145,10 +154,8 @@ class FakeBw:
             raise BitwardenClientError("simulated update rejection")
         self.updates.append((item_id, item))
 
-    def update_dedup_entry(
-        self, folder: str | None, name: str, item: BwItemResponse
-    ) -> None:
-        self.dedup_updates.append((folder, name))
+    def update_dedup_entry(self, kp_uuid: str, item: BwItemResponse) -> None:
+        self.dedup_updates.append(kp_uuid)
 
     def get_item(self, item_id: str) -> BwItemResponse:
         if self._fail_get:
@@ -503,6 +510,51 @@ def assert_non_login_collision_is_not_mutated() -> None:
         raise AssertionError("non-login collision must not issue a PUT")
 
 
+def assert_adoption_forces_stamp_put() -> None:
+    conv = UpdateTestConverter()
+    bw = FakeBw(existing_attachments=[])
+    # Content is identical (no diff), but adopting a legacy item must still PUT
+    # to backfill the KP2BW_ID stamp -- force_update bypasses the diff gate.
+    outcome, _, _ = conv.reconcile(
+        _as_bw(bw),
+        _make_existing(),
+        "folder-1",
+        _make_desired(),
+        [],
+        fixed_coll_id=None,
+        kp_uuid="kp-uuid-9",
+        force_update=True,
+    )
+    if outcome != "updated":
+        raise AssertionError(
+            f"adoption must force a stamping PUT despite no content change, got {outcome!r}"
+        )
+    if len(bw.updates) != 1:
+        raise AssertionError("adoption must issue exactly one PUT")
+    if bw.dedup_updates != ["kp-uuid-9"]:
+        raise AssertionError(
+            f"dedup cache must be refreshed under the kp_uuid, got {bw.dedup_updates!r}"
+        )
+
+
+def assert_no_update_skips_forced_stamp() -> None:
+    conv = UpdateTestConverter(update_existing=False)
+    bw = FakeBw(existing_attachments=[])
+    # Even adoption's forced stamp must respect --no-update: no PUT at all.
+    outcome, _, _ = conv.reconcile(
+        _as_bw(bw),
+        _make_existing(),
+        "folder-1",
+        _make_desired(),
+        [],
+        fixed_coll_id=None,
+        kp_uuid="kp-uuid-9",
+        force_update=True,
+    )
+    if outcome != "skipped" or bw.updates:
+        raise AssertionError("--no-update must not PUT even when adoption forces it")
+
+
 def main() -> None:
     """Run the script-style assertions and report success."""
     assert_identical_content_is_idempotent()
@@ -524,6 +576,8 @@ def main() -> None:
     assert_rejected_update_is_non_fatal()
     assert_no_update_flag_restores_skip()
     assert_non_login_collision_is_not_mutated()
+    assert_adoption_forces_stamp_put()
+    assert_no_update_skips_forced_stamp()
     print("convert update test passed")
 
 

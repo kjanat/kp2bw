@@ -19,7 +19,7 @@ from rich.progress import (
 
 from . import VERBOSE
 from ._console import console
-from .bw_serve import BitwardenServeClient
+from .bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient
 from .bw_types import (
     BwFido2Credential,
     BwField,
@@ -356,6 +356,14 @@ class Converter:
         if self._migrate_metadata:
             custom_properties.update(self._build_metadata_fields(entry))
 
+        # Stamp the stable identity marker — always, independent of --metadata.
+        # It carries the source KeePass entry UUID as a hidden field so dedup
+        # keys on it instead of the mutable (folder, title); see
+        # bw_serve.item_kp2bw_id / _build_dedup_index. Excluded from the content
+        # diff (_fields_signature) so it never makes a re-run look "changed".
+        entry_uuid = str(entry.uuid).replace("-", "").upper()
+        custom_properties[KP2BW_ID_FIELD_NAME] = (entry_uuid, 1)
+
         # Build FIDO2/passkey credentials from KeePassXC attributes
         fido2_credentials = self._build_fido2_credentials(entry)
         if fido2_credentials:
@@ -426,7 +434,8 @@ class Converter:
         if entry.notes and len(entry.notes) > MAX_BW_ITEM_LENGTH:
             attachments.append(("notes", entry.notes))
 
-        entry_key: str = str(entry.uuid).replace("-", "").upper()
+        # Same value stamped as KP2BW_ID above; it is this entry's dedup key.
+        entry_key: str = entry_uuid
         if entry.attachments:
             attachments += entry.attachments
 
@@ -740,11 +749,17 @@ class Converter:
     def _fields_signature(
         fields: list[BwField] | None,
     ) -> list[tuple[str, str, int]]:
-        """Order-independent (name, value, type) signature of custom fields."""
+        """Order-independent (name, value, type) signature of custom fields.
+
+        The ``KP2BW_ID`` identity stamp is excluded: it is kp2bw-managed metadata,
+        not user content, so it must never make a re-run look "changed" (and on a
+        legacy item it is absent, while the desired item always carries it).
+        """
         return sorted(
             (
                 (f.get("name") or "", f.get("value") or "", f.get("type") or 0)
                 for f in (fields or [])
+                if (f.get("name") or "") != KP2BW_ID_FIELD_NAME
             ),
             key=lambda t: (t[0], t[2], t[1]),
         )
@@ -887,6 +902,8 @@ class Converter:
         attachments: list[AttachmentItem],
         *,
         fixed_coll_id: str | None,
+        kp_uuid: str,
+        force_update: bool = False,
     ) -> tuple[
         Literal["updated", "collection", "skipped", "failed"],
         list[AttachmentItem],
@@ -901,6 +918,12 @@ class Converter:
         not have yet plus those whose content changed; and *stale_by_name* maps
         a changed file's name to the id of the stale copy to delete once its
         replacement has been uploaded.
+
+        *kp_uuid* is the source entry's stable id; it keys the dedup cache update
+        after a PUT.  *force_update* makes the content PUT fire even when the
+        content is unchanged -- used when adopting a legacy item so its missing
+        ``KP2BW_ID`` stamp is backfilled.  It still respects ``--no-update`` (the
+        PUT is gated by ``self._update_existing``).
         """
         name = bw_item["name"]
         item_id = existing["id"]
@@ -922,10 +945,12 @@ class Converter:
         try:
             # Content sync: PUT only when the KeePass-derived content changed
             # (keeps re-runs idempotent).
-            if self._update_existing and self._content_differs(existing, bw_item):
+            if self._update_existing and (
+                force_update or self._content_differs(existing, bw_item)
+            ):
                 payload = self._build_update_payload(existing, bw_item)
                 bw.update_item(item_id, payload)
-                bw.update_dedup_entry(folder, name, payload)
+                bw.update_dedup_entry(kp_uuid, payload)
                 logger.log(VERBOSE, f"-- Entry {name!r}: content updated from KeePass")
                 outcome = "updated"
             elif not fixed_coll_id:
@@ -941,9 +966,9 @@ class Converter:
                     updated_item = copy.copy(existing)
                     updated_item["collectionIds"] = existing_colls + missing
                     bw.update_item(item_id, updated_item)
-                    # Keep the cache fresh so a second KeePass entry with the
-                    # same (folder, name) doesn't recompute stale collectionIds.
-                    bw.update_dedup_entry(folder, name, updated_item)
+                    # Keep the cache fresh so a later lookup of this stamp does
+                    # not recompute stale collectionIds.
+                    bw.update_dedup_entry(kp_uuid, updated_item)
                     logger.log(
                         VERBOSE,
                         f"-- Entry {name!r}: added to {len(missing)} collection(s)",
@@ -1055,10 +1080,17 @@ class Converter:
                 # Resolve collection (mutates bw_item)
                 self._resolve_collection(bw, bw_item, firstlevel)
 
-                # An item with this (folder, name) already exists: sync any
-                # KeePass changes onto it (content, collection membership, and
-                # missing attachments) instead of blindly skipping it.
-                existing = bw.get_existing_item(folder, bw_item["name"])
+                # Stable-identity dedup: match this entry to its Bitwarden item
+                # by the KeePass UUID stamp first; failing that, adopt an
+                # unstamped legacy item sharing (folder, name) and backfill the
+                # stamp. Only when neither matches is a new item created — so
+                # distinct entries that share a title each get their own item
+                # instead of collapsing onto one (the old (folder, title) bug).
+                existing = bw.get_item_by_uuid(key)
+                adopted = False
+                if existing is None:
+                    existing = bw.claim_legacy_item(folder, bw_item["name"])
+                    adopted = existing is not None
                 if existing is not None:
                     item_id = existing["id"]
                     outcome, upload_atts, stale_by_name = self._reconcile_existing_item(
@@ -1068,6 +1100,8 @@ class Converter:
                         bw_item,
                         attachments,
                         fixed_coll_id=fixed_coll_id,
+                        kp_uuid=key,
+                        force_update=adopted,
                     )
                     if outcome == "updated":
                         n_updated += 1
