@@ -43,6 +43,7 @@ kp2bw/
 ## CONVENTIONS
 
 - Python baseline is `>=3.14` in root package; stubs package intentionally targets `>=3.11`.
+- Formatting is **dprint** (config `.dprint.jsonc`) — run `dprint fmt`; never `tombi`/`taplo` or `uv`'s own output for TOML. After dependency edits run `uv lock`; type-stub packages go in the `stubs` dependency-group, not loose in `dev`.
 - Ruff runs in preview mode, target `py314`; stubs package has separate Ruff/Pyright config.
 - Intra-package imports are relative (`from .module import X`).
 - `bw serve` is localhost-only and password is passed via env var, not CLI arg.

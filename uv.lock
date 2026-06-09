@@ -419,6 +419,7 @@ lint = [
 ]
 stubs = [
     { name = "pykeepass-stubs" },
+    { name = "types-pyyaml" },
 ]
 test = [
     { name = "coverage" },
@@ -456,7 +457,10 @@ lint = [
     { name = "tombi", specifier = ">=0.7.32" },
     { name = "ty", specifier = ">=0.0.18" },
 ]
-stubs = [{ name = "pykeepass-stubs", editable = "packages/pykeepass-stubs" }]
+stubs = [
+    { name = "pykeepass-stubs", editable = "packages/pykeepass-stubs" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260518" },
+]
 test = [
     { name = "coverage", specifier = ">=7.13.4" },
     { name = "pytest", specifier = ">=9.0.2" },
