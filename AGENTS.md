@@ -4,8 +4,8 @@ Generated: 2026-02-26 Commit: `59ba3c2` Branch: `master`
 
 ## OVERVIEW
 
-KeePass to Bitwarden migration CLI. Python runtime package + workspace stubs package.
-Core flow migrates entries/folders/attachments/passkeys with `bw serve` as primary transport.
+KeePass to Bitwarden migration CLI. Python runtime package + workspace stubs package. Core flow migrates
+entries/folders/attachments/passkeys with `bw serve` as primary transport.
 
 ## STRUCTURE
 
@@ -43,11 +43,14 @@ kp2bw/
 ## CONVENTIONS
 
 - Python baseline is `>=3.14` in root package; stubs package intentionally targets `>=3.11`.
+- Formatting is **dprint** (config `.dprint.jsonc`) — run `dprint fmt`; never `tombi`/`taplo` or `uv`'s own output for
+  TOML. After dependency edits run `uv lock`; type-stub packages go in the `stubs` dependency-group, not loose in `dev`.
 - Ruff runs in preview mode, target `py314`; stubs package has separate Ruff/Pyright config.
 - Intra-package imports are relative (`from .module import X`).
 - `bw serve` is localhost-only and password is passed via env var, not CLI arg.
 - Tests are executable scripts (`main()` + assertions), not pytest collection.
-- `tests/test_script_adapters.py` provides pytest wrappers so `pytest` collects tests; script files remain the source-of-truth.
+- `tests/test_script_adapters.py` provides pytest wrappers so `pytest` collects tests; script files remain the
+  source-of-truth.
 - Heavy adapters are opt-in: set `KP2BW_RUN_PACKAGING_TESTS=1` and/or `KP2BW_RUN_E2E_TESTS=1`.
 - Workflow check jobs call `scripts/*.mjs` via `actions/github-script`; script output keys are workflow contracts.
 
@@ -58,7 +61,8 @@ kp2bw/
 - Never use bare `Exception`; use project exceptions (`BitwardenClientError`, `ConversionError`).
 - Do not rewrite valid Python 3.14 comma-form `except X, Y:` syntax to tuple form.
 - Do not assume publish-on-tag for main package; main publish is release-event driven.
-- Do not change `scripts/version-check-shared.mjs` output shape (`name`, `version`, `pypi_url`) without workflow updates.
+- Do not change `scripts/version-check-shared.mjs` output shape (`name`, `version`, `pypi_url`) without workflow
+  updates.
 
 ## UNIQUE STYLES
 
@@ -103,4 +107,5 @@ uv version --package pykeepass-stubs --bump stable [--dry-run]
 - Ignore transient dirs in analysis (`.venv/`, `.ruff_cache/`, `node_modules/`, `__pycache__/`).
 - If changing release/version behavior, update both workflows and `scripts/*.mjs` together.
 - For full `uv version` bump matrix/examples, use global skill `uv-versioning`.
-- Keep domain detail in child AGENTS files (`src/kp2bw`, `tests`, `scripts`, `packages/pykeepass-stubs`, `.github/workflows`).
+- Keep domain detail in child AGENTS files (`src/kp2bw`, `tests`, `scripts`, `packages/pykeepass-stubs`,
+  `.github/workflows`).

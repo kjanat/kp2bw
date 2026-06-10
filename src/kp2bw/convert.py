@@ -6,6 +6,7 @@ import time
 from itertools import islice
 from typing import Literal
 
+import yaml
 from pykeepass import Attachment, Entry, Group, PyKeePass
 from rich.progress import (
     BarColumn,
@@ -19,7 +20,7 @@ from rich.progress import (
 
 from . import VERBOSE
 from ._console import console
-from .bw_serve import BitwardenServeClient
+from .bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient
 from .bw_types import (
     BwFido2Credential,
     BwField,
@@ -39,6 +40,11 @@ KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
 # Bitwarden item type for login entries (1=login, 2=secureNote, 3=card,
 # 4=identity).  kp2bw only ever creates and content-syncs login items.
 BW_ITEM_TYPE_LOGIN: int = 1
+
+# Single custom field holding KeePass metadata Bitwarden has no native slot for
+# (tags, expiry) as readable YAML. Folds what used to be several rows into one,
+# and is omitted entirely when an entry has no such metadata.
+KP2BW_META_FIELD_NAME: str = "KP2BW_META"
 
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
 type AttachmentItem = Attachment | tuple[str, str]
@@ -60,6 +66,7 @@ def _print_summary(
     n_attachments: int,
     n_update_failed: int,
     n_attach_failed: int,
+    n_create_failed: int,
 ) -> None:
     """Print a final migration summary to the shared rich console."""
     m, s = divmod(int(elapsed), 60)
@@ -75,6 +82,7 @@ def _print_summary(
                 n_attachments,
                 n_update_failed,
                 n_attach_failed,
+                n_create_failed,
                 1,
             )
         )
@@ -90,6 +98,11 @@ def _print_summary(
         )
     if n_attachments:
         console.print(f"  [cyan]{n_attachments:{w}d}[/cyan] attachments uploaded")
+    if n_create_failed:
+        console.print(
+            f"  [red]{n_create_failed:{w}d}[/red] entries failed to create "
+            f"(see warnings above)"
+        )
     if n_update_failed:
         console.print(
             f"  [red]{n_update_failed:{w}d}[/red] entries failed to update "
@@ -293,25 +306,34 @@ class Converter:
             group = group.parentgroup
         return False
 
-    def _build_metadata_fields(self, entry: Entry) -> dict[str, FieldSpec]:
-        """Build extra custom fields for KeePass metadata (tags, expiry, timestamps)."""
-        fields: dict[str, FieldSpec] = {}
+    def _build_metadata_field(self, entry: Entry) -> FieldSpec | None:
+        """Build the single ``KP2BW_META`` field for KeePass metadata, as YAML.
 
-        # Tags
-        if entry.tags:
-            fields["KeePass Tags"] = (", ".join(entry.tags), 0)
+        Carries only the metadata Bitwarden has no native slot for and that we
+        keep -- tags and expiry -- as readable YAML.  KeePass ``Created``/
+        ``Modified`` timestamps are intentionally dropped: Bitwarden manages its
+        own creation/revision dates (which the API cannot backdate), so the
+        originals had no native home.  Returns ``None`` when the entry has
+        neither tags nor an expiry, so most items get no metadata field at all.
 
-        # Expiry
+        Serialised with PyYAML's ``safe_dump`` at ``allow_unicode=False`` so
+        every value is escaped correctly -- including control characters and the
+        YAML line-break code points (U+0085/U+2028/U+2029) that a hand-rolled
+        emitter silently corrupts.  Non-ASCII is escaped (e.g. ``"caf\\xE9"``) as
+        the price of that guarantee.  Sorted keys + KeePass tag order make the
+        output byte-stable for idempotent re-runs.
+        """
+        meta: dict[str, object] = {}
         if entry.expires and entry.expiry_time:
-            fields["Expires"] = (entry.expiry_time.isoformat(), 0)
-
-        # Timestamps
-        if entry.ctime:
-            fields["Created"] = (entry.ctime.isoformat(), 0)
-        if entry.mtime:
-            fields["Modified"] = (entry.mtime.isoformat(), 0)
-
-        return fields
+            meta["expires"] = entry.expiry_time.isoformat()
+        if entry.tags:
+            meta["tags"] = list(entry.tags)
+        if not meta:
+            return None
+        text: str = yaml.safe_dump(
+            meta, default_flow_style=False, allow_unicode=False, sort_keys=True
+        ).rstrip("\n")
+        return (text, 0)
 
     def _add_bw_entry_to_entries_dict(
         self, entry: Entry, custom_protected: list[str] | None
@@ -352,9 +374,21 @@ class Converter:
             else:
                 custom_properties[key] = (value, 0)
 
-        # Add metadata fields (tags, expiry, timestamps) if enabled
+        # Fold KeePass metadata (tags, expiry) into one KP2BW_META JSON field
+        # when enabled; omitted on entries with neither, so most items stay clean.
         if self._migrate_metadata:
-            custom_properties.update(self._build_metadata_fields(entry))
+            meta_field = self._build_metadata_field(entry)
+            if meta_field is not None:
+                custom_properties[KP2BW_META_FIELD_NAME] = meta_field
+
+        # Stamp the stable identity marker — always, independent of --metadata.
+        # A plain-text field carrying the source KeePass entry UUID so dedup keys
+        # on it instead of the mutable (folder, title); see bw_serve.item_kp2bw_id
+        # / _build_dedup_index. Excluded from the content diff (_fields_signature)
+        # so it never makes a re-run look "changed". Text, not hidden: it is an
+        # identifier, not a secret.
+        entry_uuid = str(entry.uuid).replace("-", "").upper()
+        custom_properties[KP2BW_ID_FIELD_NAME] = (entry_uuid, 0)
 
         # Build FIDO2/passkey credentials from KeePassXC attributes
         fido2_credentials = self._build_fido2_credentials(entry)
@@ -426,7 +460,8 @@ class Converter:
         if entry.notes and len(entry.notes) > MAX_BW_ITEM_LENGTH:
             attachments.append(("notes", entry.notes))
 
-        entry_key: str = str(entry.uuid).replace("-", "").upper()
+        # Same value stamped as KP2BW_ID above; it is this entry's dedup key.
+        entry_key: str = entry_uuid
         if entry.attachments:
             attachments += entry.attachments
 
@@ -713,6 +748,48 @@ class Converter:
             bw_item["collectionIds"] = [collection_id]
         return collection_id
 
+    def _resolve_collection_safely(
+        self,
+        bw: BitwardenServeClient,
+        bw_item: BwItemCreate,
+        firstlevel: str | None,
+    ) -> bool:
+        """Resolve+set the collection for *bw_item*, reporting failure non-fatally.
+
+        Returns ``True`` on success.  A :class:`BitwardenClientError` (e.g. the
+        org-collection POST is dropped or times out) is logged and reported as
+        ``False`` so the caller skips just this entry instead of aborting the
+        whole migration -- the same per-entry robustness the create and update
+        phases have (issue #24).
+        """
+        try:
+            self._resolve_collection(bw, bw_item, firstlevel)
+        except BitwardenClientError as exc:
+            logger.warning(
+                f"Could not resolve the collection for {bw_item.get('name', '?')!r}; "
+                f"skipping it this run (a re-run is safe): {exc}"
+            )
+            return False
+        return True
+
+    @staticmethod
+    def _sync_safely(bw: BitwardenServeClient) -> None:
+        """Run the pre-attachment sync, reporting failure non-fatally.
+
+        Freshly created item IDs can be momentarily unresolvable by ``bw serve``'s
+        attachment endpoint until a sync makes them visible.  A dropped sync is
+        non-fatal: the items are already created and :meth:`upload_attachment`
+        self-heals with its own sync-and-retry, so a failed pre-emptive sync must
+        not abort a run whose items already landed.
+        """
+        try:
+            bw.sync()
+        except BitwardenClientError as exc:
+            logger.warning(
+                f"Pre-attachment sync failed; continuing (uploads self-heal with "
+                f"their own sync-and-retry): {exc}"
+            )
+
     @staticmethod
     def _attachment_filename(att: AttachmentItem) -> str:
         """Return the Bitwarden filename an AttachmentItem materialises to.
@@ -740,11 +817,17 @@ class Converter:
     def _fields_signature(
         fields: list[BwField] | None,
     ) -> list[tuple[str, str, int]]:
-        """Order-independent (name, value, type) signature of custom fields."""
+        """Order-independent (name, value, type) signature of custom fields.
+
+        The ``KP2BW_ID`` identity stamp is excluded: it is kp2bw-managed metadata,
+        not user content, so it must never make a re-run look "changed" (and on a
+        legacy item it is absent, while the desired item always carries it).
+        """
         return sorted(
             (
                 (f.get("name") or "", f.get("value") or "", f.get("type") or 0)
                 for f in (fields or [])
+                if (f.get("name") or "") != KP2BW_ID_FIELD_NAME
             ),
             key=lambda t: (t[0], t[2], t[1]),
         )
@@ -887,6 +970,8 @@ class Converter:
         attachments: list[AttachmentItem],
         *,
         fixed_coll_id: str | None,
+        kp_uuid: str,
+        force_update: bool = False,
     ) -> tuple[
         Literal["updated", "collection", "skipped", "failed"],
         list[AttachmentItem],
@@ -901,6 +986,12 @@ class Converter:
         not have yet plus those whose content changed; and *stale_by_name* maps
         a changed file's name to the id of the stale copy to delete once its
         replacement has been uploaded.
+
+        *kp_uuid* is the source entry's stable id; it keys the dedup cache update
+        after a PUT.  *force_update* makes the content PUT fire even when the
+        content is unchanged -- used when adopting a legacy item so its missing
+        ``KP2BW_ID`` stamp is backfilled.  It still respects ``--no-update`` (the
+        PUT is gated by ``self._update_existing``).
         """
         name = bw_item["name"]
         item_id = existing["id"]
@@ -922,10 +1013,12 @@ class Converter:
         try:
             # Content sync: PUT only when the KeePass-derived content changed
             # (keeps re-runs idempotent).
-            if self._update_existing and self._content_differs(existing, bw_item):
+            if self._update_existing and (
+                force_update or self._content_differs(existing, bw_item)
+            ):
                 payload = self._build_update_payload(existing, bw_item)
                 bw.update_item(item_id, payload)
-                bw.update_dedup_entry(folder, name, payload)
+                bw.update_dedup_entry(kp_uuid, payload)
                 logger.log(VERBOSE, f"-- Entry {name!r}: content updated from KeePass")
                 outcome = "updated"
             elif not fixed_coll_id:
@@ -941,9 +1034,9 @@ class Converter:
                     updated_item = copy.copy(existing)
                     updated_item["collectionIds"] = existing_colls + missing
                     bw.update_item(item_id, updated_item)
-                    # Keep the cache fresh so a second KeePass entry with the
-                    # same (folder, name) doesn't recompute stale collectionIds.
-                    bw.update_dedup_entry(folder, name, updated_item)
+                    # Keep the cache fresh so a later lookup of this stamp does
+                    # not recompute stale collectionIds.
+                    bw.update_dedup_entry(kp_uuid, updated_item)
                     logger.log(
                         VERBOSE,
                         f"-- Entry {name!r}: added to {len(missing)} collection(s)",
@@ -991,7 +1084,8 @@ class Converter:
     def _create_bitwarden_items_for_entries(self) -> int:
         """Create entries via ``bw serve`` HTTP API and upload attachments.
 
-        Returns the count of non-fatal failures (rejected updates + uploads).
+        Returns the count of non-fatal failures (rejected creates + updates +
+        attachment uploads).
         """
         logger.info("Connecting and reading existing folders and entries")
 
@@ -1008,6 +1102,7 @@ class Converter:
         n_updated = 0
         n_collection_update = 0
         n_created = 0
+        n_create_failed = 0
         n_attachments = 0
         n_attach_failed = 0
         n_update_failed = 0
@@ -1052,13 +1147,25 @@ class Converter:
                     entry_value
                 )
 
-                # Resolve collection (mutates bw_item)
-                self._resolve_collection(bw, bw_item, firstlevel)
+                # Resolve collection (mutates bw_item). A dropped collection
+                # POST is non-fatal: skip just this entry rather than abort the
+                # whole loop and strand every entry after it (issue #24).
+                if not self._resolve_collection_safely(bw, bw_item, firstlevel):
+                    n_create_failed += 1
+                    progress.advance(task1)
+                    continue
 
-                # An item with this (folder, name) already exists: sync any
-                # KeePass changes onto it (content, collection membership, and
-                # missing attachments) instead of blindly skipping it.
-                existing = bw.get_existing_item(folder, bw_item["name"])
+                # Stable-identity dedup: match this entry to its Bitwarden item
+                # by the KeePass UUID stamp first; failing that, adopt an
+                # unstamped legacy item sharing (folder, name) and backfill the
+                # stamp. Only when neither matches is a new item created — so
+                # distinct entries that share a title each get their own item
+                # instead of collapsing onto one (the old (folder, title) bug).
+                existing = bw.get_item_by_uuid(key)
+                adopted = False
+                if existing is None:
+                    existing = bw.claim_legacy_item(folder, bw_item["name"])
+                    adopted = existing is not None
                 if existing is not None:
                     item_id = existing["id"]
                     outcome, upload_atts, stale_by_name = self._reconcile_existing_item(
@@ -1068,6 +1175,8 @@ class Converter:
                         bw_item,
                         attachments,
                         fixed_coll_id=fixed_coll_id,
+                        kp_uuid=key,
+                        force_update=adopted,
                     )
                     if outcome == "updated":
                         n_updated += 1
@@ -1112,8 +1221,17 @@ class Converter:
                     n_created += 1
                     progress.advance(task2)
 
+                def _on_create_failed(_key: str, _exc: BitwardenClientError) -> None:
+                    # A rejected create is non-fatal (issue #24): tally it and
+                    # advance the bar so a partial batch still completes the run.
+                    nonlocal n_create_failed
+                    n_create_failed += 1
+                    progress.advance(task2)
+
                 key_to_id = bw.create_items_batch(
-                    import_entries, on_item_created=_on_created
+                    import_entries,
+                    on_item_created=_on_created,
+                    on_item_failed=_on_create_failed,
                 )
             else:
                 key_to_id = {}
@@ -1148,7 +1266,7 @@ class Converter:
             # cache; sync so freshly created IDs are visible before uploading to
             # them. (upload_attachment also self-heals with a sync-and-retry.)
             if new_item_uploads:
-                bw.sync()
+                self._sync_safely(bw)
 
             if upload_items:
                 total_files = sum(len(fps) for _, fps in upload_items)
@@ -1189,14 +1307,15 @@ class Converter:
             n_attachments,
             n_update_failed,
             n_attach_failed,
+            n_create_failed,
         )
-        return n_update_failed + n_attach_failed
+        return n_update_failed + n_attach_failed + n_create_failed
 
     def convert(self) -> int:
         """Run the full KeePass-to-Bitwarden migration pipeline.
 
-        Returns the number of non-fatal failures (rejected entry updates plus
-        rejected attachment uploads); ``0`` means everything succeeded.
+        Returns the number of non-fatal failures (rejected entry creates plus
+        updates plus attachment uploads); ``0`` means everything succeeded.
         """
         # load keepass data from database
         self._load_keepass_data()

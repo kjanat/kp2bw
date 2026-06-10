@@ -16,8 +16,10 @@ from types import FrameType, TracebackType
 from typing import Any, Self, cast
 
 import httpx
+from rich.markup import escape
 
 from . import VERBOSE
+from ._console import console
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import BitwardenClientError
 
@@ -35,6 +37,20 @@ _HTTP_TIMEOUT_S: float = 60.0
 # Max length for sanitized CLI output snippets in logs/errors.
 _SANITIZED_OUTPUT_MAX_CHARS: int = 240
 
+# bw serve occasionally drops a pooled keepalive connection over a long
+# migration (a localhost reset, e.g. WinError 10054). Idempotent requests are
+# retried on such a transport error; non-idempotent ones (POST) are not, since a
+# reset could hide an item the server already created.
+_REQUEST_MAX_ATTEMPTS: int = 3
+_REQUEST_RETRY_BACKOFF_S: float = 0.5
+_IDEMPOTENT_METHODS: frozenset[str] = frozenset({
+    "GET",
+    "PUT",
+    "DELETE",
+    "HEAD",
+    "OPTIONS",
+})
+
 # Response-only keys returned by ``GET``/``list`` that must never be sent back in
 # a ``PUT`` body: the API expects a create-shaped object (``BwItemCreate``), and
 # echoing server-managed fields (notably ``attachments``) risks rejection or
@@ -48,12 +64,72 @@ _RESPONSE_ONLY_ITEM_KEYS: frozenset[str] = frozenset({
     "attachments",
 })
 
+# Bitwarden item type for login entries (1=login, 2=secureNote, 3=card,
+# 4=identity).  kp2bw only ever creates/adopts login items, so non-login items
+# sharing a name are a user's own data and must never be adopted.
+_BW_ITEM_TYPE_LOGIN: int = 1
+
+# Hidden custom-field name kp2bw stamps on every item it creates, carrying the
+# source KeePass entry UUID.  This is the *stable identity key*: dedup matches on
+# it so two distinct entries that merely share a ``(folder, title)`` never
+# collapse onto one item, and re-runs stay idempotent across title/folder edits.
+KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
+
+
+def item_kp2bw_id(item: BwItemResponse) -> str | None:
+    """Return *item*'s KeePass-UUID stamp, or ``None`` if it is unstamped.
+
+    Reads the hidden ``KP2BW_ID`` custom field written by :mod:`kp2bw.convert`.
+    An unstamped item is a legacy import (pre-stable-identity) eligible for a
+    one-time ``(folder, name)`` adoption that backfills the stamp.
+    """
+    for field in item.get("fields") or []:
+        if field.get("name") == KP2BW_ID_FIELD_NAME:
+            return field.get("value") or None
+    return None
+
+
 # Actionable message shown when the Bitwarden CLI cannot be located.
 BW_NOT_FOUND_MSG: str = (
     "Bitwarden CLI ('bw') not found on your PATH. Install it and make sure "
     "'bw' is runnable from your shell, then try again. "
     "See https://bitwarden.com/help/cli/ for installation instructions."
 )
+
+# Pointer shown when `bw unlock` fails. kp2bw never runs `bw login` itself
+# (that is the user's step), so the unlock failure is the earliest point it can
+# flag the most common unfixable cause: a self-hosted server older than the
+# `bw` CLI. Recent CLIs log in via `/identity/accounts/prelogin/password`, a
+# route servers before Vaultwarden 1.36.0 answer with 404, so login never
+# succeeds and the subsequent unlock cannot find a session.
+BW_LOGIN_COMPAT_HINT: str = (
+    "If you cannot log in at all -- e.g. `bw login` returns HTTP 404 on "
+    "/identity/accounts/prelogin/password -- your self-hosted server is likely "
+    "older than your `bw` CLI."
+)
+
+# Deep link to the matching TROUBLESHOOTING.md section (GitHub heading anchor).
+TROUBLESHOOTING_LOGIN_404_URL: str = (
+    "https://github.com/kjanat/kp2bw/blob/master/TROUBLESHOOTING.md"
+    "#login-fails-with-a-404-self-hosted-server-too-old-for-your-bw-cli"
+)
+
+
+def warn_login_compatibility() -> None:
+    """Print the login-compat hint to the console as a clickable link.
+
+    Deliberately routed through the shared Rich console rather than ``logger``:
+    Rich renders the URL as an OSC 8 hyperlink where the terminal supports it
+    and degrades to plain text otherwise, so the clickable form never leaks
+    escape codes into the always-on debug log file (which already records the
+    bare unlock failure). The URL is both the ``[link]`` target *and* the
+    visible text, so a legacy console or a redirected stream still shows the
+    address -- only the clickability is lost.
+    """
+    url = TROUBLESHOOTING_LOGIN_404_URL
+    console.print(
+        f"[yellow]{escape(BW_LOGIN_COMPAT_HINT)}[/yellow] See [link={url}]{url}[/link]"
+    )
 
 
 def _is_missing_item_error(status_code: int, message: object) -> bool:
@@ -157,45 +233,110 @@ def resolve_bw_command() -> tuple[list[str], str | None]:
     return [path], None
 
 
-def terminate_serve(
-    process: subprocess.Popen[bytes],
-    *,
-    via_shell: bool = False,
-    timeout: float = 5.0,
-) -> None:
-    """Stop a running ``bw serve`` process together with its descendants.
+def parse_listening_pids(netstat_output: str, port: int) -> set[int]:
+    """Extract PIDs ``LISTENING`` on ``127.0.0.1:port`` from ``netstat -ano`` output.
 
-    When ``bw`` is launched through a Windows shim wrapper (``cmd.exe`` for a
-    ``bw.cmd``/``bw.bat``, or PowerShell for a ``bw.ps1``),
-    :meth:`subprocess.Popen.terminate` reaches only the wrapper and orphans the
-    real ``bw serve``, which keeps holding the port. In that case the whole
-    process tree is killed with ``taskkill /F /T`` instead.
+    Split out from :func:`_listening_pids` so the (fiddly, column-based) parsing
+    is unit-testable without spawning a real listener.  A ``netstat`` row looks
+    like ``TCP  127.0.0.1:45707  0.0.0.0:0  LISTENING  1234``.
     """
-    if process.poll() is not None:
-        return
-    if via_shell and os.name == "nt":
-        # terminate() would only kill the cmd.exe wrapper; take down the tree.
+    needle = f"127.0.0.1:{port}"
+    pids: set[int] = set()
+    for line in netstat_output.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[1] == needle and parts[3] == "LISTENING":
+            try:
+                pids.add(int(parts[4]))
+            except ValueError:
+                continue
+    return pids
+
+
+def _listening_pids(port: int) -> set[int]:
+    """Return PIDs ``LISTENING`` on ``127.0.0.1:port`` (Windows, via ``netstat``).
+
+    Best-effort: any failure yields an empty set so teardown never raises.
+    """
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            check=False,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    return parse_listening_pids(result.stdout, port)
+
+
+def _kill_port_listeners(port: int) -> None:
+    """Force-kill any process still ``LISTENING`` on ``127.0.0.1:port`` (Windows).
+
+    The reliable orphan reaper: regardless of how the ``bw serve`` process tree
+    is shaped, or whether the wrapper we tracked already exited, whatever still
+    holds the serve port is the orphan to kill.  Best-effort; a kill failure is
+    logged, not raised, since this runs during teardown.
+    """
+    for pid in _listening_pids(port):
         _ = subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            ["taskkill", "/F", "/PID", str(pid)],
             check=False,
             capture_output=True,
             stdin=subprocess.DEVNULL,
         )
-        try:
-            _ = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            logger.warning("bw serve did not exit after taskkill /T")
-        return
-    process.terminate()
-    try:
-        _ = process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        logger.warning("bw serve did not exit on SIGTERM, sending SIGKILL")
-        process.kill()
-        try:
-            _ = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            logger.warning("bw serve did not exit after SIGKILL")
+        logger.warning(f"Reaped orphaned bw serve process {pid} holding port {port}")
+
+
+def terminate_serve(
+    process: subprocess.Popen[bytes],
+    *,
+    via_shell: bool = False,
+    port: int | None = None,
+    timeout: float = 5.0,
+) -> None:
+    """Stop a running ``bw serve`` together with its descendants.
+
+    On Windows a shim-launched ``bw serve`` runs as a *grandchild* (``cmd.exe``
+    wrapper → ``node`` → ``node`` worker, or PowerShell for a ``.ps1``).  Killing
+    only the wrapper — or finding it already exited and bailing — orphans the
+    worker, which keeps holding the port; and because every ``bw`` invocation
+    shares one app-data store, accumulated orphans can deadlock later runs.
+    Teardown is therefore belt-and-suspenders: take down the tracked process
+    tree, then (Windows) reap anything still ``LISTENING`` on *port*, which
+    catches a worker that outlived or re-parented away from its wrapper.
+    """
+    if process.poll() is None:
+        if via_shell and os.name == "nt":
+            # terminate() would reach only the cmd.exe wrapper; take the tree.
+            _ = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                check=False,
+                capture_output=True,
+                stdin=subprocess.DEVNULL,
+            )
+            try:
+                _ = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                logger.warning("bw serve did not exit after taskkill /T")
+        else:
+            process.terminate()
+            try:
+                _ = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                logger.warning("bw serve did not exit on SIGTERM, sending SIGKILL")
+                process.kill()
+                try:
+                    _ = process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    logger.warning("bw serve did not exit after SIGKILL")
+
+    # Windows: reap a shim worker that survived (or re-parented away from) the
+    # wrapper we tracked — including the case where the wrapper had already
+    # exited, which the old early-return missed, leaving an orphan on the port.
+    if os.name == "nt" and port is not None:
+        _kill_port_listeners(port)
 
 
 def sanitize_cli_output(
@@ -213,6 +354,84 @@ def sanitize_cli_output(
     if len(sanitized) > max_chars:
         return sanitized[:max_chars] + "...[truncated]"
     return sanitized
+
+
+def format_http_error(resp: httpx.Response) -> str:
+    """Extract a human-readable reason from a 4xx/5xx HTTP response.
+
+    ``bw serve`` returns its ``{success, message}`` envelope (and Vaultwarden a
+    validation payload) even on error responses, but the body was previously
+    discarded -- turning every rejection into an opaque ``HTTP 400`` with no
+    cause.  This pulls out ``message``/``validationErrors`` (or the raw text when
+    the body is not the expected JSON shape) so the real reason reaches logs and
+    errors.  Whitespace-normalised and truncated via :func:`sanitize_cli_output`;
+    only the *response* body is read, never request data, so no secret is logged.
+    """
+    try:
+        parsed: Any = resp.json()
+    except ValueError:
+        text = resp.text
+        return sanitize_cli_output(text) if text.strip() else "(empty response body)"
+    if isinstance(parsed, dict):
+        body: dict[str, Any] = cast(dict[str, Any], parsed)
+        message: object = body.get("message")
+        details: object = body.get("validationErrors") or body.get("errors")
+        parts: list[str] = []
+        if message:
+            parts.append(str(message))
+        if details:
+            parts.append(f"details={details}")
+        if parts:
+            return sanitize_cli_output(" ".join(parts))
+    # Parsed but not the expected object envelope (array/scalar): fall back to
+    # the raw text rather than re-serialising an unknown-typed value.
+    text = resp.text
+    return sanitize_cli_output(text) if text.strip() else "(empty response body)"
+
+
+def send_with_retry(
+    send: Callable[[], httpx.Response],
+    *,
+    method: str,
+    path: str,
+    idempotent: bool | None = None,
+    max_attempts: int = _REQUEST_MAX_ATTEMPTS,
+    backoff_s: float = _REQUEST_RETRY_BACKOFF_S,
+    sleep: Callable[[float], None] = time.sleep,
+) -> httpx.Response:
+    """Call *send*, retrying transient transport errors for idempotent requests.
+
+    ``bw serve`` can drop a pooled keepalive connection over a long run; httpx
+    surfaces that as :class:`httpx.TransportError` before the request is
+    processed, so retrying an idempotent request on a fresh connection recovers
+    without risking a duplicate.  Whether a request is idempotent defaults to its
+    HTTP method (GET/PUT/DELETE retry, POST does not), but *idempotent* overrides
+    that: a ``POST`` that merely replays state (``/sync``, ``/unlock``) passes
+    ``idempotent=True`` so a transient reset on startup is retried away rather
+    than aborting the run before it begins.  A persistent failure is raised as a
+    :class:`BitwardenClientError` so callers see a project error (and per-entry
+    handlers can treat it as non-fatal) rather than a raw ``httpx`` traceback
+    that aborts the whole migration.  *sleep* is injectable for tests.
+    """
+    if idempotent is None:
+        idempotent = method.upper() in _IDEMPOTENT_METHODS
+    attempts = max_attempts if idempotent else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return send()
+        except httpx.TransportError as exc:
+            if attempt < attempts:
+                logger.warning(
+                    f"bw serve {method} {path}: transport error ({exc}); "
+                    f"retrying ({attempt}/{attempts - 1})"
+                )
+                sleep(backoff_s * attempt)
+                continue
+            raise BitwardenClientError(
+                f"bw serve {method} {path} failed after {attempt} attempt(s): {exc}"
+            ) from exc
+    # The loop always returns or raises above; this satisfies the type checker.
+    raise BitwardenClientError(f"bw serve {method} {path}: no attempt was made")
 
 
 def _find_free_port() -> int:
@@ -238,9 +457,10 @@ class BitwardenServeClient:
     _previous_sigterm: Callable[[int, FrameType | None], Any] | int | None
     _previous_sigint: Callable[[int, FrameType | None], Any] | int | None
     _folders: dict[str, str]  # name → id cache
-    _existing_entries: dict[
-        str | None, dict[str, BwItemResponse]
-    ]  # folder_name → {name → item}
+    _by_uuid: dict[str, BwItemResponse]  # KP2BW_ID stamp → item (stable identity)
+    _legacy_by_folder_name: dict[
+        str | None, dict[str, list[BwItemResponse]]
+    ]  # unstamped login items: folder → name → [items], for one-time adoption
     _collections: dict[str, str] | None  # name → id cache (None if no org)
     _org_id: str | None
     _collection_id: str | None  # fixed target collection for dedup scoping
@@ -279,7 +499,8 @@ class BitwardenServeClient:
         self._collection_id = collection_id
 
         self._folders = {}
-        self._existing_entries = {}
+        self._by_uuid = {}
+        self._legacy_by_folder_name = {}
         self._collections = None
 
         # Register cleanup handlers early so close() is safe to call at
@@ -296,9 +517,9 @@ class BitwardenServeClient:
         self._unlock(password)
         self._sync()
 
-        # Populate folder cache and dedup index from existing vault state.
+        # Populate folder cache and dedup indexes from existing vault state.
         self._folders = self.list_folders()
-        self._existing_entries = self._build_dedup_index()
+        self._build_dedup_index()
 
         # Load existing org collections if an org ID was provided.
         if self._org_id:
@@ -349,6 +570,7 @@ class BitwardenServeClient:
             if stderr_text:
                 message += f"; stderr: {stderr_text}"
             logger.warning(message)
+            warn_login_compatibility()
             return None
         session = result.stdout.strip()
         if session:
@@ -441,9 +663,14 @@ class BitwardenServeClient:
         if self._previous_sigint is not None:
             signal.signal(signal.SIGINT, self._previous_sigint)
 
-        if self._process is not None and self._process.poll() is None:
+        # Call teardown unconditionally (not gated on poll()): on Windows the
+        # tracked wrapper can exit while its node worker lives on, so the
+        # port-based reap inside terminate_serve must run even then.
+        if self._process is not None:
             logger.log(VERBOSE, "Terminating bw serve process")
-            terminate_serve(self._process, via_shell=self._bw_via_shell)
+            terminate_serve(
+                self._process, via_shell=self._bw_via_shell, port=self._port
+            )
 
         self._process = None
         try:
@@ -481,21 +708,27 @@ class BitwardenServeClient:
         *,
         json_body: Mapping[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        idempotent: bool | None = None,
     ) -> dict[str, Any]:
         """Send an HTTP request and return the parsed ``data`` payload.
 
         Raises :class:`BitwardenClientError` on non-success responses or
         when the ``bw serve`` JSON envelope reports ``success: false``.
+
+        *idempotent* overrides method-based retry classification for a ``POST``
+        that merely replays state (``/sync``, ``/unlock``); see
+        :func:`send_with_retry`.
         """
-        resp = self._http.request(
-            method,
-            path,
-            json=json_body,
-            params=params,
+        resp = send_with_retry(
+            lambda: self._http.request(method, path, json=json_body, params=params),
+            method=method,
+            path=path,
+            idempotent=idempotent,
         )
         if resp.status_code >= 400:
             raise BitwardenClientError(
-                f"bw serve returned HTTP {resp.status_code} for {method} {path}"
+                f"bw serve returned HTTP {resp.status_code} for {method} {path}: "
+                f"{format_http_error(resp)}"
             )
 
         try:
@@ -517,14 +750,22 @@ class BitwardenServeClient:
     # ------------------------------------------------------------------
 
     def _unlock(self, password: str) -> None:
-        """Unlock the vault via ``POST /unlock``."""
+        """Unlock the vault via ``POST /unlock``.
+
+        Replaying an unlock is harmless, so it is retried on a transient reset.
+        """
         logger.log(VERBOSE, "Unlocking vault via bw serve")
-        self._request("POST", "/unlock", json_body={"password": password})
+        self._request(
+            "POST", "/unlock", json_body={"password": password}, idempotent=True
+        )
 
     def _sync(self) -> None:
-        """Synchronise vault state via ``POST /sync``."""
+        """Synchronise vault state via ``POST /sync``.
+
+        Replaying a sync is harmless, so it is retried on a transient reset.
+        """
         logger.log(VERBOSE, "Syncing vault via bw serve")
-        self._request("POST", "/sync")
+        self._request("POST", "/sync", idempotent=True)
 
     def sync(self) -> None:
         """Force a vault sync (public API)."""
@@ -620,9 +861,10 @@ class BitwardenServeClient:
 
     def create_items_batch(
         self,
-        entries: dict[str, tuple[str | None, BwItemCreate]],
+        entries: Mapping[str, tuple[str | None, BwItemCreate]],
         *,
         on_item_created: Callable[[], None] | None = None,
+        on_item_failed: Callable[[str, BitwardenClientError], None] | None = None,
     ) -> dict[str, str]:
         """Create folders and items via HTTP, returning ``{key: item_id}``.
 
@@ -630,21 +872,60 @@ class BitwardenServeClient:
         Folders are created/resolved first, then items are created sequentially
         with the correct ``folderId`` bound.
 
-        *on_item_created* is called after each successful item creation; callers
-        use it to advance a progress bar without creating a direct dependency on
-        the UI library.
+        A single create that fails (``bw serve`` drops or times out the request,
+        surfaced as :class:`BitwardenClientError`) is non-fatal: the item is
+        skipped and reported via *on_item_failed*, and the remaining entries are
+        still migrated rather than stranded -- the same robustness the update and
+        attachment phases have (issue #24).  A folder whose creation fails skips
+        its items, which are reported failed rather than silently created in the
+        no-folder root.  Re-running is safe: stable-UUID dedup adopts anything a
+        timed-out request actually created server-side.
+
+        *on_item_created* is called after each successful item creation and
+        *on_item_failed* after each skipped one; callers use them to advance a
+        progress bar and tally outcomes without depending on the UI library.
         """
-        # Ensure all required folders exist.
+        # Ensure all required folders exist. A folder whose creation fails is
+        # recorded so its items are skipped, not misplaced into the no-folder root.
         folder_names = {fname for fname, _ in entries.values() if fname}
+        failed_folders: set[str] = set()
         for fname in sorted(folder_names):
-            self.create_folder(fname)
+            try:
+                self.create_folder(fname)
+            except BitwardenClientError as exc:
+                logger.warning(
+                    f"Could not create folder {fname!r}; its items are skipped "
+                    f"this run (a re-run is safe): {exc}"
+                )
+                failed_folders.add(fname)
 
         key_to_id: dict[str, str] = {}
         for key, (folder_name, bw_item) in entries.items():
+            name = bw_item.get("name", "?")
+            if folder_name is not None and folder_name in failed_folders:
+                if on_item_failed is not None:
+                    on_item_failed(
+                        key,
+                        BitwardenClientError(
+                            f"folder {folder_name!r} could not be created"
+                        ),
+                    )
+                continue
             # Bind folder ID — shallow-copy rather than mutating the shared dict.
             item = copy.copy(bw_item)
             item["folderId"] = self._folders.get(folder_name) if folder_name else None
-            item_id = self.create_item(item)
+            try:
+                item_id = self.create_item(item)
+            except BitwardenClientError as exc:
+                # One bad entry must not abort the run and strand every entry
+                # after it; a re-run adopts it if the server created it anyway.
+                logger.warning(
+                    f"Could not create item {name!r}; skipping it this run "
+                    f"(a re-run is safe): {exc}"
+                )
+                if on_item_failed is not None:
+                    on_item_failed(key, exc)
+                continue
             key_to_id[key] = item_id
             if on_item_created is not None:
                 on_item_created()
@@ -655,66 +936,92 @@ class BitwardenServeClient:
     # Deduplication
     # ------------------------------------------------------------------
 
-    def _build_dedup_index(self) -> dict[str | None, dict[str, BwItemResponse]]:
-        """Build a ``{folder_name: {item_name: item}}`` index for O(1) dedup.
+    def _build_dedup_index(self) -> None:
+        """Build the stable-identity dedup indexes from existing vault state.
 
-        Stores the full item response so callers can inspect ``collectionIds``
-        and call :meth:`update_item` without an extra GET.
+        Populates two structures:
 
-        Scoping rules (most-specific filter wins):
+        * :attr:`_by_uuid` — ``{KP2BW_ID stamp: item}`` for every item kp2bw has
+          already stamped.  This is the authoritative identity map: a KeePass
+          entry is matched to its Bitwarden item by UUID, so distinct entries
+          sharing a ``(folder, title)`` never collapse and re-runs are idempotent.
+        * :attr:`_legacy_by_folder_name` — ``{folder: {name: [items]}}`` of
+          *unstamped login* items (legacy imports made before stable identity).
+          A KeePass entry with no UUID match claims one of these by
+          ``(folder, name)`` and backfills the stamp — a one-time adoption that
+          avoids re-creating the whole vault on the first post-upgrade run.
+
+        Items are stored in full so callers can inspect ``collectionIds`` and
+        call :meth:`update_item` without an extra GET.  Scoping (most-specific
+        filter wins) is unchanged from the previous ``(folder, name)`` index:
 
         * **Fixed collection** (``collection_id`` set): only items already in
-          that collection are indexed.  Items in other collections are treated
-          as new, so they are created — not silently skipped — when the user
-          imports into a specific target collection.
+          that collection are indexed.
         * **Org-only** (``org_id`` set, no ``collection_id``): items belonging
-          to the organisation are indexed.  Personal-vault entries don't shadow
-          an empty org vault.  Collection membership of existing items can be
-          updated via :meth:`update_item` (collection-aware dedup).
-        * **Personal vault** (both ``None``): all visible items are indexed.
-          Org-shared items visible to the user may produce false positives
-          (pre-existing limitation, intentionally asymmetric).
+          to the organisation; personal entries don't shadow an empty org vault.
+        * **Personal vault** (both ``None``): all visible items.
+
+        Non-login items are excluded from the legacy index: kp2bw only ever
+        creates login items, so a non-login item sharing a name is a user's own
+        item and must never be adopted or mutated.
         """
         id_to_name: dict[str, str] = {
             fid: fname for fname, fid in self._folders.items()
         }
-        index: dict[str | None, dict[str, BwItemResponse]] = {}
+        by_uuid: dict[str, BwItemResponse] = {}
+        legacy: dict[str | None, dict[str, list[BwItemResponse]]] = {}
         for item in self.list_items(
             organization_id=self._org_id,
             collection_id=self._collection_id,
         ):
-            folder_id: str | None = item.get("folderId") or None
-            folder_name = id_to_name.get(folder_id) if folder_id else None
+            kp_uuid = item_kp2bw_id(item)
+            if kp_uuid:
+                by_uuid[kp_uuid] = item
+                continue
+            # Unstamped legacy item — index for one-time (folder, name) adoption,
+            # but only login items (kp2bw never touches a user's other items).
+            if item.get("type") != _BW_ITEM_TYPE_LOGIN:
+                continue
             name: str = item.get("name", "")
             if not name:
                 continue
-            index.setdefault(folder_name, {})[name] = item
-        return index
+            folder_id: str | None = item.get("folderId") or None
+            folder_name = id_to_name.get(folder_id) if folder_id else None
+            legacy.setdefault(folder_name, {}).setdefault(name, []).append(item)
+        self._by_uuid = by_uuid
+        self._legacy_by_folder_name = legacy
 
-    def entry_exists(self, folder: str | None, name: str) -> bool:
-        """Check whether an entry with *name* already exists in *folder*."""
-        return name in self._existing_entries.get(folder, {})
+    def get_item_by_uuid(self, kp_uuid: str) -> BwItemResponse | None:
+        """Return the item stamped with *kp_uuid*, or ``None`` (stable identity)."""
+        return self._by_uuid.get(kp_uuid)
 
-    def get_existing_item(self, folder: str | None, name: str) -> BwItemResponse | None:
-        """Return the cached item response for *name* in *folder*, or ``None``."""
-        return self._existing_entries.get(folder, {}).get(name)
+    def claim_legacy_item(self, folder: str | None, name: str) -> BwItemResponse | None:
+        """Claim one unstamped legacy item matching ``(folder, name)``, or ``None``.
+
+        Pops the item so a second KeePass entry sharing the ``(folder, name)``
+        cannot claim it too — that sibling falls through to creation instead,
+        recovering an item the old ``(folder, title)`` dedup would have collapsed.
+        The caller backfills the ``KP2BW_ID`` stamp onto the claimed item.
+        """
+        bucket = self._legacy_by_folder_name.get(folder, {}).get(name)
+        if not bucket:
+            return None
+        return bucket.pop()
 
     def refresh_dedup_index(self) -> None:
-        """Re-query the vault and rebuild the dedup index."""
+        """Re-query the vault and rebuild the dedup indexes."""
         self._folders = self.list_folders()
-        self._existing_entries = self._build_dedup_index()
+        self._build_dedup_index()
 
-    def update_dedup_entry(
-        self, folder: str | None, name: str, item: BwItemResponse
-    ) -> None:
-        """Update a single cached entry after an in-place :meth:`update_item` call.
+    def update_dedup_entry(self, kp_uuid: str, item: BwItemResponse) -> None:
+        """Refresh the cached item for *kp_uuid* after an in-place update.
 
-        Avoids a full :meth:`refresh_dedup_index` round-trip when only one
-        item's metadata (e.g. ``collectionIds``) has changed.  Must be called
-        after every :meth:`update_item` so subsequent ``get_existing_item``
-        lookups on the same ``(folder, name)`` key return fresh data.
+        Keeps :attr:`_by_uuid` current after :meth:`update_item` so a later
+        lookup of the same stamp returns fresh data.  Each KeePass entry has a
+        unique UUID and is processed once per run, so this is defensive — it
+        matters only if a future flow revisits a stamp within a single run.
         """
-        self._existing_entries.setdefault(folder, {})[name] = item
+        self._by_uuid[kp_uuid] = item
 
     # ------------------------------------------------------------------
     # CRUD — org collections

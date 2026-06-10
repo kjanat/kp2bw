@@ -8,489 +8,436 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Automatic `.env` loading and a `KP2BW_KEEPASS_FILE` env var for the database path** -- `kp2bw` now loads a `.env`
+  file (searched upward from the current working directory) into the environment on startup, so settings can live in a
+  file instead of your shell history; a real shell variable still overrides a `.env` entry, keeping the documented CLI
+  flag > env var > default precedence. The KeePass database path -- previously CLI-only -- can now be supplied via
+  `KP2BW_KEEPASS_FILE`, making the positional `FILE` optional. A new `.env.example` documents every supported variable.
+- **Always-on DEBUG log file** -- a complete DEBUG trace (including third-party `httpx`/`bw serve` detail) is now always
+  written to a per-user log file regardless of console verbosity -- `%LOCALAPPDATA%\kp2bw\logs` on Windows, the platform
+  data dir elsewhere -- so a failed run leaves a full record to share without re-running with `-v`/`-d`. Override the
+  file with `KP2BW_LOG_FILE` or the directory with `KP2BW_LOG_DIR`. The console stays as quiet as before by default.
+- **A heads-up when the `bw serve` server and CLI versions disagree** -- a server/CLI version mismatch (a common source
+  of confusing `bw serve` failures) is flagged up front instead of surfacing later as an opaque error.
+
+### Changed
+
+- **KeePass tags and expiry now fold into a single `KP2BW_META` field; `Created`/`Modified` are no longer migrated** --
+  the metadata Bitwarden has no native slot for is serialised as YAML into one `KP2BW_META` custom field (PyYAML
+  `safe_dump`, so control characters and the U+0085/2028/2029 line breaks are escaped, not silently corrupted) instead
+  of several separate `Tags`/`Expires`/date fields, and the field is omitted entirely when an entry has neither tags nor
+  an expiry. Creation/modification timestamps are dropped: Bitwarden manages its own creation/revision dates and the API
+  cannot backdate them (a client-supplied date is ignored on create and rejected on update), so they had no real home.
+
+### Removed
+
+- **The unused legacy `bitwardenclient` and `bw_import` modules** -- the deprecated subprocess-per-operation CLI wrapper
+  and the file-based `bw import` path, both long superseded by the `bw serve` HTTP transport and reachable from no
+  supported entry point, were removed (git history retains them for reference).
+
+### Fixed
+
+- **`kp2bw --version` (and usage/error messages) now print `kp2bw`, not the launcher path.** Python 3.14's argparse
+  derives the default program name from how the script was launched, so a console-script run through uv's trampoline
+  printed `python.exe C:\...\Scripts\kp2bw 3.4.1`. The program name is now pinned to `kp2bw`.
+- **Distinct entries sharing a title no longer collapse onto one Bitwarden item (silent data loss)** -- deduplication
+  keyed on `(folder, title)`, so several different logins that happened to share a title (e.g. four accounts all named
+  `192.168.2.67`) merged into a single item and re-runs churned non-idempotently. Every migrated item now carries its
+  source KeePass entry UUID in a `KP2BW_ID` field and dedup keys on that: a match by UUID stays idempotent across
+  title/folder edits, an unstamped legacy item is adopted once and back-stamped, and only a genuinely new entry creates
+  a new item.
+- **A single slow or dropped `bw serve` request no longer aborts the whole migration** (#24) -- a create that timed out
+  or hit a dropped keep-alive connection (`httpx.ReadTimeout`/`ReadError`) crashed the run and stranded every entry
+  after it. Idempotent requests (including the startup sync/unlock) are now retried on a transient transport error, and
+  a per-entry create, folder, or collection failure is reported and skipped rather than fatal -- so the migration
+  finishes, the summary counts what failed, and a re-run safely adopts anything a timed-out request already created
+  server-side.
+- **`bw serve` HTTP errors now carry the server's actual message** -- a failed request surfaces the response body
+  (Bitwarden/Vaultwarden's real `message` / validation error) instead of an opaque `HTTP 400`.
+- **Windows: orphaned `bw serve` processes are reaped reliably** -- a shim-launched `bw serve` runs as a `node`
+  grandchild that `taskkill /T` did not always reap, leaving orphans that deadlocked the shared `bw` app-data on later
+  runs. Teardown now also kills whatever still listens on the serve port, regardless of process-tree shape.
+
 ## [3.4.1] - 2026-06-09
 
 ### Fixed
 
-- **A newly created item could lose an attachment on re-run** -- when `kp2bw`
-  created a fresh Bitwarden item and immediately uploaded its attachment,
-  `bw serve` could fail to resolve the just-created item (it looks the id up in
-  its local vault cache, not on the server), report `Not found`, and silently
-  drop that one attachment. The vault is now synced after items are created and
-  before attachments upload, and an upload that still hits a not-found error
-  syncs and retries once.
+- **A newly created item could lose an attachment on re-run** -- when `kp2bw` created a fresh Bitwarden item and
+  immediately uploaded its attachment, `bw serve` could fail to resolve the just-created item (it looks the id up in its
+  local vault cache, not on the server), report `Not found`, and silently drop that one attachment. The vault is now
+  synced after items are created and before attachments upload, and an upload that still hits a not-found error syncs
+  and retries once.
 
 ## [3.4.0] - 2026-06-08
 
 ### Added
 
-- **Reproducible snapshot-backed Vaultwarden e2e suite** (#20) -- the
-  integration test migrates a comprehensive KeePass seed (every TOTP shape, text
-  and hidden custom fields, real file/image attachments, nested folders,
-  unicode, empty password) into a real Vaultwarden and captures the result as
-  normalized golden snapshots under `tests/__snapshots__/`, so migration drift
-  surfaces as a reviewable diff; idempotency is proven at the snapshot level
-  (pass 1 == pass 2). CI runs a host-mode `@bitwarden/cli` version matrix via a
-  new `setup-bw` composite action -- the pinned leg gates the golden, `latest`
-  is a behavioral-only canary -- with Vaultwarden and `bw` version-pinned and
-  Dependabot-managed.
-- **`--include-oversize-secrets` to recover over-limit secret fields** (#21) --
-  a hidden OTP secret (e.g. an HOTP `HmacOtp-Secret`), a passkey attribute, or a
-  KeePass-protected custom field whose value tops the 10k inline limit survives
-  nowhere else, so it was dropped. The new flag (env:
-  `KP2BW_INCLUDE_OVERSIZE_SECRETS`, default off) offloads it to a `<key>.txt`
-  attachment like any other long field. Off by default so a secret is never
-  written to a readable attachment without consent.
+- **Reproducible snapshot-backed Vaultwarden e2e suite** (#20) -- the integration test migrates a comprehensive KeePass
+  seed (every TOTP shape, text and hidden custom fields, real file/image attachments, nested folders, unicode, empty
+  password) into a real Vaultwarden and captures the result as normalized golden snapshots under `tests/__snapshots__/`,
+  so migration drift surfaces as a reviewable diff; idempotency is proven at the snapshot level (pass 1 == pass 2). CI
+  runs a host-mode `@bitwarden/cli` version matrix via a new `setup-bw` composite action -- the pinned leg gates the
+  golden, `latest` is a behavioral-only canary -- with Vaultwarden and `bw` version-pinned and Dependabot-managed.
+- **`--include-oversize-secrets` to recover over-limit secret fields** (#21) -- a hidden OTP secret (e.g. an HOTP
+  `HmacOtp-Secret`), a passkey attribute, or a KeePass-protected custom field whose value tops the 10k inline limit
+  survives nowhere else, so it was dropped. The new flag (env: `KP2BW_INCLUDE_OVERSIZE_SECRETS`, default off) offloads
+  it to a `<key>.txt` attachment like any other long field. Off by default so a secret is never written to a readable
+  attachment without consent.
 
 ### Fixed
 
-- **Oversize custom fields routed to their attachment, not inline** (#21) -- a
-  custom field whose value exceeds the 10k inline limit is offloaded to its
-  `<key>.txt` attachment only, decided at the source when the Bitwarden item is
-  built (symmetric with how a long note goes to `notes.txt`), instead of being
-  left among the inline fields. Regression coverage locks the long-field →
-  `<key>.txt` path into the golden e2e snapshots.
-- **Over-limit secret custom fields were dropped silently** (#21) -- a hidden
-  OTP secret, passkey attribute, or KeePass-protected field longer than the 10k
-  inline limit was filtered out of the inline fields and excluded from the
-  `.txt` attachment offload, vanishing with no log line. Such a field is now
-  warned-and-dropped by default
-  (pointing at `--include-oversize-secrets` to keep it), so data is never lost
-  without notice. A consumed OTP key over the limit is still dropped silently --
-  it is already preserved in `login.totp`, so dropping the raw field is
-  deduplication, not loss.
+- **Oversize custom fields routed to their attachment, not inline** (#21) -- a custom field whose value exceeds the 10k
+  inline limit is offloaded to its `<key>.txt` attachment only, decided at the source when the Bitwarden item is built
+  (symmetric with how a long note goes to `notes.txt`), instead of being left among the inline fields. Regression
+  coverage locks the long-field → `<key>.txt` path into the golden e2e snapshots.
+- **Over-limit secret custom fields were dropped silently** (#21) -- a hidden OTP secret, passkey attribute, or
+  KeePass-protected field longer than the 10k inline limit was filtered out of the inline fields and excluded from the
+  `.txt` attachment offload, vanishing with no log line. Such a field is now warned-and-dropped by default (pointing at
+  `--include-oversize-secrets` to keep it), so data is never lost without notice. A consumed OTP key over the limit is
+  still dropped silently -- it is already preserved in `login.totp`, so dropping the raw field is deduplication, not
+  loss.
 
 ## [3.3.0] - 2026-06-08
 
 ### Added
 
-- **In-place updates for changed entries** -- re-running `kp2bw` now syncs
-  KeePass edits onto existing Bitwarden items instead of skipping them. Changed
-  notes, passwords, usernames, URIs and custom fields are written via an
-  idempotent `PUT` (an unchanged entry issues no request). Collection
-  membership is only ever added, never removed, and a Bitwarden-side `favorite`
-  flag or a passkey absent from KeePass is preserved. Opt out with `--no-update`
-  (env: `KP2BW_UPDATE=0`) to restore the previous skip-only behavior.
+- **In-place updates for changed entries** -- re-running `kp2bw` now syncs KeePass edits onto existing Bitwarden items
+  instead of skipping them. Changed notes, passwords, usernames, URIs and custom fields are written via an idempotent
+  `PUT` (an unchanged entry issues no request). Collection membership is only ever added, never removed, and a
+  Bitwarden-side `favorite` flag or a passkey absent from KeePass is preserved. Opt out with `--no-update` (env:
+  `KP2BW_UPDATE=0`) to restore the previous skip-only behavior.
 
 ### Fixed
 
-- **Updated KeePass notes never reached Bitwarden** (#11) -- editing an entry's
-  notes (e.g. pasting in new recovery keys) without touching credentials left
-  the existing Bitwarden item unchanged, forcing a full vault purge to
+- **Updated KeePass notes never reached Bitwarden** (#11) -- editing an entry's notes (e.g. pasting in new recovery
+  keys) without touching credentials left the existing Bitwarden item unchanged, forcing a full vault purge to
   re-import. Existing items are now updated in place on re-run.
-- **Long notes not attached to (or refreshed on) previously imported entries**
-  (#11) -- notes over 10k chars migrate to a `notes.txt` attachment, but
-  previously imported (skipped) entries never received it, and an edited
-  attachment that kept the same filename was never updated. Re-runs now upload
-  any attachment an existing item is missing **and** refresh one whose content
-  changed (the stale copy is removed only after the replacement uploads), all
-  without creating duplicates. Applies to every attachment kp2bw manages --
-  long notes, long custom fields, and real KeePass file attachments.
-- **A single rejected attachment aborted the whole migration** (#11) -- an
-  attachment the server refused (for example a `.jpg` rejected for premium or
-  storage-quota reasons) raised an opaque `HTTP 400` that stopped everything.
-  Upload failures are now non-fatal: the real server message is surfaced
-  instead of just the status code, and the migration continues with the
-  remaining entries.
+- **Long notes not attached to (or refreshed on) previously imported entries** (#11) -- notes over 10k chars migrate to
+  a `notes.txt` attachment, but previously imported (skipped) entries never received it, and an edited attachment that
+  kept the same filename was never updated. Re-runs now upload any attachment an existing item is missing **and**
+  refresh one whose content changed (the stale copy is removed only after the replacement uploads), all without creating
+  duplicates. Applies to every attachment kp2bw manages -- long notes, long custom fields, and real KeePass file
+  attachments.
+- **A single rejected attachment aborted the whole migration** (#11) -- an attachment the server refused (for example a
+  `.jpg` rejected for premium or storage-quota reasons) raised an opaque `HTTP 400` that stopped everything. Upload
+  failures are now non-fatal: the real server message is surfaced instead of just the status code, and the migration
+  continues with the remaining entries.
 
 ## [3.2.0] - 2026-06-08
 
 ### Added
 
-- **Windows shim support (`bw.cmd`/`bw.bat`/`bw.ps1`)** -- Installer methods put
-  different shims on `PATH` and `CreateProcess` can only run real `.exe`/`.com`
-  images. `resolve_bw_command` now resolves all flavours, most-reliable first:
-  native `bw.exe`/`bw.com` run directly; `bw.cmd`/`bw.bat` are routed through
-  `cmd.exe /c` (invoked by basename from their own directory to avoid
-  shell-quoting issues); and a `bw.ps1` (which isn't in `PATHEXT`, so
-  `shutil.which` can't see it) is found on `PATH` and run through PowerShell. So
-  when npm ships both `bw.cmd` and `bw.ps1`, the `cmd` shim is preferred.
-  `terminate_serve` tears the `bw serve` process tree down with `taskkill /F /T`
-  so the real server isn't orphaned behind a `cmd.exe`/PowerShell wrapper. A
-  `windows-bw-cmd` CI job installs `bw` via npm and runs a live smoke test
-  (`tests/windows_bw_cmd_smoke.py`) covering shim invocation (`bw --version`) and
-  `cmd.exe`-wrapped process-tree teardown. Fixes #8.
+- **Windows shim support (`bw.cmd`/`bw.bat`/`bw.ps1`)** -- Installer methods put different shims on `PATH` and
+  `CreateProcess` can only run real `.exe`/`.com` images. `resolve_bw_command` now resolves all flavours, most-reliable
+  first: native `bw.exe`/`bw.com` run directly; `bw.cmd`/`bw.bat` are routed through `cmd.exe /c` (invoked by basename
+  from their own directory to avoid shell-quoting issues); and a `bw.ps1` (which isn't in `PATHEXT`, so `shutil.which`
+  can't see it) is found on `PATH` and run through PowerShell. So when npm ships both `bw.cmd` and `bw.ps1`, the `cmd`
+  shim is preferred. `terminate_serve` tears the `bw serve` process tree down with `taskkill /F /T` so the real server
+  isn't orphaned behind a `cmd.exe`/PowerShell wrapper. A `windows-bw-cmd` CI job installs `bw` via npm and runs a live
+  smoke test (`tests/windows_bw_cmd_smoke.py`) covering shim invocation (`bw --version`) and `cmd.exe`-wrapped
+  process-tree teardown. Fixes #8.
 
 ### Fixed
 
-- **Missing `bw` CLI traceback** -- When the Bitwarden CLI (`bw`) was not on
-  `PATH`, `kp2bw` crashed with a long, intimidating `FileNotFoundError`
-  traceback from `subprocess`. The CLI now checks for `bw` up front (before
-  prompting for passwords) and exits cleanly with an actionable message; any
-  `BitwardenClientError`/`ConversionError` raised during conversion is reported
-  the same way instead of as a stack trace. `BitwardenServeClient` raises a
-  `BitwardenClientError` rather than letting `FileNotFoundError` escape.
-  Detection uses `shutil.which`, so Windows `bw.exe`/`bw.cmd` shims are found via
-  `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so a
+- **Missing `bw` CLI traceback** -- When the Bitwarden CLI (`bw`) was not on `PATH`, `kp2bw` crashed with a long,
+  intimidating `FileNotFoundError` traceback from `subprocess`. The CLI now checks for `bw` up front (before prompting
+  for passwords) and exits cleanly with an actionable message; any `BitwardenClientError`/`ConversionError` raised
+  during conversion is reported the same way instead of as a stack trace. `BitwardenServeClient` raises a
+  `BitwardenClientError` rather than letting `FileNotFoundError` escape. Detection uses `shutil.which`, so Windows
+  `bw.exe`/`bw.cmd` shims are found via `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so a
   genuinely missing CLI still yields the friendly message. Fixes #5.
-- **Chained `{REF:...}` references** -- a reference whose target was itself
-  another reference entry (a chain `A -> B -> C`) raised `KeyError` in
-  `_resolve_entries_with_references`, logged a `Could not resolve entry`
-  warning, and dropped the referencing entry from the import even though
-  KeePass resolves such chains correctly. Unresolved targets that are
-  themselves REF entries are now resolved transitively and on demand, with
-  memoization and cycle detection, so the chain collapses onto whatever it
-  ultimately maps to. Fixes #6.
-- **Malformed `{REF:...}` tokens no longer abort the run** -- a reference whose
-  field/lookup part lacked the `@` separator (e.g. `{REF:UI:...}`) raised an
-  uncaught `ValueError` in `_parse_kp_ref_string` that stopped the whole
-  migration. Such tokens are now reported and the offending entry is skipped,
-  consistent with other unresolvable references.
+- **Chained `{REF:...}` references** -- a reference whose target was itself another reference entry (a chain
+  `A -> B -> C`) raised `KeyError` in `_resolve_entries_with_references`, logged a `Could not resolve entry` warning,
+  and dropped the referencing entry from the import even though KeePass resolves such chains correctly. Unresolved
+  targets that are themselves REF entries are now resolved transitively and on demand, with memoization and cycle
+  detection, so the chain collapses onto whatever it ultimately maps to. Fixes #6.
+- **Malformed `{REF:...}` tokens no longer abort the run** -- a reference whose field/lookup part lacked the `@`
+  separator (e.g. `{REF:UI:...}`) raised an uncaught `ValueError` in `_parse_kp_ref_string` that stopped the whole
+  migration. Such tokens are now reported and the offending entry is skipped, consistent with other unresolvable
+  references.
 
 ## [3.1.0] - 2026-06-08
 
 ### Added
 
-- **KeePass2/KeePassXC native TOTP migration** -- entries that store TOTP in the
-  `TimeOtp-*` custom fields (rather than the `otp` field) now migrate to
-  Bitwarden's `login.totp`. All four KeePass secret encodings are supported
-  (`TimeOtp-Secret` UTF-8, `-Hex`, `-Base32`, `-Base64`), and non-default
-  `TimeOtp-Length` / `-Period` / `-Algorithm` settings are emitted as a full
-  `otpauth://` URI so Bitwarden generates correct codes instead of silently
-  defaulting to 6 digits / 30 s / SHA-1. A default-config Base32 secret still
-  migrates as a bare secret; `entry.otp` keeps precedence when both are present.
-  Logic lives in a new pure, unit-tested `kp2bw/otp.py` module.
+- **KeePass2/KeePassXC native TOTP migration** -- entries that store TOTP in the `TimeOtp-*` custom fields (rather than
+  the `otp` field) now migrate to Bitwarden's `login.totp`. All four KeePass secret encodings are supported
+  (`TimeOtp-Secret` UTF-8, `-Hex`, `-Base32`, `-Base64`), and non-default `TimeOtp-Length` / `-Period` / `-Algorithm`
+  settings are emitted as a full `otpauth://` URI so Bitwarden generates correct codes instead of silently defaulting to
+  6 digits / 30 s / SHA-1. A default-config Base32 secret still migrates as a bare secret; `entry.otp` keeps precedence
+  when both are present. Logic lives in a new pure, unit-tested `kp2bw/otp.py` module.
 
 ### Fixed
 
-- **Lossy/leaky TOTP fallback** -- the initial `TimeOtp-Secret-Base32` fallback
-  dropped non-default OTP configuration (producing wrong 2FA codes), ignored the
-  other three secret encodings, and stripped the Base32 secret from custom
-  fields even when it was not the value migrated. Secrets are now removed from
-  custom fields only when actually folded into `login.totp`; any OTP secret left
-  behind (HOTP, an undecodable value, or one shadowed by `entry.otp`) is
+- **Lossy/leaky TOTP fallback** -- the initial `TimeOtp-Secret-Base32` fallback dropped non-default OTP configuration
+  (producing wrong 2FA codes), ignored the other three secret encodings, and stripped the Base32 secret from custom
+  fields even when it was not the value migrated. Secrets are now removed from custom fields only when actually folded
+  into `login.totp`; any OTP secret left behind (HOTP, an undecodable value, or one shadowed by `entry.otp`) is
   preserved as a *hidden* custom field rather than dropped or exposed.
-- **Silent HOTP loss** -- counter-based HOTP (`HmacOtp-Secret*`) has no
-  time-based target in Bitwarden. It is now reported with a warning and its
-  secret kept as a hidden field, instead of silently becoming a visible
-  plaintext custom field.
+- **Silent HOTP loss** -- counter-based HOTP (`HmacOtp-Secret*`) has no time-based target in Bitwarden. It is now
+  reported with a warning and its secret kept as a hidden field, instead of silently becoming a visible plaintext custom
+  field.
 
 ## [3.0.1] - 2026-06-08
 
 ### Fixed
 
-- **`None` username/password in REF resolution** -- `_resolve_entries_with_references`
-  raised `TypeError: argument of type 'NoneType' is not iterable` when an entry
-  with a `{REF:...}` field also had a `None` username or password. The field is
-  now guarded before the `KP_REF_IDENTIFIER` membership test, and `None` values
-  are normalized to `""` for the username/password match so a resolved entry
-  merges its URI instead of spawning a duplicate. Fixes #9, #4.
+- **`None` username/password in REF resolution** -- `_resolve_entries_with_references` raised
+  `TypeError: argument of type 'NoneType' is not iterable` when an entry with a `{REF:...}` field also had a `None`
+  username or password. The field is now guarded before the `KP_REF_IDENTIFIER` membership test, and `None` values are
+  normalized to `""` for the username/password match so a resolved entry merges its URI instead of spawning a duplicate.
+  Fixes #9, #4.
 
 ## [3.0.0] - 2026-02-26
 
 ### Added
 
-- **Strict TypedDict transport layer** -- `bw_types.py` defines `BwItemCreate`,
-  `BwItemResponse`, `BwItemLogin`, `BwUri`, `BwField`, `BwFido2Credential`,
-  `BwFolder`, and `BwCollection`. All `dict[str, Any]` usage is eliminated from
-  `bw_serve.py` and `convert.py`; the generated `_bw_api_types.py` is the
-  canonical source for spec-derived shapes.
-- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when
-  `_bw_api_types.py` drifts from `specs/vault-management-api.json`.
-- **Rich progress bars and summary** -- Migration phases (processing, creating,
-  uploading) show live progress bars via Rich. Final summary prints counts and
-  elapsed time.
+- **Strict TypedDict transport layer** -- `bw_types.py` defines `BwItemCreate`, `BwItemResponse`, `BwItemLogin`,
+  `BwUri`, `BwField`, `BwFido2Credential`, `BwFolder`, and `BwCollection`. All `dict[str, Any]` usage is eliminated from
+  `bw_serve.py` and `convert.py`; the generated `_bw_api_types.py` is the canonical source for spec-derived shapes.
+- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when `_bw_api_types.py` drifts from
+  `specs/vault-management-api.json`.
+- **Rich progress bars and summary** -- Migration phases (processing, creating, uploading) show live progress bars via
+  Rich. Final summary prints counts and elapsed time.
 
 ### Fixed
 
-- **Collection-blind dedup** -- Items already in the org but assigned to a
-  different collection were silently skipped even when `--bitwarden-collection`
-  targeted a new collection. The dedup path now detects this case and issues a
-  `PUT /object/item/{id}` to add the item to the missing collection instead of
-  skipping it.
-- **Org import dedup matched personal vault** -- `_build_dedup_index()` fetched
-  all vault items regardless of `--bitwarden-org`, causing personal-vault entries
-  to shadow the (empty) org vault and skip every import. Now passes
-  `organizationId` to `bw serve`'s `/list/object/items` so only org-scoped items
-  are checked when importing to an organization.
-- **`organizationId` casing on collection list** -- The query param sent to
-  `/list/object/org-collections` was lowercase (`organizationid`), which the API
-  silently ignored, returning all collections regardless of org. Now matches the
+- **Collection-blind dedup** -- Items already in the org but assigned to a different collection were silently skipped
+  even when `--bitwarden-collection` targeted a new collection. The dedup path now detects this case and issues a
+  `PUT /object/item/{id}` to add the item to the missing collection instead of skipping it.
+- **Org import dedup matched personal vault** -- `_build_dedup_index()` fetched all vault items regardless of
+  `--bitwarden-org`, causing personal-vault entries to shadow the (empty) org vault and skip every import. Now passes
+  `organizationId` to `bw serve`'s `/list/object/items` so only org-scoped items are checked when importing to an
+  organization.
+- **`organizationId` casing on collection list** -- The query param sent to `/list/object/org-collections` was lowercase
+  (`organizationid`), which the API silently ignored, returning all collections regardless of org. Now matches the
   camelCase form required by the spec.
-- **CLI help metavars** -- Auto-derived dest-based metavars (`KP_PW`, `BW_ORG`,
-  etc.) replaced with type-descriptive names (`PASSWORD`, `FILE`, `ID`, `TAG`,
-  `N`) to match README and improve `--help` readability.
-- **Dedup cache stale after collection PUT** -- `update_dedup_entry()` keeps the
-  in-memory index fresh after an `update_item()` call, preventing redundant PUTs
-  when multiple KeePass entries share the same `(folder, name)` key.
-- **`_request()` type safety** -- `json_body` widened from `dict[str, Any]` to
-  `Mapping[str, Any]` so `BwItemCreate` passes without type suppression.
-- **`BwItemResponse` nullable fields** -- `notes`, `collectionIds`, and `login`
-  now reflect actual `bw serve` response shapes (nullable / not-required).
-- **`_unpack_entry` tuple destructuring** -- replaced index-based access with
-  direct unpacking; `EntryValue` is always a 4-tuple.
+- **CLI help metavars** -- Auto-derived dest-based metavars (`KP_PW`, `BW_ORG`, etc.) replaced with type-descriptive
+  names (`PASSWORD`, `FILE`, `ID`, `TAG`, `N`) to match README and improve `--help` readability.
+- **Dedup cache stale after collection PUT** -- `update_dedup_entry()` keeps the in-memory index fresh after an
+  `update_item()` call, preventing redundant PUTs when multiple KeePass entries share the same `(folder, name)` key.
+- **`_request()` type safety** -- `json_body` widened from `dict[str, Any]` to `Mapping[str, Any]` so `BwItemCreate`
+  passes without type suppression.
+- **`BwItemResponse` nullable fields** -- `notes`, `collectionIds`, and `login` now reflect actual `bw serve` response
+  shapes (nullable / not-required).
+- **`_unpack_entry` tuple destructuring** -- replaced index-based access with direct unpacking; `EntryValue` is always a
+  4-tuple.
 
 ## [3.0.0a1] - 2026-02-24
 
 ### Added
 
-- **`bw serve` HTTP transport** -- New `BitwardenServeClient` in
-  `bw_serve.py` manages a persistent `bw serve` process with HTTP API
-  access, replacing the one-subprocess-per-operation model. Includes automatic
-  port selection, health polling, vault unlock/sync, signal-safe cleanup, and
-  `atexit` registration.
-- **Batch import via `bw import`** -- New `bw_import.py` module builds
-  Bitwarden-format JSON and invokes `bw import` for bulk item creation,
-  dramatically reducing the number of subprocess calls.
-- **Dedup index** -- `BitwardenServeClient` maintains an
-  `O(1)` `dict[str | None, set[str]]` index of existing vault entries to
-  skip duplicates without per-item API calls.
-- **Async parallel attachment uploads** -- Attachments are uploaded concurrently
-  via `asyncio` with a bounded semaphore (default 4) for backpressure.
-- **Org collection CRUD with cache** -- `bw serve`-based collection
-  creation/listing with an in-memory name-to-ID cache, avoiding repeated API
-  round-trips.
-- **`bw serve` availability guard in e2e test** -- `_assert_bw_serve_available()`
-  pre-flight check before running the Vaultwarden integration test.
-- **`httpx` runtime dependency** -- Added `httpx>=0.28.0` for the HTTP
-  transport layer.
-- **Docker Compose e2e infrastructure** -- `tests/Dockerfile.vaultwarden`,
-  `tests/Dockerfile.test`, `tests/docker-compose.yml`, and `.dockerignore` for
-  fully containerized Vaultwarden integration tests. Fixture data is COPY'd into
-  the Vaultwarden image; the test image bundles Python 3.14, `uv`, `bun`,
-  Node.js, and `@bitwarden/cli`.
-- **`-d`/`--debug` flag** -- Separate debug verbosity level that includes
-  third-party library logs (pykeepass, httpx). `-v` now shows kp2bw operational
-  detail only (custom VERBOSE level at 15), `-d` enables full DEBUG for
-  everything.
-- **Custom VERBOSE logging level** -- `kp2bw.VERBOSE` (15) sits between DEBUG
-  and INFO, matching PowerShell's Write-Verbose/Write-Debug distinction.
-- **Pytest adapters for script tests** -- Added
-  `tests/test_script_adapters.py` so `pytest` can collect and run script-style
-  test modules while preserving `main()`-based direct execution.
-- **CLI-output sanitization tests** -- Added
-  `tests/bw_serve_sanitization_test.py` to verify secret redaction, whitespace
-  normalization, and truncation behavior.
+- **`bw serve` HTTP transport** -- New `BitwardenServeClient` in `bw_serve.py` manages a persistent `bw serve` process
+  with HTTP API access, replacing the one-subprocess-per-operation model. Includes automatic port selection, health
+  polling, vault unlock/sync, signal-safe cleanup, and `atexit` registration.
+- **Batch import via `bw import`** -- New `bw_import.py` module builds Bitwarden-format JSON and invokes `bw import` for
+  bulk item creation, dramatically reducing the number of subprocess calls.
+- **Dedup index** -- `BitwardenServeClient` maintains an `O(1)` `dict[str | None, set[str]]` index of existing vault
+  entries to skip duplicates without per-item API calls.
+- **Async parallel attachment uploads** -- Attachments are uploaded concurrently via `asyncio` with a bounded semaphore
+  (default 4) for backpressure.
+- **Org collection CRUD with cache** -- `bw serve`-based collection creation/listing with an in-memory name-to-ID cache,
+  avoiding repeated API round-trips.
+- **`bw serve` availability guard in e2e test** -- `_assert_bw_serve_available()` pre-flight check before running the
+  Vaultwarden integration test.
+- **`httpx` runtime dependency** -- Added `httpx>=0.28.0` for the HTTP transport layer.
+- **Docker Compose e2e infrastructure** -- `tests/Dockerfile.vaultwarden`, `tests/Dockerfile.test`,
+  `tests/docker-compose.yml`, and `.dockerignore` for fully containerized Vaultwarden integration tests. Fixture data is
+  COPY'd into the Vaultwarden image; the test image bundles Python 3.14, `uv`, `bun`, Node.js, and `@bitwarden/cli`.
+- **`-d`/`--debug` flag** -- Separate debug verbosity level that includes third-party library logs (pykeepass, httpx).
+  `-v` now shows kp2bw operational detail only (custom VERBOSE level at 15), `-d` enables full DEBUG for everything.
+- **Custom VERBOSE logging level** -- `kp2bw.VERBOSE` (15) sits between DEBUG and INFO, matching PowerShell's
+  Write-Verbose/Write-Debug distinction.
+- **Pytest adapters for script tests** -- Added `tests/test_script_adapters.py` so `pytest` can collect and run
+  script-style test modules while preserving `main()`-based direct execution.
+- **CLI-output sanitization tests** -- Added `tests/bw_serve_sanitization_test.py` to verify secret redaction,
+  whitespace normalization, and truncation behavior.
 
 ### Changed
 
-- **3-phase migration architecture** -- `convert.py`
-  `_create_bitwarden_items_for_entries()` rewritten: (1) partition entries and
-  resolve collections, (2) create items via `bw serve` HTTP API, (3) parallel
-  attachment uploads.
-- **Version bump to 3.0.0a1** -- Major version increment reflecting the
-  breaking change from subprocess-per-item to `bw serve` transport.
-- **100% docstring coverage** -- Added docstrings to all functions and methods
-  across `convert.py`, `cli.py`, and `bitwardenclient.py`.
+- **3-phase migration architecture** -- `convert.py` `_create_bitwarden_items_for_entries()` rewritten: (1) partition
+  entries and resolve collections, (2) create items via `bw serve` HTTP API, (3) parallel attachment uploads.
+- **Version bump to 3.0.0a1** -- Major version increment reflecting the breaking change from subprocess-per-item to
+  `bw serve` transport.
+- **100% docstring coverage** -- Added docstrings to all functions and methods across `convert.py`, `cli.py`, and
+  `bitwardenclient.py`.
 - **CI workflow simplified** -- `integration-docker.yml` reduced to a single
-  `docker compose up --build --abort-on-container-exit --exit-code-from test`
-  invocation, replacing multi-step `bw` CLI setup.
-- **CI build output collapsible** -- Docker image build phase wrapped in
-  `::group::` markers so it collapses in GitHub Actions logs.
-- **Regenerated TLS certs** -- Self-signed cert now includes `DNS:vaultwarden`
-  SAN for Docker Compose service-name resolution.
-- **`firstlevel` refactored out of BwItem dict** -- Internal collection-routing
-  key now travels as a separate `EntryValue` tuple element instead of being
-  smuggled inside the Bitwarden API payload dict.
-- **`collectionIds` corrected to array** -- Now emits `[id]` or `[]` per the
-  Bitwarden API spec, instead of a bare string or `None`.
-- **`EntryValue` normalized to one tuple shape** -- Internal converter storage
-  now always carries attachments as a list (empty when none), removing
-  3-tuple/4-tuple branching and `type: ignore` indexing.
-- **Test workflow documentation expanded** -- Added adapter-driven pytest
-  commands and opt-in env flags for packaging/e2e script tests in `AGENTS.md`.
+  `docker compose up --build --abort-on-container-exit --exit-code-from test` invocation, replacing multi-step `bw` CLI
+  setup.
+- **CI build output collapsible** -- Docker image build phase wrapped in `::group::` markers so it collapses in GitHub
+  Actions logs.
+- **Regenerated TLS certs** -- Self-signed cert now includes `DNS:vaultwarden` SAN for Docker Compose service-name
+  resolution.
+- **`firstlevel` refactored out of BwItem dict** -- Internal collection-routing key now travels as a separate
+  `EntryValue` tuple element instead of being smuggled inside the Bitwarden API payload dict.
+- **`collectionIds` corrected to array** -- Now emits `[id]` or `[]` per the Bitwarden API spec, instead of a bare
+  string or `None`.
+- **`EntryValue` normalized to one tuple shape** -- Internal converter storage now always carries attachments as a list
+  (empty when none), removing 3-tuple/4-tuple branching and `type: ignore` indexing.
+- **Test workflow documentation expanded** -- Added adapter-driven pytest commands and opt-in env flags for
+  packaging/e2e script tests in `AGENTS.md`.
 
 ### Fixed
 
-- **Signal handler init race** -- `_previous_sigterm` / `_previous_sigint`
-  are now assigned before `_start_serve()` so that `close()` is safe to
-  call at any point during `__init__` (e.g. when `_wait_for_ready` times
-  out).
-- **Duplicate item name ID lookup** -- Post-import ID recovery now collects all
-  IDs per `(folder, name)` pair and pops them in order, so entries sharing the
-  same name each get their own server-assigned ID for attachment uploads.
-- **`bw serve` startup diagnostics** -- Captured stderr from the `bw serve`
-  process and included it in timeout/crash error messages. Closed stdin via
-  `subprocess.DEVNULL` to prevent blocking. Increased startup timeout from
-  30 s to 60 s for CI headroom.
-- **e2e test empty session token** -- `bw login` + separate `bw unlock --raw`
-  returned an empty session on `@bitwarden/cli@2026.1.0`. Replaced with
-  `bw login --raw` to capture the session in a single step; added
+- **Signal handler init race** -- `_previous_sigterm` / `_previous_sigint` are now assigned before `_start_serve()` so
+  that `close()` is safe to call at any point during `__init__` (e.g. when `_wait_for_ready` times out).
+- **Duplicate item name ID lookup** -- Post-import ID recovery now collects all IDs per `(folder, name)` pair and pops
+  them in order, so entries sharing the same name each get their own server-assigned ID for attachment uploads.
+- **`bw serve` startup diagnostics** -- Captured stderr from the `bw serve` process and included it in timeout/crash
+  error messages. Closed stdin via `subprocess.DEVNULL` to prevent blocking. Increased startup timeout from 30 s to 60 s
+  for CI headroom.
+- **e2e test empty session token** -- `bw login` + separate `bw unlock --raw` returned an empty session on
+  `@bitwarden/cli@2026.1.0`. Replaced with `bw login --raw` to capture the session in a single step; added
   lock-then-unlock retry fallback in `_get_session()`.
-- **`bw import` command injection** -- `run_import` used `shell=True` with a
-  format-string command; replaced with list-form `subprocess.check_output`
-  (no shell).
-- **`close()` double-call crash** -- `BitwardenServeClient.close()` was not
-  idempotent; second call could restore stale signal handlers or raise on
-  `_http.close()`. Added `_closed` guard.
-- **Attachment upload fail-fast** -- `asyncio.gather` abandoned remaining
-  uploads on first error; now uses `return_exceptions=True` to collect all
-  failures before raising an aggregate error.
-- **`bw serve` IPv6 binding** -- `--hostname localhost` caused Node.js/Koa to
-  bind to `::1` (IPv6 loopback) while `httpx` connected to `127.0.0.1` (IPv4),
-  resulting in a 60 s timeout. Changed to `--hostname 127.0.0.1`.
-- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE` from
-  `_start_serve()`; stderr remains piped for crash diagnostics while stdout now
-  inherits parent file descriptors. Removed dead `_read_output()` method that
-  depended on piped streams.
-- **Signal handler restore crash** -- `close()` could raise `TypeError` when
-  restoring signal handlers that were `None` (C-installed handlers). Now guards
-  against `None` before calling `signal.signal()`.
-- **Third-party debug log spam** -- `-v` no longer sets root logger to DEBUG;
-  pykeepass/httpx debug messages only appear with `-d`.
-- **Deprecated `WEBSOCKET_ENABLED` env var** -- Removed from docker-compose.yml;
-  silently ignored since Vaultwarden 1.29.
-- **Dockerfile.test missing `pipefail`** -- Added `SHELL` directive so `curl`
-  failures in pipe are not masked.
-- **Root-level explicit collection assignment** -- Entries without a first-level
-  KeePass group now still receive an explicitly configured Bitwarden
-  collection ID.
-- **Org collection create with missing org ID** -- `create_org_collection()` now
-  short-circuits when no org ID is configured instead of attempting a POST with
-  `organizationId: None`.
-- **Attachment upload JSON parse failures** -- Non-JSON `/attachment` responses
-  now raise `BitwardenClientError` with HTTP context instead of leaking decode
-  exceptions.
-- **`bw serve` response parse hardening** -- Core `_request()` now maps
-  non-JSON responses to `BitwardenClientError`; dedup index also skips malformed
-  item names safely.
-- **Signal-ignore semantics** -- `_signal_handler()` now respects inherited
-  `SIG_IGN` handlers instead of forcing process exit.
-- **Sensitive stderr exposure in diagnostics** -- `bw unlock` and early
-  `bw serve` stderr output is now sanitized (secret redaction + truncation)
-  before logs/error messages are emitted.
-- **E2E command output redaction** -- Integration helper now redacts
-  `--session`/`--passwordenv` values and `--raw` command output in failure
-  messages.
+- **`bw import` command injection** -- `run_import` used `shell=True` with a format-string command; replaced with
+  list-form `subprocess.check_output` (no shell).
+- **`close()` double-call crash** -- `BitwardenServeClient.close()` was not idempotent; second call could restore stale
+  signal handlers or raise on `_http.close()`. Added `_closed` guard.
+- **Attachment upload fail-fast** -- `asyncio.gather` abandoned remaining uploads on first error; now uses
+  `return_exceptions=True` to collect all failures before raising an aggregate error.
+- **`bw serve` IPv6 binding** -- `--hostname localhost` caused Node.js/Koa to bind to `::1` (IPv6 loopback) while
+  `httpx` connected to `127.0.0.1` (IPv4), resulting in a 60 s timeout. Changed to `--hostname 127.0.0.1`.
+- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE` from `_start_serve()`; stderr remains piped for crash
+  diagnostics while stdout now inherits parent file descriptors. Removed dead `_read_output()` method that depended on
+  piped streams.
+- **Signal handler restore crash** -- `close()` could raise `TypeError` when restoring signal handlers that were `None`
+  (C-installed handlers). Now guards against `None` before calling `signal.signal()`.
+- **Third-party debug log spam** -- `-v` no longer sets root logger to DEBUG; pykeepass/httpx debug messages only appear
+  with `-d`.
+- **Deprecated `WEBSOCKET_ENABLED` env var** -- Removed from docker-compose.yml; silently ignored since Vaultwarden
+  1.29.
+- **Dockerfile.test missing `pipefail`** -- Added `SHELL` directive so `curl` failures in pipe are not masked.
+- **Root-level explicit collection assignment** -- Entries without a first-level KeePass group now still receive an
+  explicitly configured Bitwarden collection ID.
+- **Org collection create with missing org ID** -- `create_org_collection()` now short-circuits when no org ID is
+  configured instead of attempting a POST with `organizationId: None`.
+- **Attachment upload JSON parse failures** -- Non-JSON `/attachment` responses now raise `BitwardenClientError` with
+  HTTP context instead of leaking decode exceptions.
+- **`bw serve` response parse hardening** -- Core `_request()` now maps non-JSON responses to `BitwardenClientError`;
+  dedup index also skips malformed item names safely.
+- **Signal-ignore semantics** -- `_signal_handler()` now respects inherited `SIG_IGN` handlers instead of forcing
+  process exit.
+- **Sensitive stderr exposure in diagnostics** -- `bw unlock` and early `bw serve` stderr output is now sanitized
+  (secret redaction + truncation) before logs/error messages are emitted.
+- **E2E command output redaction** -- Integration helper now redacts `--session`/`--passwordenv` values and `--raw`
+  command output in failure messages.
 
 ### Removed
 
-- **Diagnostic `_smoke_test_bw_serve()`** -- Removed from e2e test; it launched
-  `bw serve` with piped stdout (which also triggered the IPv6 binding issue) and
-  blocked the test run.
+- **Diagnostic `_smoke_test_bw_serve()`** -- Removed from e2e test; it launched `bw serve` with piped stdout (which also
+  triggered the IPv6 binding issue) and blocked the test run.
 
 ## [2.0.0] - 2026-02-23
 
 ### Fixed
 
-- **Stubs missing runtime dependency** -- Added explicit `lxml>=6.0.2`
-  dependency to `pykeepass-stubs`; previously only `types-lxml` was declared,
-  leaving the runtime `lxml` import unsatisfied when the stubs package was
-  installed standalone.
+- **Stubs missing runtime dependency** -- Added explicit `lxml>=6.0.2` dependency to `pykeepass-stubs`; previously only
+  `types-lxml` was declared, leaving the runtime `lxml` import unsatisfied when the stubs package was installed
+  standalone.
 - **`except` clauses using Python 2 syntax** -- `except ValueError,
-  binascii.Error` and `except ConversionError, KeyError, AttributeError` only
-  caught the first exception type; the remaining names were silently
-  misinterpreted as the exception variable. Fixed to tuple syntax
-  `except (A, B)`.
-- **Protected custom fields leaking across entries** -- `custom_protected` list
-  was initialized once before the entry loop and accumulated field names from
-  every entry, causing later entries to incorrectly treat same-named properties
-  as protected. Now reset per entry.
+  binascii.Error` and
+  `except ConversionError, KeyError, AttributeError` only caught the first exception type; the remaining names were
+  silently misinterpreted as the exception variable. Fixed to tuple syntax `except (A, B)`.
+- **Protected custom fields leaking across entries** -- `custom_protected` list was initialized once before the entry
+  loop and accumulated field names from every entry, causing later entries to incorrectly treat same-named properties as
+  protected. Now reset per entry.
 
 ## [2.0.0rc3]
 
 ### Added
 
-- **CLI version flag** -- Added `-V` / `--version` to print installed `kp2bw`
-  version and exit.
+- **CLI version flag** -- Added `-V` / `--version` to print installed `kp2bw` version and exit.
 
 ### Fixed
 
-- **Publish workflow token permissions** -- Added explicit least-privilege
-  `permissions: { contents: read }` on the integration gate job in
-  `.github/workflows/publish.yml` to satisfy CodeQL
-  `actions/missing-workflow-permissions`.
+- **Publish workflow token permissions** -- Added explicit least-privilege `permissions: { contents: read }` on the
+  integration gate job in `.github/workflows/publish.yml` to satisfy CodeQL `actions/missing-workflow-permissions`.
 
 ## [2.0.0rc2]
 
 ### Added
 
-- **Vaultwarden Docker integration workflow** -- Added
-  `.github/workflows/integration-docker.yml` to run end-to-end migration checks
-  against a local Vaultwarden container in CI.
-- **Vaultwarden e2e test** -- Added `tests/e2e_vaultwarden_test.py`, which
-  creates a KeePass snapshot, runs `kp2bw`, and validates folder/item migration,
-  URL + custom-field mapping, and idempotency.
-- **Tracked integration fixtures** -- Added fixture allowlist rules in
-  `tests/fixtures/.gitignore` plus seeded Vaultwarden fixture assets under
-  `tests/fixtures/vaultwarden-data/` and `tests/fixtures/vaultwarden-certs/`.
+- **Vaultwarden Docker integration workflow** -- Added `.github/workflows/integration-docker.yml` to run end-to-end
+  migration checks against a local Vaultwarden container in CI.
+- **Vaultwarden e2e test** -- Added `tests/e2e_vaultwarden_test.py`, which creates a KeePass snapshot, runs `kp2bw`, and
+  validates folder/item migration, URL + custom-field mapping, and idempotency.
+- **Tracked integration fixtures** -- Added fixture allowlist rules in `tests/fixtures/.gitignore` plus seeded
+  Vaultwarden fixture assets under `tests/fixtures/vaultwarden-data/` and `tests/fixtures/vaultwarden-certs/`.
 
 ### Changed
 
-- **Contributor guidance** -- Updated `AGENTS.md` with release tag naming,
-  Vaultwarden integration-test workflow details, and fixture tracking notes.
-- **CLI interface modernization** -- Replaced legacy single-dash long options
-  (`-kppw`, `-bworg`, etc.) with standard long flags plus short aliases
-  (for example `--keepass-password` / `-k`) and added consistent `KP2BW_*`
+- **Contributor guidance** -- Updated `AGENTS.md` with release tag naming, Vaultwarden integration-test workflow
+  details, and fixture tracking notes.
+- **CLI interface modernization** -- Replaced legacy single-dash long options (`-kppw`, `-bworg`, etc.) with standard
+  long flags plus short aliases (for example `--keepass-password` / `-k`) and added consistent `KP2BW_*`
   environment-variable support with clear precedence (`CLI > env > default`).
 
 ### Fixed
 
-- **Sensitive logging** -- `BitwardenClient._exec()` no longer logs raw `bw`
-  commands or raw command output; debug logs now use non-sensitive telemetry
-  only (generic command message, exit code, output byte count).
+- **Sensitive logging** -- `BitwardenClient._exec()` no longer logs raw `bw` commands or raw command output; debug logs
+  now use non-sensitive telemetry only (generic command message, exit code, output byte count).
 
 ## [2.0.0rc1] - 2026-02-23
 
 ### Added
 
-- **Passkey migration** -- KeePassXC FIDO2/passkey credentials (`KPEX_PASSKEY_*`
-  attributes) are detected and converted to Bitwarden `fido2Credentials` format
-  (PEM private key → base64url, credential ID, relying party, user handle).
-  Passkey attributes are excluded from regular custom fields to avoid
-  duplication.
-- **Recycle Bin filtering** -- deleted KeePass entries are now excluded by
-  default; use `-include-recyclebin` to override.
-- **Metadata migration** -- KeePass tags, expiry dates, and created/modified
-  timestamps are stored as Bitwarden custom fields. Disable with `-no-metadata`.
-- **Expired entry handling** -- expired entries are marked `[EXPIRED]` in notes;
-  use `-skip-expired` to omit them entirely.
-- Custom exception classes (`BitwardenClientError`, `ConversionError`) replacing
-  bare `Exception` raises.
+- **Passkey migration** -- KeePassXC FIDO2/passkey credentials (`KPEX_PASSKEY_*` attributes) are detected and converted
+  to Bitwarden `fido2Credentials` format (PEM private key → base64url, credential ID, relying party, user handle).
+  Passkey attributes are excluded from regular custom fields to avoid duplication.
+- **Recycle Bin filtering** -- deleted KeePass entries are now excluded by default; use `-include-recyclebin` to
+  override.
+- **Metadata migration** -- KeePass tags, expiry dates, and created/modified timestamps are stored as Bitwarden custom
+  fields. Disable with `-no-metadata`.
+- **Expired entry handling** -- expired entries are marked `[EXPIRED]` in notes; use `-skip-expired` to omit them
+  entirely.
+- Custom exception classes (`BitwardenClientError`, `ConversionError`) replacing bare `Exception` raises.
 - Module-level loggers replacing root logger calls.
 - New CLI flags: `-skip-expired`, `-include-recyclebin`, `-no-metadata`.
-- Type annotations on all source modules (`bitwardenclient.py`, `cli.py`,
-  `convert.py`). Type aliases for Bitwarden structures (`BwItem`, `EntryValue`,
-  `AttachmentItem`, `Fido2Credentials`).
-- **pykeepass type stubs** -- PEP 561 stub package (`packages/pykeepass-stubs/`)
-  as a `uv` workspace member, covering `PyKeePass`, `Entry`, `Group`,
-  `Attachment`, `BaseElement`, `icons`, and exception classes. Uses proper
-  `lxml.etree.Element` / `ElementTree` types with `Literal`-based overloads on
-  `_xpath()` for precise return-type narrowing. Enables full static type
-  checking without upstream `py.typed` support.
+- Type annotations on all source modules (`bitwardenclient.py`, `cli.py`, `convert.py`). Type aliases for Bitwarden
+  structures (`BwItem`, `EntryValue`, `AttachmentItem`, `Fido2Credentials`).
+- **pykeepass type stubs** -- PEP 561 stub package (`packages/pykeepass-stubs/`) as a `uv` workspace member, covering
+  `PyKeePass`, `Entry`, `Group`, `Attachment`, `BaseElement`, `icons`, and exception classes. Uses proper
+  `lxml.etree.Element` / `ElementTree` types with `Literal`-based overloads on `_xpath()` for precise return-type
+  narrowing. Enables full static type checking without upstream `py.typed` support.
 - `py.typed` marker (PEP 561) for both `kp2bw` and stub packages.
 - `__main__.py` module — enables `python -m kp2bw`.
 - `__version__` exposed via `importlib.metadata` in `__init__.py`.
-- **Publish workflow** -- Added `.github/workflows/publish.yml` release workflow
-  with a version-check gate and dynamic PyPI environment URL.
-- **Release smoke tests** -- Added `tests/smoke_test.py` and wired it into
-  publish for both wheel and source distributions to verify package contents,
-  entry points, imports, and CLI help.
-- **Scripts workspace** -- Added `scripts/` JavaScript tooling (`package.json`,
-  `tsconfig.json`, `bun.lock`, `.gitignore`) and typed `uv-version.mjs` helper
-  for `actions/github-script`.
-- **Stub publish workflow** -- Added `.github/workflows/publish-stubs.yml` with
-  tag-based (`stubs-v*`) publishing for `pykeepass-stubs`, package-specific
-  version checks, and explicit artifact publishing.
-- **Stub release smoke tests** -- Added `tests/stubs_smoke_test.py` and wired it
-  into stub-package publish checks for both wheel and source distributions.
+- **Publish workflow** -- Added `.github/workflows/publish.yml` release workflow with a version-check gate and dynamic
+  PyPI environment URL.
+- **Release smoke tests** -- Added `tests/smoke_test.py` and wired it into publish for both wheel and source
+  distributions to verify package contents, entry points, imports, and CLI help.
+- **Scripts workspace** -- Added `scripts/` JavaScript tooling (`package.json`, `tsconfig.json`, `bun.lock`,
+  `.gitignore`) and typed `uv-version.mjs` helper for `actions/github-script`.
+- **Stub publish workflow** -- Added `.github/workflows/publish-stubs.yml` with tag-based (`stubs-v*`) publishing for
+  `pykeepass-stubs`, package-specific version checks, and explicit artifact publishing.
+- **Stub release smoke tests** -- Added `tests/stubs_smoke_test.py` and wired it into stub-package publish checks for
+  both wheel and source distributions.
 
 ### Changed (stubs)
 
-- **baseelement.pyi** -- Replaced `_KeePassLike` protocol with direct
-  `PyKeePass` import (circular imports are fine in `.pyi`). `_kp` attribute and
-  `kp` parameter now typed `PyKeePass | None`. `icon` parameter drops `int`
-  (only `str | None`). `icon` setter accepts `str | None`. `group` and
-  `parentgroup` typed as `Group | None` (were `Any`). `parentgroup` declared as
-  `@property` matching the actual `parentgroup = group` alias in source.
-- **attachment.pyi** -- `_kp` now `PyKeePass | None`. `filename` getter returns
-  `str | None` (lxml `.text` semantics). Added `__repr__`.
-- **entry.pyi** -- `element` parameter accepts `ObjectifiedElement`. All
-  string-field setters (`title`, `username`, `password`, `url`, `notes`, `otp`,
-  `autotype_sequence`, `autotype_window`) accept `str | None`. Added `__str__`.
+- **baseelement.pyi** -- Replaced `_KeePassLike` protocol with direct `PyKeePass` import (circular imports are fine in
+  `.pyi`). `_kp` attribute and `kp` parameter now typed `PyKeePass | None`. `icon` parameter drops `int` (only
+  `str | None`). `icon` setter accepts `str | None`. `group` and `parentgroup` typed as `Group | None` (were `Any`).
+  `parentgroup` declared as `@property` matching the actual `parentgroup = group` alias in source.
+- **attachment.pyi** -- `_kp` now `PyKeePass | None`. `filename` getter returns `str | None` (lxml `.text` semantics).
+  Added `__repr__`.
+- **entry.pyi** -- `element` parameter accepts `ObjectifiedElement`. All string-field setters (`title`, `username`,
+  `password`, `url`, `notes`, `otp`, `autotype_sequence`, `autotype_window`) accept `str | None`. Added `__str__`.
   `HistoryEntry` gains `__str__` and `__hash__`.
-- **group.pyi** -- `element` parameter accepts `ObjectifiedElement`. `append`
-  accepts `Entry | Group | list[Entry] | list[Group]`. Added `__str__`.
-- **pykeepass.pyi** -- `add_entry` `tags` parameter accepts
-  `list[str] | str | None`. Added `_encode_time` and `_decode_time`.
+- **group.pyi** -- `element` parameter accepts `ObjectifiedElement`. `append` accepts
+  `Entry | Group | list[Entry] | list[Group]`. Added `__str__`.
+- **pykeepass.pyi** -- `add_entry` `tags` parameter accepts `list[str] | str | None`. Added `_encode_time` and
+  `_decode_time`.
 - **icons.pyi** -- New stub declaring `icons: SimpleNamespace`.
 - **\_\_init\_\_.pyi** -- Added `icons` re-export and `__all__` entry.
-- Ignored `PYI029` in stubs `ruff.lint` config (`__repr__` without `__eq__` is
-  intentional — `__eq__` is on `BaseElement`).
-- Marked stubs as partial in `py.typed` and expanded package
-  metadata/classifiers in `packages/pykeepass-stubs/pyproject.toml`.
-- Adopted independent stubs versioning (no lockstep with `pykeepass`) and
-  declared supported runtime compatibility range `pykeepass>=4.1.1.post1,<4.2`.
+- Ignored `PYI029` in stubs `ruff.lint` config (`__repr__` without `__eq__` is intentional — `__eq__` is on
+  `BaseElement`).
+- Marked stubs as partial in `py.typed` and expanded package metadata/classifiers in
+  `packages/pykeepass-stubs/pyproject.toml`.
+- Adopted independent stubs versioning (no lockstep with `pykeepass`) and declared supported runtime compatibility range
+  `pykeepass>=4.1.1.post1,<4.2`.
 
 ### Changed
 
@@ -498,26 +445,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Requires Python 3.14+.
 - Rewrote README: mentions fork origin, tightened copy, added usage table.
 - Removed legacy `setup.py`, `setup.cfg`, and `kp2bw.egg-info/`.
-- Replaced `KpEntry`/`KpGroup` type aliases (were `Any`) with real pykeepass
-  types (`Entry`, `Group`) from stubs, eliminating ~130 basedpyright warnings.
-- Added contributor guidance to run `bun --cwd=scripts typecheck` when files
-  under `scripts/` are changed.
-- Updated local Zed JavaScript language-server configuration to include `tsgo`
-  with `vtsls`.
+- Replaced `KpEntry`/`KpGroup` type aliases (were `Any`) with real pykeepass types (`Entry`, `Group`) from stubs,
+  eliminating ~130 basedpyright warnings.
+- Added contributor guidance to run `bun --cwd=scripts typecheck` when files under `scripts/` are changed.
+- Updated local Zed JavaScript language-server configuration to include `tsgo` with `vtsls`.
 
 ### Fixed
 
 - Type errors: `self._colls` could be `None` when accessed without guard.
-- `except` clause used Python 2 syntax (`except A, B, C:` instead of
-  `except (A, B, C):`).
-- Tag-based import could add the same entry multiple times when it matched
-  multiple tags (now breaks after first match).
+- `except` clause used Python 2 syntax (`except A, B, C:` instead of `except (A, B, C):`).
+- Tag-based import could add the same entry multiple times when it matched multiple tags (now breaks after first match).
 - `entry.group` could be `None` — added guards for safe attribute access.
 - Dead code: `group.path == "/"` comparisons (path is a list, never a string).
 - Unnecessary `isinstance(self._import_tags, list)` check and dead else branch.
-- Multiple ruff lint violations (35 total): import sorting, f-string
-  conversions, redundant `.keys()`/`.items()` calls, nested `if` simplification,
-  unused variables, overly broad exception catches, and more.
+- Multiple ruff lint violations (35 total): import sorting, f-string conversions, redundant `.keys()`/`.items()` calls,
+  nested `if` simplification, unused variables, overly broad exception catches, and more.
 
 ## [Upstream]
 

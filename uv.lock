@@ -389,6 +389,8 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "pykeepass" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -407,6 +409,7 @@ dev = [
     { name = "ruff" },
     { name = "tombi" },
     { name = "ty" },
+    { name = "types-pyyaml" },
 ]
 lint = [
     { name = "basedpyright" },
@@ -417,6 +420,7 @@ lint = [
 ]
 stubs = [
     { name = "pykeepass-stubs" },
+    { name = "types-pyyaml" },
 ]
 test = [
     { name = "coverage" },
@@ -428,6 +432,8 @@ test = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pykeepass", specifier = ">=4.1.1.post1" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=13.0.0" },
 ]
 
@@ -444,6 +450,7 @@ dev = [
     { name = "ruff", specifier = ">=0.15.2" },
     { name = "tombi", specifier = ">=0.7.32" },
     { name = "ty", specifier = ">=0.0.18" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260518" },
 ]
 lint = [
     { name = "basedpyright", specifier = ">=1.38.1" },
@@ -452,7 +459,10 @@ lint = [
     { name = "tombi", specifier = ">=0.7.32" },
     { name = "ty", specifier = ">=0.0.18" },
 ]
-stubs = [{ name = "pykeepass-stubs", editable = "packages/pykeepass-stubs" }]
+stubs = [
+    { name = "pykeepass-stubs", editable = "packages/pykeepass-stubs" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260518" },
+]
 test = [
     { name = "coverage", specifier = ">=7.13.4" },
     { name = "pytest", specifier = ">=9.0.2" },
@@ -790,6 +800,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dotenv"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
+]
+
+[[package]]
 name = "pytokens"
 version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -965,6 +984,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/dd/ad/c70ac8cbdc28eb58a17301c69b4925af54b614e47f9b2ebc9de5cc10f786/types_lxml-2026.2.16.tar.gz", hash = "sha256:b3a1340cc06db98d541c785732f6f68bea438daff4e2b7809ef748d545d01406", size = 161204, upload-time = "2026-02-17T02:34:50.855Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/5c/03ec9befbf4bb5309bfd576c6a5ac1c75633f78f6b64cf1f594e97cd3d23/types_lxml-2026.2.16-py3-none-any.whl", hash = "sha256:5dd81ffa54830e5f361988737c5f1d6a0ae48b2742790637ec560df790ea0401", size = 97040, upload-time = "2026-02-17T02:34:49.286Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260518"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/83/4a1afc3fbfcf5b8d46fc390cd95ed6b0dc9010a265f4e9f46314efffa37a/types_pyyaml-6.0.12.20260518.tar.gz", hash = "sha256:d917f83fb38462550338c1297faedd860b3ec83912b96b1e3d73255f7473e466", size = 17850, upload-time = "2026-05-18T06:01:58.675Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/a2/c01db32be2ae7d6a1689972f3c492b149ee4e164b12fdfd9f64b50888215/types_pyyaml-6.0.12.20260518-py3-none-any.whl", hash = "sha256:d2150f75a231c9fe9c7463bd29487d93e60bac90400287351384bc2284eba7cd", size = 20312, upload-time = "2026-05-18T06:01:57.368Z" },
 ]
 
 [[package]]

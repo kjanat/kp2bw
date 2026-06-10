@@ -11,7 +11,6 @@ def assert_distribution_files() -> None:
     available = {str(path) for path in dist_files}
     required = {
         "kp2bw/__init__.py",
-        "kp2bw/bitwardenclient.py",
         "kp2bw/cli.py",
         "kp2bw/convert.py",
         "kp2bw/py.typed",
@@ -31,9 +30,8 @@ def assert_console_script() -> None:
 
 def assert_imports() -> None:
     import kp2bw
-    from kp2bw import bitwardenclient, cli, convert, exceptions
+    from kp2bw import cli, convert, exceptions
 
-    _ = bitwardenclient
     _ = cli
     _ = convert
     _ = exceptions
