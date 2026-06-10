@@ -66,6 +66,18 @@ def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
     return os.environ.get(env_var)
 
 
+def _resolve_bool_option(arg_val: bool | None, env_var: str, *, default: bool) -> bool:
+    """Resolve a boolean option through CLI > env var > default precedence.
+
+    Raises :exc:`ValueError` when the environment variable holds an unrecognised
+    value, propagated up to the caller's ``except ValueError``.
+    """
+    if arg_val is not None:
+        return arg_val
+    parsed = _parse_bool_env(os.environ.get(env_var), env_var=env_var)
+    return parsed if parsed is not None else default
+
+
 def _load_dotenv() -> str | None:
     """Load a ``.env`` file (searched upward from the CWD) into ``os.environ``.
 
@@ -399,69 +411,31 @@ def main() -> None:
 
     # bool/int options: CLI > env > code default
     try:
-        path_to_name = (
-            args.path_to_name
-            if args.path_to_name is not None
-            else _parse_bool_env(
-                os.environ.get("KP2BW_PATH_TO_NAME"), env_var="KP2BW_PATH_TO_NAME"
-            )
+        path_to_name = _resolve_bool_option(
+            args.path_to_name, "KP2BW_PATH_TO_NAME", default=False
         )
-        skip_expired = (
-            args.skip_expired
-            if args.skip_expired is not None
-            else _parse_bool_env(
-                os.environ.get("KP2BW_SKIP_EXPIRED"), env_var="KP2BW_SKIP_EXPIRED"
-            )
+        skip_expired = _resolve_bool_option(
+            args.skip_expired, "KP2BW_SKIP_EXPIRED", default=False
         )
-        include_recyclebin = (
-            args.include_recyclebin
-            if args.include_recyclebin is not None
-            else _parse_bool_env(
-                os.environ.get("KP2BW_INCLUDE_RECYCLE_BIN"),
-                env_var="KP2BW_INCLUDE_RECYCLE_BIN",
-            )
+        include_recyclebin = _resolve_bool_option(
+            args.include_recyclebin, "KP2BW_INCLUDE_RECYCLE_BIN", default=False
         )
-        migrate_metadata = (
-            args.migrate_metadata
-            if args.migrate_metadata is not None
-            else _parse_bool_env(
-                os.environ.get("KP2BW_MIGRATE_METADATA"),
-                env_var="KP2BW_MIGRATE_METADATA",
-            )
+        migrate_metadata = _resolve_bool_option(
+            args.migrate_metadata, "KP2BW_MIGRATE_METADATA", default=True
         )
-        update_existing = (
-            args.update_existing
-            if args.update_existing is not None
-            else _parse_bool_env(
-                os.environ.get("KP2BW_UPDATE"),
-                env_var="KP2BW_UPDATE",
-            )
+        update_existing = _resolve_bool_option(
+            args.update_existing, "KP2BW_UPDATE", default=True
         )
-        include_oversize_secrets = (
-            args.include_oversize_secrets
-            if args.include_oversize_secrets is not None
-            else _parse_bool_env(
-                os.environ.get("KP2BW_INCLUDE_OVERSIZE_SECRETS"),
-                env_var="KP2BW_INCLUDE_OVERSIZE_SECRETS",
-            )
+        include_oversize_secrets = _resolve_bool_option(
+            args.include_oversize_secrets,
+            "KP2BW_INCLUDE_OVERSIZE_SECRETS",
+            default=False,
         )
-        skip_confirm = (
-            args.skip_confirm
-            if args.skip_confirm is not None
-            else _parse_bool_env(os.environ.get("KP2BW_YES"), env_var="KP2BW_YES")
+        skip_confirm = _resolve_bool_option(
+            args.skip_confirm, "KP2BW_YES", default=False
         )
-        verbose = (
-            args.verbose
-            if args.verbose is not None
-            else _parse_bool_env(
-                os.environ.get("KP2BW_VERBOSE"), env_var="KP2BW_VERBOSE"
-            )
-        )
-        debug = (
-            args.debug
-            if args.debug is not None
-            else _parse_bool_env(os.environ.get("KP2BW_DEBUG"), env_var="KP2BW_DEBUG")
-        )
+        verbose = _resolve_bool_option(args.verbose, "KP2BW_VERBOSE", default=False)
+        debug = _resolve_bool_option(args.debug, "KP2BW_DEBUG", default=False)
     except ValueError as exc:
         _ = sys.stderr.write(f"ERROR: {exc}\n\n")
         _argparser().print_help()
@@ -481,18 +455,6 @@ def main() -> None:
                 )
                 _argparser().print_help()
                 sys.exit(2)
-
-    path_to_name = path_to_name if path_to_name is not None else False
-    skip_expired = skip_expired if skip_expired is not None else False
-    include_recyclebin = include_recyclebin if include_recyclebin is not None else False
-    migrate_metadata = migrate_metadata if migrate_metadata is not None else True
-    update_existing = update_existing if update_existing is not None else True
-    include_oversize_secrets = (
-        include_oversize_secrets if include_oversize_secrets is not None else False
-    )
-    skip_confirm = skip_confirm if skip_confirm is not None else False
-    verbose = verbose if verbose is not None else False
-    debug = debug if debug is not None else False
 
     if not args.keepass_file:
         _ = sys.stderr.write(
