@@ -66,7 +66,6 @@ def _print_summary(
     n_attachments: int,
     n_update_failed: int,
     n_attach_failed: int,
-    n_create_failed: int,
 ) -> None:
     """Print a final migration summary to the shared rich console."""
     m, s = divmod(int(elapsed), 60)
@@ -82,7 +81,6 @@ def _print_summary(
                 n_attachments,
                 n_update_failed,
                 n_attach_failed,
-                n_create_failed,
                 1,
             )
         )
@@ -98,11 +96,6 @@ def _print_summary(
         )
     if n_attachments:
         console.print(f"  [cyan]{n_attachments:{w}d}[/cyan] attachments uploaded")
-    if n_create_failed:
-        console.print(
-            f"  [red]{n_create_failed:{w}d}[/red] entries failed to create "
-            f"(see warnings above)"
-        )
     if n_update_failed:
         console.print(
             f"  [red]{n_update_failed:{w}d}[/red] entries failed to update "
@@ -672,7 +665,7 @@ class Converter:
                     ref_result = self._get_referenced_entry(
                         lookup_mode, ref_compare_string
                     )
-                    _, _, ref_entry, _ = self._unpack_entry(ref_result)
+                    _, _, ref_entry, _ = ref_result
 
                     value = self._find_referenced_value(ref_entry, field_referenced)
                     setattr(kp_entry, member, value)
@@ -693,7 +686,7 @@ class Converter:
 
             if username_and_password_match and ref_result is not None:
                 # => add url to bw_item => username / pw identical
-                _, _, ref_item, _ = self._unpack_entry(ref_result)
+                _, _, ref_item, _ = ref_result
                 if kp_entry.url:
                     ref_item["login"]["uris"].append(
                         BwUri(uri=kp_entry.url, match=None)
@@ -718,14 +711,6 @@ class Converter:
         finally:
             self._refs_in_progress.discard(entry_key)
 
-    @staticmethod
-    def _unpack_entry(
-        entry_value: EntryValue,
-    ) -> tuple[str | None, str | None, BwItemCreate, list[AttachmentItem]]:
-        """Destructure an entry value into (folder, firstlevel, item, attachments)."""
-        folder, firstlevel, bw_item, attachments = entry_value
-        return folder, firstlevel, bw_item, attachments
-
     def _resolve_collection(
         self,
         bw: BitwardenServeClient,
@@ -747,48 +732,6 @@ class Converter:
             # bw_item here is safe for the current single-pass architecture.
             bw_item["collectionIds"] = [collection_id]
         return collection_id
-
-    def _resolve_collection_safely(
-        self,
-        bw: BitwardenServeClient,
-        bw_item: BwItemCreate,
-        firstlevel: str | None,
-    ) -> bool:
-        """Resolve+set the collection for *bw_item*, reporting failure non-fatally.
-
-        Returns ``True`` on success.  A :class:`BitwardenClientError` (e.g. the
-        org-collection POST is dropped or times out) is logged and reported as
-        ``False`` so the caller skips just this entry instead of aborting the
-        whole migration -- the same per-entry robustness the create and update
-        phases have (issue #24).
-        """
-        try:
-            self._resolve_collection(bw, bw_item, firstlevel)
-        except BitwardenClientError as exc:
-            logger.warning(
-                f"Could not resolve the collection for {bw_item.get('name', '?')!r}; "
-                f"skipping it this run (a re-run is safe): {exc}"
-            )
-            return False
-        return True
-
-    @staticmethod
-    def _sync_safely(bw: BitwardenServeClient) -> None:
-        """Run the pre-attachment sync, reporting failure non-fatally.
-
-        Freshly created item IDs can be momentarily unresolvable by ``bw serve``'s
-        attachment endpoint until a sync makes them visible.  A dropped sync is
-        non-fatal: the items are already created and :meth:`upload_attachment`
-        self-heals with its own sync-and-retry, so a failed pre-emptive sync must
-        not abort a run whose items already landed.
-        """
-        try:
-            bw.sync()
-        except BitwardenClientError as exc:
-            logger.warning(
-                f"Pre-attachment sync failed; continuing (uploads self-heal with "
-                f"their own sync-and-retry): {exc}"
-            )
 
     @staticmethod
     def _attachment_filename(att: AttachmentItem) -> str:
@@ -1084,8 +1027,7 @@ class Converter:
     def _create_bitwarden_items_for_entries(self) -> int:
         """Create entries via ``bw serve`` HTTP API and upload attachments.
 
-        Returns the count of non-fatal failures (rejected creates + updates +
-        attachment uploads).
+        Returns the count of non-fatal failures (rejected updates + uploads).
         """
         logger.info("Connecting and reading existing folders and entries")
 
@@ -1102,7 +1044,6 @@ class Converter:
         n_updated = 0
         n_collection_update = 0
         n_created = 0
-        n_create_failed = 0
         n_attachments = 0
         n_attach_failed = 0
         n_update_failed = 0
@@ -1143,17 +1084,10 @@ class Converter:
 
             task1 = progress.add_task("Processing entries", total=len(self._entries))
             for key, entry_value in self._entries.items():
-                folder, firstlevel, bw_item, attachments = self._unpack_entry(
-                    entry_value
-                )
+                folder, firstlevel, bw_item, attachments = entry_value
 
-                # Resolve collection (mutates bw_item). A dropped collection
-                # POST is non-fatal: skip just this entry rather than abort the
-                # whole loop and strand every entry after it (issue #24).
-                if not self._resolve_collection_safely(bw, bw_item, firstlevel):
-                    n_create_failed += 1
-                    progress.advance(task1)
-                    continue
+                # Resolve collection (mutates bw_item)
+                self._resolve_collection(bw, bw_item, firstlevel)
 
                 # Stable-identity dedup: match this entry to its Bitwarden item
                 # by the KeePass UUID stamp first; failing that, adopt an
@@ -1221,17 +1155,8 @@ class Converter:
                     n_created += 1
                     progress.advance(task2)
 
-                def _on_create_failed(_key: str, _exc: BitwardenClientError) -> None:
-                    # A rejected create is non-fatal (issue #24): tally it and
-                    # advance the bar so a partial batch still completes the run.
-                    nonlocal n_create_failed
-                    n_create_failed += 1
-                    progress.advance(task2)
-
                 key_to_id = bw.create_items_batch(
-                    import_entries,
-                    on_item_created=_on_created,
-                    on_item_failed=_on_create_failed,
+                    import_entries, on_item_created=_on_created
                 )
             else:
                 key_to_id = {}
@@ -1266,7 +1191,7 @@ class Converter:
             # cache; sync so freshly created IDs are visible before uploading to
             # them. (upload_attachment also self-heals with a sync-and-retry.)
             if new_item_uploads:
-                self._sync_safely(bw)
+                bw.sync()
 
             if upload_items:
                 total_files = sum(len(fps) for _, fps in upload_items)
@@ -1307,15 +1232,14 @@ class Converter:
             n_attachments,
             n_update_failed,
             n_attach_failed,
-            n_create_failed,
         )
-        return n_update_failed + n_attach_failed + n_create_failed
+        return n_update_failed + n_attach_failed
 
     def convert(self) -> int:
         """Run the full KeePass-to-Bitwarden migration pipeline.
 
-        Returns the number of non-fatal failures (rejected entry creates plus
-        updates plus attachment uploads); ``0`` means everything succeeded.
+        Returns the number of non-fatal failures (rejected entry updates plus
+        rejected attachment uploads); ``0`` means everything succeeded.
         """
         # load keepass data from database
         self._load_keepass_data()
