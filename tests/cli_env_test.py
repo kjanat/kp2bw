@@ -31,10 +31,19 @@ class _CapturingConverter:
         return 0
 
 
-def _reset_root_logging() -> None:
-    """Detach and close the file handler main() left on the root logger."""
+def _reset_root_logging(keep: list[logging.Handler]) -> None:
+    """Detach and close only the handlers ``main()`` added to the root logger.
+
+    Snapshot the root handlers (*keep*) before ``cli.main()`` runs, then remove
+    just the file handler it adds.  Handlers present beforehand -- notably
+    pytest's log-capture handler -- are left intact so this teardown never
+    strips a framework handler the test did not install.
+    """
     root = logging.getLogger()
+    kept = set(keep)
     for handler in list(root.handlers):
+        if handler in kept:
+            continue
         root.removeHandler(handler)
         handler.close()
 
@@ -48,6 +57,9 @@ def assert_dotenv_supplies_keepass_file() -> None:
     """
     original_cwd = Path.cwd()
     original_argv = sys.argv
+    # Snapshot root handlers before main() adds its file handler, so teardown
+    # removes only what main() installed and leaves pytest's capture intact.
+    original_handlers = list(logging.getLogger().handlers)
     saved_env = {key: os.environ.get(key) for key in _MANAGED_ENV}
 
     tmp = tempfile.mkdtemp()
@@ -80,7 +92,9 @@ def assert_dotenv_supplies_keepass_file() -> None:
             raise AssertionError(f"expected db path from .env, got {db_path!r}")
     finally:
         sys.argv = original_argv
-        _reset_root_logging()  # release the log file before removing the temp dir
+        # Release the log file (so rmtree works on Windows) without stripping
+        # the framework handlers present before the test.
+        _reset_root_logging(original_handlers)
         os.chdir(original_cwd)
         shutil.rmtree(tmp, ignore_errors=True)
         for key, value in saved_env.items():
