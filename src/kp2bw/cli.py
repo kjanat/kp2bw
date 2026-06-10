@@ -11,7 +11,7 @@ from dotenv import find_dotenv, load_dotenv
 from rich.logging import RichHandler
 from rich.markup import escape
 
-from . import VERBOSE, __version__
+from . import VERBOSE, __title__, __version__
 from ._console import console
 from .bw_serve import ensure_bw_available
 from .convert import Converter
@@ -86,11 +86,12 @@ def _load_dotenv() -> str | None:
 
 def _argparser() -> MyArgParser:
     """Build and return the CLI argument parser with all flags and env-var support."""
-    # Pin prog explicitly: Python 3.14 argparse derives a default prog from the
-    # launch (via _prog_name), which for a packaged/console-script invocation
-    # (uv's trampoline) becomes "python.exe <argv0>" and leaked the launcher
-    # path into --version, usage, and error messages.
-    parser = MyArgParser(prog="kp2bw", description="KeePass to Bitwarden converter")
+    # Pin prog to the package name (single source: pyproject [project].name,
+    # surfaced as __title__). Python 3.14 argparse otherwise derives prog from
+    # the launch (via _prog_name), which for a console-script invocation becomes
+    # "python.exe <argv0>" and leaked the launcher path into --version, usage,
+    # and error messages.
+    parser = MyArgParser(prog=__title__, description="KeePass to Bitwarden converter")
 
     parser.add_argument(
         "-V",
