@@ -394,22 +394,28 @@ def send_with_retry(
     *,
     method: str,
     path: str,
+    idempotent: bool | None = None,
     max_attempts: int = _REQUEST_MAX_ATTEMPTS,
     backoff_s: float = _REQUEST_RETRY_BACKOFF_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> httpx.Response:
-    """Call *send*, retrying transient transport errors for idempotent methods.
+    """Call *send*, retrying transient transport errors for idempotent requests.
 
     ``bw serve`` can drop a pooled keepalive connection over a long run; httpx
     surfaces that as :class:`httpx.TransportError` before the request is
-    processed, so retrying an idempotent method (GET/PUT/DELETE) on a fresh
-    connection recovers without risking a duplicate.  A non-idempotent ``POST``
-    is attempted once.  A persistent failure is raised as a
+    processed, so retrying an idempotent request on a fresh connection recovers
+    without risking a duplicate.  Whether a request is idempotent defaults to its
+    HTTP method (GET/PUT/DELETE retry, POST does not), but *idempotent* overrides
+    that: a ``POST`` that merely replays state (``/sync``, ``/unlock``) passes
+    ``idempotent=True`` so a transient reset on startup is retried away rather
+    than aborting the run before it begins.  A persistent failure is raised as a
     :class:`BitwardenClientError` so callers see a project error (and per-entry
     handlers can treat it as non-fatal) rather than a raw ``httpx`` traceback
     that aborts the whole migration.  *sleep* is injectable for tests.
     """
-    attempts = max_attempts if method.upper() in _IDEMPOTENT_METHODS else 1
+    if idempotent is None:
+        idempotent = method.upper() in _IDEMPOTENT_METHODS
+    attempts = max_attempts if idempotent else 1
     for attempt in range(1, attempts + 1):
         try:
             return send()
@@ -702,16 +708,22 @@ class BitwardenServeClient:
         *,
         json_body: Mapping[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        idempotent: bool | None = None,
     ) -> dict[str, Any]:
         """Send an HTTP request and return the parsed ``data`` payload.
 
         Raises :class:`BitwardenClientError` on non-success responses or
         when the ``bw serve`` JSON envelope reports ``success: false``.
+
+        *idempotent* overrides method-based retry classification for a ``POST``
+        that merely replays state (``/sync``, ``/unlock``); see
+        :func:`send_with_retry`.
         """
         resp = send_with_retry(
             lambda: self._http.request(method, path, json=json_body, params=params),
             method=method,
             path=path,
+            idempotent=idempotent,
         )
         if resp.status_code >= 400:
             raise BitwardenClientError(
@@ -738,14 +750,22 @@ class BitwardenServeClient:
     # ------------------------------------------------------------------
 
     def _unlock(self, password: str) -> None:
-        """Unlock the vault via ``POST /unlock``."""
+        """Unlock the vault via ``POST /unlock``.
+
+        Replaying an unlock is harmless, so it is retried on a transient reset.
+        """
         logger.log(VERBOSE, "Unlocking vault via bw serve")
-        self._request("POST", "/unlock", json_body={"password": password})
+        self._request(
+            "POST", "/unlock", json_body={"password": password}, idempotent=True
+        )
 
     def _sync(self) -> None:
-        """Synchronise vault state via ``POST /sync``."""
+        """Synchronise vault state via ``POST /sync``.
+
+        Replaying a sync is harmless, so it is retried on a transient reset.
+        """
         logger.log(VERBOSE, "Syncing vault via bw serve")
-        self._request("POST", "/sync")
+        self._request("POST", "/sync", idempotent=True)
 
     def sync(self) -> None:
         """Force a vault sync (public API)."""
@@ -841,9 +861,10 @@ class BitwardenServeClient:
 
     def create_items_batch(
         self,
-        entries: dict[str, tuple[str | None, BwItemCreate]],
+        entries: Mapping[str, tuple[str | None, BwItemCreate]],
         *,
         on_item_created: Callable[[], None] | None = None,
+        on_item_failed: Callable[[str, BitwardenClientError], None] | None = None,
     ) -> dict[str, str]:
         """Create folders and items via HTTP, returning ``{key: item_id}``.
 
@@ -851,21 +872,60 @@ class BitwardenServeClient:
         Folders are created/resolved first, then items are created sequentially
         with the correct ``folderId`` bound.
 
-        *on_item_created* is called after each successful item creation; callers
-        use it to advance a progress bar without creating a direct dependency on
-        the UI library.
+        A single create that fails (``bw serve`` drops or times out the request,
+        surfaced as :class:`BitwardenClientError`) is non-fatal: the item is
+        skipped and reported via *on_item_failed*, and the remaining entries are
+        still migrated rather than stranded -- the same robustness the update and
+        attachment phases have (issue #24).  A folder whose creation fails skips
+        its items, which are reported failed rather than silently created in the
+        no-folder root.  Re-running is safe: stable-UUID dedup adopts anything a
+        timed-out request actually created server-side.
+
+        *on_item_created* is called after each successful item creation and
+        *on_item_failed* after each skipped one; callers use them to advance a
+        progress bar and tally outcomes without depending on the UI library.
         """
-        # Ensure all required folders exist.
+        # Ensure all required folders exist. A folder whose creation fails is
+        # recorded so its items are skipped, not misplaced into the no-folder root.
         folder_names = {fname for fname, _ in entries.values() if fname}
+        failed_folders: set[str] = set()
         for fname in sorted(folder_names):
-            self.create_folder(fname)
+            try:
+                self.create_folder(fname)
+            except BitwardenClientError as exc:
+                logger.warning(
+                    f"Could not create folder {fname!r}; its items are skipped "
+                    f"this run (a re-run is safe): {exc}"
+                )
+                failed_folders.add(fname)
 
         key_to_id: dict[str, str] = {}
         for key, (folder_name, bw_item) in entries.items():
+            name = bw_item.get("name", "?")
+            if folder_name is not None and folder_name in failed_folders:
+                if on_item_failed is not None:
+                    on_item_failed(
+                        key,
+                        BitwardenClientError(
+                            f"folder {folder_name!r} could not be created"
+                        ),
+                    )
+                continue
             # Bind folder ID — shallow-copy rather than mutating the shared dict.
             item = copy.copy(bw_item)
             item["folderId"] = self._folders.get(folder_name) if folder_name else None
-            item_id = self.create_item(item)
+            try:
+                item_id = self.create_item(item)
+            except BitwardenClientError as exc:
+                # One bad entry must not abort the run and strand every entry
+                # after it; a re-run adopts it if the server created it anyway.
+                logger.warning(
+                    f"Could not create item {name!r}; skipping it this run "
+                    f"(a re-run is safe): {exc}"
+                )
+                if on_item_failed is not None:
+                    on_item_failed(key, exc)
+                continue
             key_to_id[key] = item_id
             if on_item_created is not None:
                 on_item_created()

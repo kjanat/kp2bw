@@ -240,6 +240,63 @@ def assert_send_with_retry_exhaustion_raises_project_error() -> None:
         raise AssertionError("exhausted retries must raise BitwardenClientError")
 
 
+def assert_send_with_retry_idempotent_override_retries_post() -> None:
+    """An explicit ``idempotent=True`` retries a POST.
+
+    ``/sync`` and ``/unlock`` are POSTs but semantically idempotent (replaying
+    them is harmless), so a transient reset on startup must be retried away
+    rather than aborting the whole migration before it begins.
+    """
+    calls = {"n": 0}
+    ok = httpx.Response(200)
+
+    def send() -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise httpx.ReadError("forcibly closed")
+        return ok
+
+    got = send_with_retry(
+        send,
+        method="POST",
+        path="/sync",
+        idempotent=True,
+        max_attempts=3,
+        sleep=lambda _s: None,
+    )
+    if got is not ok or calls["n"] != 2:
+        raise AssertionError(
+            f"idempotent=True must retry a POST until it recovers; calls={calls['n']}"
+        )
+
+
+def assert_send_with_retry_idempotent_override_can_force_single_attempt() -> None:
+    """An explicit ``idempotent=False`` forces a single attempt even for a GET."""
+    calls = {"n": 0}
+
+    def send() -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ReadError("forcibly closed")
+
+    try:
+        send_with_retry(
+            send,
+            method="GET",
+            path="/x",
+            idempotent=False,
+            max_attempts=3,
+            sleep=lambda _s: None,
+        )
+    except BitwardenClientError:
+        pass
+    else:
+        raise AssertionError("a forced non-idempotent request must still raise")
+    if calls["n"] != 1:
+        raise AssertionError(
+            f"idempotent=False must force exactly one attempt, got {calls['n']}"
+        )
+
+
 def assert_login_compat_hint_renders_osc8() -> None:
     """``warn_login_compatibility`` prints a clickable OSC 8 link on a terminal.
 
@@ -292,6 +349,8 @@ def main() -> None:
     assert_send_with_retry_recovers_idempotent()
     assert_send_with_retry_does_not_retry_post()
     assert_send_with_retry_exhaustion_raises_project_error()
+    assert_send_with_retry_idempotent_override_retries_post()
+    assert_send_with_retry_idempotent_override_can_force_single_attempt()
     assert_login_compat_hint_renders_osc8()
     assert_login_compat_hint_degrades_to_plain_url()
     print("bw serve command resolution test passed")

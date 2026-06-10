@@ -31,6 +31,10 @@ def test_bw_serve_command_script() -> None:
     _run_script_main("bw_serve_command_test.py")
 
 
+def test_bw_serve_batch_script() -> None:
+    _run_script_main("bw_serve_batch_test.py")
+
+
 def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 
@@ -49,6 +53,10 @@ def test_convert_ref_resolution_script() -> None:
 
 def test_convert_update_script() -> None:
     _run_script_main("convert_update_test.py")
+
+
+def test_convert_resilience_script() -> None:
+    _run_script_main("convert_resilience_test.py")
 
 
 def test_windows_bw_cmd_smoke_script() -> None:
