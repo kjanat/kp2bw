@@ -39,6 +39,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`kp2bw --version` (and usage/error messages) now print `kp2bw`, not the launcher path.** Python 3.14's argparse
+  derives the default program name from how the script was launched, so a console-script run through uv's trampoline
+  printed `python.exe C:\...\Scripts\kp2bw 3.4.1`. The program name is now pinned to `kp2bw`.
 - **Distinct entries sharing a title no longer collapse onto one Bitwarden item (silent data loss)** -- deduplication
   keyed on `(folder, title)`, so several different logins that happened to share a title (e.g. four accounts all named
   `192.168.2.67`) merged into a single item and re-runs churned non-idempotently. Every migrated item now carries its
