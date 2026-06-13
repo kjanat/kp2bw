@@ -13,7 +13,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from types import FrameType, TracebackType
-from typing import Any, Self, cast
+from typing import Any, NamedTuple, Self, cast
 
 import httpx
 from rich.markup import escape
@@ -93,7 +93,7 @@ KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
 def item_kp2bw_id(item: BwItemResponse) -> str | None:
     """Return *item*'s KeePass-UUID stamp, or ``None`` if it is unstamped.
 
-    Reads the hidden ``KP2BW_ID`` custom field written by :mod:`kp2bw.convert`.
+    Reads the plain-text ``KP2BW_ID`` custom field written by :mod:`kp2bw.convert`.
     An unstamped item is a legacy import (pre-stable-identity) eligible for a
     one-time ``(folder, name)`` adoption that backfills the stamp.
     """
@@ -101,6 +101,17 @@ def item_kp2bw_id(item: BwItemResponse) -> str | None:
         if field.get("name") == KP2BW_ID_FIELD_NAME:
             return field.get("value") or None
     return None
+
+
+class StripResult(NamedTuple):
+    """Outcome of a :meth:`BitwardenServeClient.strip_field_from_items` pass.
+
+    *scanned* is every in-scope item inspected; *stripped* is the subset that
+    carried the field and was rewritten.
+    """
+
+    scanned: int
+    stripped: int
 
 
 # Actionable message shown when the Bitwarden CLI cannot be located.
@@ -915,6 +926,44 @@ class BitwardenServeClient:
         }
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+
+    def strip_field_from_items(self, field_name: str) -> StripResult:
+        """Remove a custom field from every in-scope item that carries it.
+
+        The finalize step for users adopting Bitwarden: drops kp2bw's
+        ``KP2BW_ID`` dedup stamp once a migration is trusted, leaving clean
+        items behind.  Scope mirrors a migration -- the configured
+        organisation/collection when set, otherwise the personal vault -- so
+        only items kp2bw could have stamped are touched.  Items lacking the
+        field are skipped; each match is rewritten via a full :meth:`update_item`
+        ``PUT``.  Returns the scanned/stripped counts for the caller to report.
+
+        The strip itself is re-runnable (a second pass finds nothing), but it is
+        **irreversible** and degrades future migrations: the stamp is the stable
+        identity key, and without it a re-run falls back to ``(folder, name)``
+        matching -- the very collision the stamp exists to disambiguate -- so
+        entries sharing a folder and title can then be duplicated or mismatched.
+        It is therefore a deliberate final step, gated by a confirmation in the
+        CLI (skippable with ``-y`` for callers who know what they want).
+        """
+        items = self.list_items(
+            organization_id=self._org_id,
+            collection_id=self._collection_id,
+        )
+        stripped = 0
+        for item in items:
+            fields = item.get("fields") or []
+            if not any(field.get("name") == field_name for field in fields):
+                continue
+            item["fields"] = [
+                field for field in fields if field.get("name") != field_name
+            ]
+            self.update_item(item["id"], item)
+            stripped += 1
+        logger.info(
+            f"Stripped {field_name} from {stripped} of {len(items)} scanned items"
+        )
+        return StripResult(scanned=len(items), stripped=stripped)
 
     def create_items_batch(
         self,
