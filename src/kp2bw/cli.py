@@ -16,6 +16,7 @@ from ._console import console
 from .bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient, ensure_bw_available
 from .convert import Converter
 from .exceptions import BitwardenClientError, ConversionError
+from .uri_mapping import UriMatchValue, match_value_names, parse_match_name
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,31 @@ def _argparser() -> MyArgParser:
             "(env: KP2BW_INCLUDE_OVERSIZE_SECRETS)"
         ),
         action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--uri-match",
+        dest="uri_match",
+        metavar="MODE",
+        choices=match_value_names(),
+        help=(
+            "Match mode for plain URLs migrated into login URIs: "
+            "domain|host|startswith|exact|regex|never|default. 'domain' (default) "
+            "reproduces KeePassXC's host-based matching; 'default' defers to your "
+            "Bitwarden account default. Quoted-exact and wildcard URLs keep their "
+            "own modes regardless (env: KP2BW_URI_MATCH)"
+        ),
+        default=None,
+    )
+    parser.add_argument(
+        "--interpret-uri-syntax",
+        dest="interpret_uri_syntax",
+        help=(
+            "Interpret KeePassXC URL syntax on additional URLs — double-quoted as "
+            "exact, '*' as wildcard (default: on). --no-interpret-uri-syntax "
+            "imports every URL as a plain string (env: KP2BW_INTERPRET_URI_SYNTAX)"
+        ),
+        action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
@@ -528,6 +554,12 @@ def main() -> None:
         strip_ids = _resolve_bool_option(
             args.strip_ids, "KP2BW_STRIP_IDS", default=False
         )
+        interpret_uri_syntax = _resolve_bool_option(
+            args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
+        )
+        uri_match: UriMatchValue = parse_match_name(
+            _with_env(args.uri_match, "KP2BW_URI_MATCH") or "domain"
+        )
         verbose = _resolve_bool_option(args.verbose, "KP2BW_VERBOSE", default=False)
         debug = _resolve_bool_option(args.debug, "KP2BW_DEBUG", default=False)
     except ValueError as exc:
@@ -641,6 +673,8 @@ def main() -> None:
         migrate_metadata=migrate_metadata,
         update_existing=update_existing,
         include_oversize_secrets=include_oversize_secrets,
+        uri_match=uri_match,
+        interpret_uri_syntax=interpret_uri_syntax,
     )
     try:
         failures = c.convert()

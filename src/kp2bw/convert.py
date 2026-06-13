@@ -31,6 +31,13 @@ from .bw_types import (
 )
 from .exceptions import BitwardenClientError, ConversionError
 from .otp import resolve_otp
+from .uri_mapping import (
+    UriMatchValue,
+    build_login_uris,
+    is_android_app_key,
+    is_url_attribute_key,
+    url_attribute_index,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +137,8 @@ class Converter:
     _migrate_metadata: bool
     _update_existing: bool
     _include_oversize_secrets: bool
+    _uri_match: UriMatchValue
+    _interpret_uri_syntax: bool
     _kp_ref_entries: list[Entry]
     _entries: dict[str, EntryValue]
     _member_reference_resolving_dict: dict[str, str]
@@ -154,6 +163,8 @@ class Converter:
         migrate_metadata: bool = True,
         update_existing: bool = True,
         include_oversize_secrets: bool = False,
+        uri_match: UriMatchValue = 0,
+        interpret_uri_syntax: bool = True,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._keepass_file_path = keepass_file_path
@@ -170,6 +181,8 @@ class Converter:
         self._migrate_metadata = migrate_metadata
         self._update_existing = update_existing
         self._include_oversize_secrets = include_oversize_secrets
+        self._uri_match = uri_match
+        self._interpret_uri_syntax = interpret_uri_syntax
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -236,9 +249,22 @@ class Converter:
         password: str,
         custom_properties: dict[str, FieldSpec],
         fido2_credentials: list[BwFido2Credential] | None = None,
+        additional_urls: list[str] | None = None,
+        android_packages: list[str] | None = None,
     ) -> BwItemCreate:
-        """Build a Bitwarden item dict from individual entry fields."""
-        uris: list[BwUri] = [BwUri(uri=url, match=None)] if url else []
+        """Build a Bitwarden item dict from individual entry fields.
+
+        The primary ``url`` plus any KeePass(XC) additional URLs and Android
+        package ids are folded into ``login.uris`` with per-URI match modes (see
+        :mod:`kp2bw.uri_mapping`), rather than left as inert custom fields.
+        """
+        uris: list[BwUri] = build_login_uris(
+            primary_url=url,
+            additional_urls=additional_urls or [],
+            android_packages=android_packages or [],
+            plain_match=self._uri_match,
+            interpret_syntax=self._interpret_uri_syntax,
+        )
         login: BwItemLogin = BwItemLogin(
             uris=uris,
             username=username,
@@ -359,9 +385,20 @@ class Converter:
             logger.warning(f"{entry.title or '_untitled'}: {warning}")
 
         custom_properties: dict[str, FieldSpec] = {}
+        # KeePass(XC) additional URLs / Android packages are folded into
+        # login.uris (not custom fields); collected here keyed by their suffix so
+        # the emitted URI order is deterministic across re-runs.
+        url_attrs: list[tuple[int, str]] = []
+        app_attrs: list[tuple[int, str]] = []
         for key, value in custom_props.items():
             # Skip passkey attributes and OTP fields folded into login.totp.
             if key.startswith(KPEX_PASSKEY_PREFIX) or key in otp_result.consumed_keys:
+                continue
+            # Route URL/app attributes to login.uris instead of custom fields.
+            if is_url_attribute_key(key):
+                if value:
+                    bucket = app_attrs if is_android_app_key(key) else url_attrs
+                    bucket.append((url_attribute_index(key), value))
                 continue
             # A value over the item-size limit is offloaded to a <key>.txt
             # attachment below (mirroring the notes handling); keep it out of the
@@ -415,6 +452,8 @@ class Converter:
             password=entry.password if entry.password else "",
             custom_properties=custom_properties,
             fido2_credentials=fido2_credentials,
+            additional_urls=[v for _, v in sorted(url_attrs)],
+            android_packages=[v for _, v in sorted(app_attrs)],
         )
 
         # get attachments to store later on. A value over the inline size limit
@@ -696,7 +735,7 @@ class Converter:
                 _, _, ref_item, _ = self._unpack_entry(ref_result)
                 if kp_entry.url:
                     ref_item["login"]["uris"].append(
-                        BwUri(uri=kp_entry.url, match=None)
+                        BwUri(uri=kp_entry.url, match=self._uri_match)
                     )
                 canonical = ref_result
             else:

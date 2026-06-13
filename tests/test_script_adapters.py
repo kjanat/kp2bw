@@ -43,6 +43,10 @@ def test_strip_ids_script() -> None:
     _run_script_main("strip_ids_test.py")
 
 
+def test_uri_mapping_script() -> None:
+    _run_script_main("uri_mapping_test.py")
+
+
 def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 

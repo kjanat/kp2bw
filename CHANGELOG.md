@@ -10,6 +10,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Additional URLs and Android packages migrate as Bitwarden login URIs, not custom fields** -- a KeePass(XC) entry's
+  additional URLs (`KP2A_URL`, `KP2A_URL_1`, …) and `AndroidApp` package ids were copied verbatim into custom fields,
+  where they were inert. They now become real entries in `login.uris`, so one login autofills across every site and app
+  it covered in KeePass, and each URI gets a per-URI match mode reproducing KeePassXC's behaviour: a plain URL → base
+  domain (`--uri-match` / `KP2BW_URI_MATCH` tunes this; `domain` default reproduces KeePassXC's host-based matching,
+  `default` defers to your Bitwarden account default), a double-quoted URL → exact, and a `*` wildcard → starts-with
+  (trailing path) or regex. `AndroidApp` becomes an `androidapp://` URI. Non-web schemes (`keepassxc://`, `cmd://`,
+  `kdbx://`, `file://`) and unresolved `{REF:…}` URLs are dropped rather than left as dead URIs.
+  `--no-interpret-uri-syntax` (`KP2BW_INTERPRET_URI_SYNTAX`) disables the quote/wildcard interpretation for a literal
+  import. Bitwarden applies a regex to the whole URL (unlike KeePassXC's separate host/path regexes), so complex
+  wildcards are emitted as a best-effort whole-URL regex with a warning to review.
 - **Configurable per-request HTTP timeout via `KP2BW_HTTP_TIMEOUT`** -- the timeout for a single `bw serve` request is
   now overridable through the `KP2BW_HTTP_TIMEOUT` environment variable (seconds), so a slow self-hosted server (e.g.
   Vaultwarden) where an individual item write outlasts the default no longer times out. Non-numeric or non-positive

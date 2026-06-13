@@ -85,7 +85,8 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
        [--metadata | --no-metadata] [--update | --no-update]
-       [--include-oversize-secrets] [--strip-ids] [-y] [-v] [-d]
+       [--include-oversize-secrets] [--uri-match MODE]
+       [--interpret-uri-syntax | --no-interpret-uri-syntax] [--strip-ids] [-y] [-v] [-d]
        [FILE]
 ```
 
@@ -105,6 +106,8 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--metadata` / `--no-metadata`         | Toggle KeePass tags/expiry as a `KP2BW_META` field (default: on)                                          | `KP2BW_MIGRATE_METADATA`              |
 | `--update` / `--no-update`             | Update existing entries changed in KeePass (default: on)                                                  | `KP2BW_UPDATE`                        |
 | `--include-oversize-secrets`           | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off) | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
+| `--uri-match MODE`                     | Match mode for plain URLs: `domain`(default)/`host`/`startswith`/`exact`/`regex`/`never`/`default`        | `KP2BW_URI_MATCH`                     |
+| `--interpret-uri-syntax`               | Honor KeePassXC quote/wildcard URL syntax on additional URLs (default: on; `--no-…` for literal)          | `KP2BW_INTERPRET_URI_SYNTAX`          |
 | `--strip-ids`                          | Finalize: remove the `KP2BW_ID` dedup stamp from migrated items, then exit (no migration; no KeePass db)  | `KP2BW_STRIP_IDS`                     |
 | `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt                                                          | `KP2BW_YES`                           |
 | `-v, --verbose`                        | Verbose output                                                                                            | `KP2BW_VERBOSE`                       |
@@ -112,6 +115,16 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `-V, --version`                        | Print the installed `kp2bw` version and exit                                                              | -                                     |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
+
+### URL handling
+
+A KeePass(XC) entry's additional URLs (`KP2A_URL`, `KP2A_URL_1`, …) and Android packages (`AndroidApp`) are migrated as
+real Bitwarden **login URIs** — not inert custom fields — so one login autofills across every site and app it covered in
+KeePass. Each URI gets a per-URI match mode reproducing KeePassXC's behaviour: a plain URL → **base domain** (matches
+the domain and its subdomains; tune with `--uri-match`), a double-quoted URL → **exact**, and a `*` wildcard →
+**starts-with** (trailing path) or **regex**. Non-web schemes (`keepassxc://`, `cmd://`, `kdbx://`, `file://`) and
+unresolved `{REF:…}` URLs are dropped. `--no-interpret-uri-syntax` disables the quote/wildcard interpretation and
+imports every URL as a plain string.
 
 ### Finalizing (`--strip-ids`)
 
