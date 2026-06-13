@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import dotenv_values, find_dotenv
 from rich.logging import RichHandler
 from rich.markup import escape
 
@@ -92,15 +92,22 @@ def _load_dotenv() -> str | None:
     Returns the path that was loaded, or ``None`` when no ``.env`` is found.
     ``usecwd=True`` anchors the search at the user's working directory rather
     than this module's install location, so an installed ``kp2bw`` still picks
-    up the project ``.env``.  ``override`` is left at its default of ``False``
-    so a real shell environment variable always wins over a file entry: a
-    ``.env`` value simply occupies the env tier of the documented
-    CLI flag > env var > default precedence.
+    up the project ``.env``.
+
+    A real, *non-empty* shell variable still wins over a file entry (the
+    documented CLI flag > env var > default precedence). But a variable that is
+    set to the **empty string** must not shadow a ``.env`` value: that is almost
+    never intended and produces a baffling "X is required" when the file clearly
+    has it. So unlike a plain ``load_dotenv(override=False)`` -- which treats an
+    empty export as "set" and skips it -- this fills any key that is currently
+    unset *or empty* from the file, leaving non-empty exports untouched.
     """
     dotenv_path = find_dotenv(usecwd=True)
     if not dotenv_path:
         return None
-    _ = load_dotenv(dotenv_path)
+    for key, value in dotenv_values(dotenv_path).items():
+        if value is not None and not os.environ.get(key):
+            os.environ[key] = value
     return dotenv_path
 
 

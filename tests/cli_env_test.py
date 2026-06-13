@@ -104,8 +104,49 @@ def assert_dotenv_supplies_keepass_file() -> None:
                 os.environ[key] = value
 
 
+def assert_empty_env_var_defers_to_dotenv() -> None:
+    """An empty exported var must not shadow a .env value; a non-empty one wins.
+
+    Regression: `KP2BW_KEEPASS_FILE=""` in the environment used to shadow the
+    .env entry (load_dotenv override=False treats empty as "set"), producing a
+    baffling "db required". `_load_dotenv` now fills keys that are unset *or
+    empty* from the file while leaving non-empty exports untouched.
+    """
+    original_cwd = Path.cwd()
+    saved = os.environ.get("KP2BW_KEEPASS_FILE")
+    tmp = tempfile.mkdtemp()
+    try:
+        _ = (Path(tmp) / ".env").write_text(
+            "KP2BW_KEEPASS_FILE=from-dotenv.kdbx\n", encoding="utf-8"
+        )
+        os.chdir(tmp)
+
+        # Empty export -> .env wins.
+        os.environ["KP2BW_KEEPASS_FILE"] = ""
+        _ = cli._load_dotenv()
+        if os.environ.get("KP2BW_KEEPASS_FILE") != "from-dotenv.kdbx":
+            raise AssertionError(
+                f"empty export should defer to .env, got "
+                f"{os.environ.get('KP2BW_KEEPASS_FILE')!r}"
+            )
+
+        # Non-empty export -> still wins over .env.
+        os.environ["KP2BW_KEEPASS_FILE"] = "/real/shell/override.kdbx"
+        _ = cli._load_dotenv()
+        if os.environ.get("KP2BW_KEEPASS_FILE") != "/real/shell/override.kdbx":
+            raise AssertionError("non-empty export must win over .env")
+    finally:
+        os.chdir(original_cwd)
+        if saved is None:
+            _ = os.environ.pop("KP2BW_KEEPASS_FILE", None)
+        else:
+            os.environ["KP2BW_KEEPASS_FILE"] = saved
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> None:
     assert_dotenv_supplies_keepass_file()
+    assert_empty_env_var_defers_to_dotenv()
     print("cli env test passed")
 
 

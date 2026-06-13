@@ -8,6 +8,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **An empty environment variable no longer shadows the matching `.env` entry.** `KP2BW_KEEPASS_FILE=""` (or any
+  empty-string export) used to override the `.env` value -- `load_dotenv(override=False)` treats an empty export as
+  "set" -- producing a baffling "KeePass database path is required" even when `.env` clearly had it. `_load_dotenv` now
+  fills any variable that is unset *or empty* from the file, while a real *non-empty* shell variable still wins (the
+  documented CLI flag > env var > default precedence is preserved for meaningful values).
+
 ### Added
 
 - **`--report-uris keepass|bitwarden` -- a read-only URI collision report** (env `KP2BW_REPORT_URIS`). Groups every
