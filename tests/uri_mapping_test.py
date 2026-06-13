@@ -7,10 +7,14 @@ AndroidApp -> androidapp://, de-duplication, and the two config knobs
 (plain-tier match value, interpret-syntax on/off).
 """
 
+from typing import cast
+
+from kp2bw.bw_types import BwField, BwUri
 from kp2bw.uri_mapping import (
     build_login_uris,
     is_url_attribute_key,
     parse_match_name,
+    remap_item_fields_to_uris,
 )
 
 
@@ -146,6 +150,39 @@ def assert_plain_match_override() -> None:
         raise AssertionError(f"quoted form should stay exact(3): {got}")
 
 
+def assert_remap_lifts_legacy_fields() -> None:
+    """remap_item_fields_to_uris drops KP2A_URL*/AndroidApp fields and adds URIs."""
+    fields = [
+        cast(BwField, {"name": "Notes", "value": "keep", "type": 0}),
+        cast(BwField, {"name": "KP2A_URL", "value": "https://alt.example", "type": 0}),
+        cast(BwField, {"name": "AndroidApp", "value": "com.example.app", "type": 0}),
+    ]
+    uris = [cast(BwUri, {"uri": "https://primary.example", "match": 0})]
+
+    new_fields, new_uris, changed = remap_item_fields_to_uris(fields, uris)
+
+    if not changed:
+        raise AssertionError("expected changed=True")
+    if [f["name"] for f in new_fields] != ["Notes"]:
+        raise AssertionError(f"legacy fields not dropped: {new_fields}")
+    new_values = [u["uri"] for u in new_uris]
+    if new_values != [
+        "https://primary.example",
+        "https://alt.example",
+        "androidapp://com.example.app",
+    ]:
+        raise AssertionError(f"unexpected merged uris: {new_values}")
+
+
+def assert_remap_noop_without_legacy_fields() -> None:
+    """An item without KP2A_URL*/AndroidApp fields is reported unchanged."""
+    fields = [cast(BwField, {"name": "Notes", "value": "keep", "type": 0})]
+    uris = [cast(BwUri, {"uri": "https://x.example", "match": 0})]
+    _, _, changed = remap_item_fields_to_uris(fields, uris)
+    if changed:
+        raise AssertionError("expected changed=False when no legacy fields present")
+
+
 def main() -> None:
     assert_match_names_parse()
     assert_url_attribute_keys()
@@ -154,6 +191,8 @@ def main() -> None:
     assert_drops()
     assert_literal_mode_skips_interpretation()
     assert_plain_match_override()
+    assert_remap_lifts_legacy_fields()
+    assert_remap_noop_without_legacy_fields()
     print("uri mapping test passed")
 
 

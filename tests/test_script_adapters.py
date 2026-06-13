@@ -47,6 +47,10 @@ def test_uri_mapping_script() -> None:
     _run_script_main("uri_mapping_test.py")
 
 
+def test_migrate_uris_script() -> None:
+    _run_script_main("migrate_uris_test.py")
+
+
 def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 

@@ -20,7 +20,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `kdbx://`, `file://`) and unresolved `{REF:…}` URLs are dropped rather than left as dead URIs.
   `--no-interpret-uri-syntax` (`KP2BW_INTERPRET_URI_SYNTAX`) disables the quote/wildcard interpretation for a literal
   import. Bitwarden applies a regex to the whole URL (unlike KeePassXC's separate host/path regexes), so complex
-  wildcards are emitted as a best-effort whole-URL regex with a warning to review.
+  wildcards are emitted as a best-effort whole-URL regex with a warning to review. Items imported before this are
+  upgraded by a normal re-run (the change is detected and the item updated in place); for users who don't want to
+  re-import, `kp2bw --migrate-uris` (env `KP2BW_MIGRATE_URIS`) is a Bitwarden-only one-shot pass that re-folds the
+  legacy fields into URIs on every existing item. Both honour `--uri-match` / `--interpret-uri-syntax` and `-o`/`-c`
+  scope.
 - **Configurable per-request HTTP timeout via `KP2BW_HTTP_TIMEOUT`** -- the timeout for a single `bw serve` request is
   now overridable through the `KP2BW_HTTP_TIMEOUT` environment variable (seconds), so a slow self-hosted server (e.g.
   Vaultwarden) where an individual item write outlasts the default no longer times out. Non-numeric or non-positive

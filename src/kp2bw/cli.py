@@ -270,6 +270,19 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--migrate-uris",
+        dest="migrate_uris",
+        help=(
+            "Upgrade existing Bitwarden items in place: re-fold legacy "
+            "KP2A_URL*/AndroidApp custom fields into login URIs, then exit (no "
+            "migration, no KeePass database needed). For users who imported "
+            "before URL folding and don't want to re-import. Honors --uri-match / "
+            "--interpret-uri-syntax and -o/-c for scope (env: KP2BW_MIGRATE_URIS)"
+        ),
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
         "-y",
         "--yes",
         dest="skip_confirm",
@@ -384,6 +397,62 @@ def _run_strip_ids(
     else:
         console.print(
             f"No items carried a {KP2BW_ID_FIELD_NAME} stamp in {escape(scope)} "
+            f"({result.scanned} scanned); nothing to do."
+        )
+
+
+def _run_migrate_uris(
+    *,
+    bitwarden_password_arg: str | None,
+    org_id: str | None,
+    collection_id: str | None,
+    skip_confirm: bool,
+    uri_match: UriMatchValue,
+    interpret_uri_syntax: bool,
+) -> None:
+    """Upgrade existing items: re-fold legacy URL/app custom fields into URIs.
+
+    The Bitwarden-only counterpart of the new-import URL folding, for users who
+    imported before it and do not want to re-import. No KeePass database is read;
+    scope follows ``-o``/``-c``. The change is additive and idempotent (the
+    field's data survives as a URI), so the confirmation is skippable with ``-y``.
+    Errors surface as an actionable message rather than a traceback.
+    """
+    scope = _describe_scope(org_id, collection_id)
+    try:
+        if not skip_confirm:
+            console.print(
+                "This re-folds legacy [bold]KP2A_URL*[/bold]/[bold]AndroidApp[/bold] "
+                f"custom fields into login URIs on items in [bold]{escape(scope)}[/bold] "
+                "(the field data is preserved as a URI, then the field removed)."
+            )
+            if not _confirm("Migrate URL fields to URIs? [y/n]: "):
+                console.print("[yellow]Aborted; nothing changed.[/yellow]")
+                sys.exit(0)
+
+        bw_pw = _read_password(
+            bitwarden_password_arg, "Please enter your Bitwarden password: "
+        )
+        with BitwardenServeClient(
+            bw_pw, org_id=org_id, collection_id=collection_id
+        ) as bw:
+            result = bw.migrate_url_fields_to_uris(
+                plain_match=uri_match, interpret_syntax=interpret_uri_syntax
+            )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
+        sys.exit(130)
+    except (BitwardenClientError, ConversionError) as exc:
+        _fail(exc)
+
+    if result.migrated:
+        console.print(
+            f"[green]Migrated URL fields to URIs on {result.migrated} of "
+            f"{result.scanned} item(s).[/green]"
+        )
+    else:
+        console.print(
+            f"No items carried legacy URL fields in {escape(scope)} "
             f"({result.scanned} scanned); nothing to do."
         )
 
@@ -554,6 +623,9 @@ def main() -> None:
         strip_ids = _resolve_bool_option(
             args.strip_ids, "KP2BW_STRIP_IDS", default=False
         )
+        migrate_uris = _resolve_bool_option(
+            args.migrate_uris, "KP2BW_MIGRATE_URIS", default=False
+        )
         interpret_uri_syntax = _resolve_bool_option(
             args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
         )
@@ -626,6 +698,18 @@ def main() -> None:
             org_id=args.bw_org,
             collection_id=args.bw_coll,
             skip_confirm=skip_confirm,
+        )
+        return
+
+    # --migrate-uris is likewise a Bitwarden-only upgrade pass (no KeePass).
+    if migrate_uris:
+        _run_migrate_uris(
+            bitwarden_password_arg=args.bw_pw,
+            org_id=args.bw_org,
+            collection_id=args.bw_coll,
+            skip_confirm=skip_confirm,
+            uri_match=uri_match,
+            interpret_uri_syntax=interpret_uri_syntax,
         )
         return
 

@@ -86,33 +86,35 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [--include-recycle-bin | --no-include-recycle-bin]
        [--metadata | --no-metadata] [--update | --no-update]
        [--include-oversize-secrets] [--uri-match MODE]
-       [--interpret-uri-syntax | --no-interpret-uri-syntax] [--strip-ids] [-y] [-v] [-d]
+       [--interpret-uri-syntax | --no-interpret-uri-syntax]
+       [--migrate-uris] [--strip-ids] [-y] [-v] [-d]
        [FILE]
 ```
 
-| Flag                                   | Description                                                                                               | Env var                               |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `keepass_file`                         | Path to your KeePass 2.x database                                                                         | `KP2BW_KEEPASS_FILE`                  |
-| `-k, --keepass-password`               | KeePass password (prompted if omitted)                                                                    | `KP2BW_KEEPASS_PASSWORD`              |
-| `-K, --keepass-keyfile`                | KeePass key file                                                                                          | `KP2BW_KEEPASS_KEYFILE`               |
-| `-b, --bitwarden-password`             | Bitwarden password (prompted if omitted)                                                                  | `KP2BW_BITWARDEN_PASSWORD`            |
-| `-o, --bitwarden-org`                  | Bitwarden Organization ID                                                                                 | `KP2BW_BITWARDEN_ORG`                 |
-| `-c, --bitwarden-collection`           | Collection ID, or `auto` to derive from top-level folder names                                            | `KP2BW_BITWARDEN_COLLECTION`          |
-| `-t, --import-tags`                    | Only import entries with these tags                                                                       | `KP2BW_IMPORT_TAGS` (comma-separated) |
-| `--path-to-name` / `--no-path-to-name` | Prepend folder path to entry names (default: off)                                                         | `KP2BW_PATH_TO_NAME`                  |
-| `--path-to-name-skip`                  | Skip first N folders in path prefix (default: 1)                                                          | `KP2BW_PATH_TO_NAME_SKIP`             |
-| `--skip-expired`                       | Skip entries that have expired in KeePass                                                                 | `KP2BW_SKIP_EXPIRED`                  |
-| `--include-recycle-bin`                | Include Recycle Bin entries (excluded by default)                                                         | `KP2BW_INCLUDE_RECYCLE_BIN`           |
-| `--metadata` / `--no-metadata`         | Toggle KeePass tags/expiry as a `KP2BW_META` field (default: on)                                          | `KP2BW_MIGRATE_METADATA`              |
-| `--update` / `--no-update`             | Update existing entries changed in KeePass (default: on)                                                  | `KP2BW_UPDATE`                        |
-| `--include-oversize-secrets`           | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off) | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
-| `--uri-match MODE`                     | Match mode for plain URLs: `domain`(default)/`host`/`startswith`/`exact`/`regex`/`never`/`default`        | `KP2BW_URI_MATCH`                     |
-| `--interpret-uri-syntax`               | Honor KeePassXC quote/wildcard URL syntax on additional URLs (default: on; `--no-…` for literal)          | `KP2BW_INTERPRET_URI_SYNTAX`          |
-| `--strip-ids`                          | Finalize: remove the `KP2BW_ID` dedup stamp from migrated items, then exit (no migration; no KeePass db)  | `KP2BW_STRIP_IDS`                     |
-| `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt                                                          | `KP2BW_YES`                           |
-| `-v, --verbose`                        | Verbose output                                                                                            | `KP2BW_VERBOSE`                       |
-| `-d, --debug`                          | Debug output — includes third-party library logs                                                          | `KP2BW_DEBUG`                         |
-| `-V, --version`                        | Print the installed `kp2bw` version and exit                                                              | -                                     |
+| Flag                                   | Description                                                                                                    | Env var                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `keepass_file`                         | Path to your KeePass 2.x database                                                                              | `KP2BW_KEEPASS_FILE`                  |
+| `-k, --keepass-password`               | KeePass password (prompted if omitted)                                                                         | `KP2BW_KEEPASS_PASSWORD`              |
+| `-K, --keepass-keyfile`                | KeePass key file                                                                                               | `KP2BW_KEEPASS_KEYFILE`               |
+| `-b, --bitwarden-password`             | Bitwarden password (prompted if omitted)                                                                       | `KP2BW_BITWARDEN_PASSWORD`            |
+| `-o, --bitwarden-org`                  | Bitwarden Organization ID                                                                                      | `KP2BW_BITWARDEN_ORG`                 |
+| `-c, --bitwarden-collection`           | Collection ID, or `auto` to derive from top-level folder names                                                 | `KP2BW_BITWARDEN_COLLECTION`          |
+| `-t, --import-tags`                    | Only import entries with these tags                                                                            | `KP2BW_IMPORT_TAGS` (comma-separated) |
+| `--path-to-name` / `--no-path-to-name` | Prepend folder path to entry names (default: off)                                                              | `KP2BW_PATH_TO_NAME`                  |
+| `--path-to-name-skip`                  | Skip first N folders in path prefix (default: 1)                                                               | `KP2BW_PATH_TO_NAME_SKIP`             |
+| `--skip-expired`                       | Skip entries that have expired in KeePass                                                                      | `KP2BW_SKIP_EXPIRED`                  |
+| `--include-recycle-bin`                | Include Recycle Bin entries (excluded by default)                                                              | `KP2BW_INCLUDE_RECYCLE_BIN`           |
+| `--metadata` / `--no-metadata`         | Toggle KeePass tags/expiry as a `KP2BW_META` field (default: on)                                               | `KP2BW_MIGRATE_METADATA`              |
+| `--update` / `--no-update`             | Update existing entries changed in KeePass (default: on)                                                       | `KP2BW_UPDATE`                        |
+| `--include-oversize-secrets`           | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off)      | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
+| `--uri-match MODE`                     | Match mode for plain URLs: `domain`(default)/`host`/`startswith`/`exact`/`regex`/`never`/`default`             | `KP2BW_URI_MATCH`                     |
+| `--interpret-uri-syntax`               | Honor KeePassXC quote/wildcard URL syntax on additional URLs (default: on; `--no-…` for literal)               | `KP2BW_INTERPRET_URI_SYNTAX`          |
+| `--migrate-uris`                       | Upgrade existing items: re-fold legacy `KP2A_URL*`/`AndroidApp` fields into login URIs, then exit (no KeePass) | `KP2BW_MIGRATE_URIS`                  |
+| `--strip-ids`                          | Finalize: remove the `KP2BW_ID` dedup stamp from migrated items, then exit (no migration; no KeePass db)       | `KP2BW_STRIP_IDS`                     |
+| `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt                                                               | `KP2BW_YES`                           |
+| `-v, --verbose`                        | Verbose output                                                                                                 | `KP2BW_VERBOSE`                       |
+| `-d, --debug`                          | Debug output — includes third-party library logs                                                               | `KP2BW_DEBUG`                         |
+| `-V, --version`                        | Print the installed `kp2bw` version and exit                                                                   | -                                     |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 
@@ -125,6 +127,11 @@ the domain and its subdomains; tune with `--uri-match`), a double-quoted URL →
 **starts-with** (trailing path) or **regex**. Non-web schemes (`keepassxc://`, `cmd://`, `kdbx://`, `file://`) and
 unresolved `{REF:…}` URLs are dropped. `--no-interpret-uri-syntax` disables the quote/wildcard interpretation and
 imports every URL as a plain string.
+
+Already imported before this existed? Two ways to upgrade: re-run a normal migration (the change is detected and the
+items are updated in place), or — if you don't want to re-import — run `kp2bw --migrate-uris`, a Bitwarden-only one-shot
+pass that re-folds the legacy fields into URIs on every existing item. Both honour
+`--uri-match`/`--interpret-uri-syntax` and `-o`/`-c`.
 
 ### Finalizing (`--strip-ids`)
 

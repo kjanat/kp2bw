@@ -22,6 +22,7 @@ from . import VERBOSE
 from ._console import console
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import BitwardenClientError
+from .uri_mapping import UriMatchValue, remap_item_fields_to_uris
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,17 @@ class StripResult(NamedTuple):
 
     scanned: int
     stripped: int
+
+
+class MigrateResult(NamedTuple):
+    """Outcome of a :meth:`BitwardenServeClient.migrate_url_fields_to_uris` pass.
+
+    *scanned* is every in-scope item inspected; *migrated* is the subset that
+    carried ``KP2A_URL*`` / ``AndroidApp`` fields and was rewritten to URIs.
+    """
+
+    scanned: int
+    migrated: int
 
 
 # Actionable message shown when the Bitwarden CLI cannot be located.
@@ -964,6 +976,48 @@ class BitwardenServeClient:
             f"Stripped {field_name} from {stripped} of {len(items)} scanned items"
         )
         return StripResult(scanned=len(items), stripped=stripped)
+
+    def migrate_url_fields_to_uris(
+        self, *, plain_match: UriMatchValue, interpret_syntax: bool
+    ) -> MigrateResult:
+        """Re-fold legacy ``KP2A_URL*`` / ``AndroidApp`` custom fields into URIs.
+
+        The Bitwarden-only upgrade pass for users who imported before URL folding
+        and do not want to re-import: each in-scope login item carrying those
+        fields is rewritten so they become login URIs (appended to existing ones,
+        de-duplicated) and the redundant fields are dropped.  Scope mirrors a
+        migration (the configured org/collection, else the personal vault). Items
+        without such fields are left untouched; only changed items are PUT.
+        Safe to repeat -- a second pass finds nothing left to migrate.
+        """
+        items = self.list_items(
+            organization_id=self._org_id,
+            collection_id=self._collection_id,
+        )
+        migrated = 0
+        for item in items:
+            if item.get("type") != _BW_ITEM_TYPE_LOGIN:
+                continue
+            login = item.get("login")
+            if login is None:
+                continue
+            new_fields, new_uris, changed = remap_item_fields_to_uris(
+                item.get("fields") or [],
+                login.get("uris") or [],
+                plain_match=plain_match,
+                interpret_syntax=interpret_syntax,
+            )
+            if not changed:
+                continue
+            item["fields"] = new_fields
+            login["uris"] = new_uris
+            item["login"] = login
+            self.update_item(item["id"], item)
+            migrated += 1
+        logger.info(
+            f"Migrated URL fields to URIs on {migrated} of {len(items)} scanned items"
+        )
+        return MigrateResult(scanned=len(items), migrated=migrated)
 
     def create_items_batch(
         self,

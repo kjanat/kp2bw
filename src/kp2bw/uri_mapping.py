@@ -39,7 +39,7 @@ import logging
 import re
 from typing import Literal
 
-from .bw_types import BwUri
+from .bw_types import BwField, BwUri
 
 logger = logging.getLogger(__name__)
 
@@ -277,3 +277,46 @@ def build_login_uris(
             _add(_android_uri(package))
 
     return uris
+
+
+def remap_item_fields_to_uris(
+    fields: list[BwField],
+    uris: list[BwUri],
+    *,
+    plain_match: UriMatchValue = 0,
+    interpret_syntax: bool = True,
+) -> tuple[list[BwField], list[BwUri], bool]:
+    """Re-fold an already-imported item's URL/app *custom fields* into URIs.
+
+    The Bitwarden-only counterpart of the new-import path, for items that predate
+    it: ``KP2A_URL*`` / ``AndroidApp`` custom fields are removed and converted to
+    login URIs, appended to the item's existing URIs and de-duplicated by value.
+    Returns ``(kept_fields, merged_uris, changed)`` -- *changed* is ``False`` when
+    the item carries no such fields, so the caller can skip an unnecessary PUT.
+    """
+    kept_fields: list[BwField] = []
+    url_attrs: list[tuple[int, str]] = []
+    app_attrs: list[tuple[int, str]] = []
+    for field in fields:
+        name = field.get("name") or ""
+        if not is_url_attribute_key(name):
+            kept_fields.append(field)
+            continue
+        value = field.get("value") or ""
+        if value:
+            bucket = app_attrs if is_android_app_key(name) else url_attrs
+            bucket.append((url_attribute_index(name), value))
+
+    if len(kept_fields) == len(fields):
+        return fields, uris, False
+
+    derived = build_login_uris(
+        primary_url="",
+        additional_urls=[v for _, v in sorted(url_attrs)],
+        android_packages=[v for _, v in sorted(app_attrs)],
+        plain_match=plain_match,
+        interpret_syntax=interpret_syntax,
+    )
+    existing_values = {u["uri"] for u in uris}
+    merged = list(uris) + [d for d in derived if d["uri"] not in existing_values]
+    return kept_fields, merged, True
