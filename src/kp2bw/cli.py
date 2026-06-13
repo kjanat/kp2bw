@@ -13,7 +13,7 @@ from rich.markup import escape
 
 from . import VERBOSE, __title__, __version__
 from ._console import console
-from .bw_serve import ensure_bw_available
+from .bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient, ensure_bw_available
 from .convert import Converter
 from .exceptions import BitwardenClientError, ConversionError
 
@@ -230,6 +230,19 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--strip-ids",
+        dest="strip_ids",
+        help=(
+            "Finalize adoption: remove the KP2BW_ID dedup stamp kp2bw adds to "
+            "every migrated item, then exit (no migration, no KeePass database "
+            "needed). Run once you're satisfied the migration is complete and "
+            "ready to fully adopt Bitwarden. Honors -o/--bitwarden-org and "
+            "-c/--bitwarden-collection for scope (env: KP2BW_STRIP_IDS)"
+        ),
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
         "-y",
         "--yes",
         dest="skip_confirm",
@@ -269,6 +282,76 @@ def _fail(exc: BaseException) -> NoReturn:
     """Print an actionable error and exit non-zero, without a stack trace."""
     console.print(f"[red]ERROR:[/red] {escape(str(exc))}")
     sys.exit(1)
+
+
+def _confirm(prompt: str) -> bool:
+    """Prompt for a y/n answer, looping until valid; True only on explicit yes."""
+    answer: str | None = None
+    while answer not in {"y", "n"}:
+        answer = input(prompt).strip().lower()
+    return answer == "y"
+
+
+def _describe_scope(org_id: str | None, collection_id: str | None) -> str:
+    """Human-readable description of the vault scope a strip run will touch."""
+    if collection_id:
+        return f"collection {collection_id} (organization {org_id})"
+    if org_id:
+        return f"organization {org_id}"
+    return "your personal vault"
+
+
+def _run_strip_ids(
+    *,
+    bitwarden_password_arg: str | None,
+    org_id: str | None,
+    collection_id: str | None,
+    skip_confirm: bool,
+) -> None:
+    """Remove kp2bw's ``KP2BW_ID`` dedup stamp from every migrated item, then stop.
+
+    The finalize step for users who trust their migration and want clean
+    Bitwarden items: no KeePass database is read.  Scope follows ``-o``/``-c``
+    exactly as a migration would.  The mutation is gated behind a confirmation
+    (skippable with ``-y``); answering ``n`` aborts without changes.  Errors
+    surface as an actionable message rather than a traceback.
+    """
+    scope = _describe_scope(org_id, collection_id)
+    if not skip_confirm:
+        console.print(
+            f"This removes the [bold]{KP2BW_ID_FIELD_NAME}[/bold] field from "
+            f"every kp2bw-migrated item in [bold]{escape(scope)}[/bold]. Your "
+            "other vault data is left untouched, but re-runs will no longer be "
+            "matched by stamp (they fall back to folder + name)."
+        )
+        if not _confirm(f"Remove {KP2BW_ID_FIELD_NAME} stamps? [y/n]: "):
+            console.print("[yellow]Aborted; nothing changed.[/yellow]")
+            sys.exit(2)
+
+    bw_pw = _read_password(
+        bitwarden_password_arg, "Please enter your Bitwarden password: "
+    )
+    try:
+        with BitwardenServeClient(
+            bw_pw, org_id=org_id, collection_id=collection_id
+        ) as bw:
+            result = bw.strip_field_from_items(KP2BW_ID_FIELD_NAME)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
+        sys.exit(130)
+    except (BitwardenClientError, ConversionError) as exc:
+        _fail(exc)
+
+    if result.stripped:
+        console.print(
+            f"[green]Removed {KP2BW_ID_FIELD_NAME} from {result.stripped} of "
+            f"{result.scanned} item(s).[/green]"
+        )
+    else:
+        console.print(
+            f"No items carried a {KP2BW_ID_FIELD_NAME} stamp in {scope} "
+            f"({result.scanned} scanned); nothing to do."
+        )
 
 
 # Third-party loggers whose DEBUG/INFO chatter is valuable in the always-on file
@@ -434,6 +517,9 @@ def main() -> None:
         skip_confirm = _resolve_bool_option(
             args.skip_confirm, "KP2BW_YES", default=False
         )
+        strip_ids = _resolve_bool_option(
+            args.strip_ids, "KP2BW_STRIP_IDS", default=False
+        )
         verbose = _resolve_bool_option(args.verbose, "KP2BW_VERBOSE", default=False)
         debug = _resolve_bool_option(args.debug, "KP2BW_DEBUG", default=False)
     except ValueError as exc:
@@ -456,7 +542,9 @@ def main() -> None:
                 _argparser().print_help()
                 sys.exit(2)
 
-    if not args.keepass_file:
+    # --strip-ids is a Bitwarden-only finalize step: no KeePass database is read,
+    # so the path requirement (and the KeePass password prompt below) is skipped.
+    if not strip_ids and not args.keepass_file:
         _ = sys.stderr.write(
             "ERROR: KeePass database path is required "
             "(positional FILE or KP2BW_KEEPASS_FILE)\n\n"
@@ -488,6 +576,18 @@ def main() -> None:
         ensure_bw_available()
     except BitwardenClientError as exc:
         _fail(exc)
+
+    # --strip-ids short-circuits migration entirely: it only touches Bitwarden
+    # (remove kp2bw's dedup stamps), so it needs neither the bw-setup spiel nor a
+    # KeePass password. It handles its own confirmation and Bitwarden password.
+    if strip_ids:
+        _run_strip_ids(
+            bitwarden_password_arg=args.bw_pw,
+            org_id=args.bw_org,
+            collection_id=args.bw_coll,
+            skip_confirm=skip_confirm,
+        )
+        return
 
     # bw confirmation
     if not skip_confirm:

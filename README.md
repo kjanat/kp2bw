@@ -85,7 +85,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
        [--metadata | --no-metadata] [--update | --no-update]
-       [--include-oversize-secrets] [-y] [-v] [-d]
+       [--include-oversize-secrets] [--strip-ids] [-y] [-v] [-d]
        [FILE]
 ```
 
@@ -105,12 +105,26 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--metadata` / `--no-metadata`         | Toggle KeePass tags/expiry as a `KP2BW_META` field (default: on)                                          | `KP2BW_MIGRATE_METADATA`              |
 | `--update` / `--no-update`             | Update existing entries changed in KeePass (default: on)                                                  | `KP2BW_UPDATE`                        |
 | `--include-oversize-secrets`           | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off) | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
+| `--strip-ids`                          | Finalize: remove the `KP2BW_ID` dedup stamp from migrated items, then exit (no migration; no KeePass db)  | `KP2BW_STRIP_IDS`                     |
 | `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt                                                          | `KP2BW_YES`                           |
 | `-v, --verbose`                        | Verbose output                                                                                            | `KP2BW_VERBOSE`                       |
 | `-d, --debug`                          | Debug output — includes third-party library logs                                                          | `KP2BW_DEBUG`                         |
 | `-V, --version`                        | Print the installed `kp2bw` version and exit                                                              | -                                     |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
+
+### Finalizing (`--strip-ids`)
+
+Every migrated item carries a hidden `KP2BW_ID` field — the KeePass UUID kp2bw uses to match entries on re-runs so
+nothing duplicates. Once you're satisfied the migration is complete and you're ready to fully adopt Bitwarden, run
+
+```bash
+kp2bw --strip-ids            # personal vault; add -o/-c to scope to an org/collection
+```
+
+to remove that stamp from every migrated item and exit. No KeePass database is read. It asks for confirmation first
+(skip with `-y`) and is safe to repeat. Note that after stripping, a later migration re-matches by folder + name (and
+re-stamps) rather than by UUID.
 
 ### `.env` file
 
