@@ -356,7 +356,7 @@ def _run_strip_ids(
         )
     else:
         console.print(
-            f"No items carried a {KP2BW_ID_FIELD_NAME} stamp in {scope} "
+            f"No items carried a {KP2BW_ID_FIELD_NAME} stamp in {escape(scope)} "
             f"({result.scanned} scanned); nothing to do."
         )
 

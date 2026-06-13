@@ -115,8 +115,9 @@ Configuration precedence is always: CLI flag > environment variable > built-in d
 
 ### Finalizing (`--strip-ids`)
 
-Every migrated item carries a hidden `KP2BW_ID` field — the KeePass UUID kp2bw uses to match entries on re-runs so
-nothing duplicates. Once you're satisfied the migration is complete and you're ready to fully adopt Bitwarden, run
+Every migrated item carries a plain-text `KP2BW_ID` custom field — the KeePass UUID kp2bw uses to match entries on
+re-runs so nothing duplicates. Once you're satisfied the migration is complete and you're ready to fully adopt
+Bitwarden, run
 
 ```bash
 kp2bw --strip-ids            # personal vault; add -o/-c to scope to an org/collection

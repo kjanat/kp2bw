@@ -79,7 +79,7 @@ KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
 def item_kp2bw_id(item: BwItemResponse) -> str | None:
     """Return *item*'s KeePass-UUID stamp, or ``None`` if it is unstamped.
 
-    Reads the hidden ``KP2BW_ID`` custom field written by :mod:`kp2bw.convert`.
+    Reads the plain-text ``KP2BW_ID`` custom field written by :mod:`kp2bw.convert`.
     An unstamped item is a legacy import (pre-stable-identity) eligible for a
     one-time ``(folder, name)`` adoption that backfills the stamp.
     """
