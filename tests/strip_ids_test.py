@@ -116,8 +116,8 @@ def assert_declined_confirmation_aborts_without_touching_vault() -> None:
                 skip_confirm=False,
             )
         except SystemExit as exc:
-            if exc.code != 2:
-                raise AssertionError(f"expected exit code 2, got {exc.code}")
+            if exc.code != 0:
+                raise AssertionError(f"expected exit code 0, got {exc.code}")
         else:
             raise AssertionError("expected SystemExit on a declined confirmation")
 

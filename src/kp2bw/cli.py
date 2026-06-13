@@ -321,24 +321,25 @@ def _run_strip_ids(
     as an actionable message rather than a traceback.
     """
     scope = _describe_scope(org_id, collection_id)
-    if not skip_confirm:
-        console.print(
-            f"[bold yellow]Warning:[/bold yellow] this removes the "
-            f"[bold]{KP2BW_ID_FIELD_NAME}[/bold] field from every kp2bw-migrated "
-            f"item in [bold]{escape(scope)}[/bold]. Other vault data is "
-            "untouched, but this [bold]cannot be undone[/bold] and makes future "
-            "migration re-runs unreliable: without the stamp, entries sharing a "
-            "folder + name can be duplicated or mismatched. Only do this once "
-            "you are finished migrating and ready to fully adopt Bitwarden."
-        )
-        if not _confirm(f"Remove {KP2BW_ID_FIELD_NAME} stamps? [y/n]: "):
-            console.print("[yellow]Aborted; nothing changed.[/yellow]")
-            sys.exit(2)
-
-    bw_pw = _read_password(
-        bitwarden_password_arg, "Please enter your Bitwarden password: "
-    )
     try:
+        if not skip_confirm:
+            console.print(
+                f"[bold yellow]Warning:[/bold yellow] this removes the "
+                f"[bold]{KP2BW_ID_FIELD_NAME}[/bold] field from every "
+                f"kp2bw-migrated item in [bold]{escape(scope)}[/bold]. Other "
+                "vault data is untouched, but this [bold]cannot be undone[/bold] "
+                "and makes future migration re-runs unreliable: without the "
+                "stamp, entries sharing a folder + name can be duplicated or "
+                "mismatched. Only do this once you are finished migrating and "
+                "ready to fully adopt Bitwarden."
+            )
+            if not _confirm(f"Remove {KP2BW_ID_FIELD_NAME} stamps? [y/n]: "):
+                console.print("[yellow]Aborted; nothing changed.[/yellow]")
+                sys.exit(0)
+
+        bw_pw = _read_password(
+            bitwarden_password_arg, "Please enter your Bitwarden password: "
+        )
         with BitwardenServeClient(
             bw_pw, org_id=org_id, collection_id=collection_id
         ) as bw:
