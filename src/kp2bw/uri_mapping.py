@@ -39,6 +39,7 @@ complex wildcards are emitted with a warning so the user can review them.
 
 import logging
 import re
+from collections.abc import Iterable
 from typing import Literal
 
 from .bw_types import BwField, BwUri
@@ -79,6 +80,64 @@ _KP_REF_MARKER = "{REF:"
 # Characters KeePassXC rejects in a URL (`isUrlValid`); we drop strings carrying them.
 _ILLEGAL_URL_CHARS = re.compile(r"[<>^`{|}]")
 _ANDROID_APP_SCHEME = "androidapp://"
+
+# Curated two-level public suffixes for the registrable-domain heuristic behind
+# the --report-uris collision report. Not the full Public Suffix List -- just the
+# common multi-level TLDs -- so e.g. ``10bis.co.il`` collapses to ``10bis.co.il``
+# rather than ``co.il``. A miss only mis-groups a report line; it never touches
+# migration behaviour.
+_TWO_LEVEL_SUFFIXES: frozenset[str] = frozenset({
+    "co.uk",
+    "org.uk",
+    "gov.uk",
+    "ac.uk",
+    "me.uk",
+    "net.uk",
+    "sch.uk",
+    "co.il",
+    "org.il",
+    "net.il",
+    "ac.il",
+    "gov.il",
+    "co.jp",
+    "or.jp",
+    "ne.jp",
+    "ac.jp",
+    "go.jp",
+    "co.kr",
+    "or.kr",
+    "co.nz",
+    "org.nz",
+    "govt.nz",
+    "co.za",
+    "org.za",
+    "co.in",
+    "net.in",
+    "org.in",
+    "co.id",
+    "co.th",
+    "in.th",
+    "com.au",
+    "net.au",
+    "org.au",
+    "edu.au",
+    "gov.au",
+    "com.br",
+    "net.br",
+    "com.mx",
+    "com.tr",
+    "com.cn",
+    "net.cn",
+    "com.sg",
+    "com.hk",
+    "com.tw",
+    "com.ar",
+    "com.co",
+    "com.ua",
+    "com.pl",
+    "com.ru",
+    "co.cr",
+})
 
 
 def match_value_names() -> tuple[str, ...]:
@@ -328,3 +387,51 @@ def remap_item_fields_to_uris(
     existing_values = {u["uri"] for u in uris}
     merged = list(uris) + [d for d in derived if d["uri"] not in existing_values]
     return kept_fields, merged, True
+
+
+def uri_host(uri: str) -> str | None:
+    """Extract the lowercase host from a URI, or ``None`` when it has none.
+
+    Strips scheme, userinfo, port, and path; skips ``androidapp://`` app URIs and
+    bare strings without a dot (intranet labels, junk) that carry no domain.
+    """
+    s = uri.strip().lower()
+    if not s or s.startswith(_ANDROID_APP_SCHEME):
+        return None
+    if "://" in s:
+        s = s.split("://", 1)[1]
+    host = s.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    host = host.split("@")[-1].split(":", 1)[0]
+    return host if "." in host else None
+
+
+def registrable_domain(host: str) -> str:
+    """Best-effort registrable domain (eTLD+1) of *host*.
+
+    Uses the curated :data:`_TWO_LEVEL_SUFFIXES` set rather than the full Public
+    Suffix List, which is good enough for the collision report where a rare miss
+    only mis-groups one line.
+    """
+    parts = [p for p in host.lower().strip(".").split(".") if p]
+    if len(parts) < 2:
+        return host
+    if ".".join(parts[-2:]) in _TWO_LEVEL_SUFFIXES and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
+def collision_groups(uris: Iterable[str]) -> dict[str, list[str]]:
+    """Group URI hosts by registrable domain, keeping only multi-host groups.
+
+    These are the registrable domains under which more than one distinct host is
+    stored -- i.e. the logins that all surface together under Bitwarden's
+    base-domain match, and the candidates for switching to Host match. Each value
+    is the sorted distinct host list.
+    """
+    groups: dict[str, set[str]] = {}
+    for uri in uris:
+        host = uri_host(uri)
+        if host is None:
+            continue
+        groups.setdefault(registrable_domain(host), set()).add(host)
+    return {base: sorted(hosts) for base, hosts in groups.items() if len(hosts) > 1}

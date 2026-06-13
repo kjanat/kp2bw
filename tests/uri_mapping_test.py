@@ -12,9 +12,12 @@ from typing import cast
 from kp2bw.bw_types import BwField, BwUri
 from kp2bw.uri_mapping import (
     build_login_uris,
+    collision_groups,
     is_url_attribute_key,
     parse_match_name,
+    registrable_domain,
     remap_item_fields_to_uris,
+    uri_host,
 )
 
 
@@ -213,6 +216,31 @@ def assert_remap_noop_without_legacy_fields() -> None:
         raise AssertionError("expected changed=False when no legacy fields present")
 
 
+def assert_collision_report_helpers() -> None:
+    """uri_host / registrable_domain / collision_groups power --report-uris."""
+    # Host extraction strips scheme/port/path; app + bare-label URIs yield None.
+    if uri_host("https://vault.kajkowalski.nl/login?x=1") != "vault.kajkowalski.nl":
+        raise AssertionError("host extraction failed")
+    if uri_host("androidapp://com.x") is not None or uri_host("Windows") is not None:
+        raise AssertionError("app/bare URIs should have no host")
+    # Registrable domain honours the two-level public-suffix heuristic.
+    if registrable_domain("vault.kajkowalski.nl") != "kajkowalski.nl":
+        raise AssertionError("registrable domain (.nl) failed")
+    if registrable_domain("app.10bis.co.il") != "10bis.co.il":
+        raise AssertionError("registrable domain (.co.il) failed")
+    # Only multi-host registrable domains are reported; singletons are omitted.
+    groups = collision_groups([
+        "https://vault.kajkowalski.nl",
+        "https://gitea.kajkowalski.nl",
+        "https://example.com",
+        "androidapp://com.x",
+    ])
+    if set(groups) != {"kajkowalski.nl"}:
+        raise AssertionError(f"expected only kajkowalski.nl group, got {groups}")
+    if groups["kajkowalski.nl"] != ["gitea.kajkowalski.nl", "vault.kajkowalski.nl"]:
+        raise AssertionError(f"unexpected hosts: {groups}")
+
+
 def main() -> None:
     assert_match_names_parse()
     assert_url_attribute_keys()
@@ -224,6 +252,7 @@ def main() -> None:
     assert_plain_match_override()
     assert_remap_lifts_legacy_fields()
     assert_remap_noop_without_legacy_fields()
+    assert_collision_report_helpers()
     print("uri mapping test passed")
 
 

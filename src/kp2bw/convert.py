@@ -34,6 +34,7 @@ from .otp import resolve_otp
 from .uri_mapping import (
     UriMatchValue,
     build_login_uris,
+    is_additional_url_key,
     is_android_app_key,
     is_url_attribute_key,
     url_attribute_index,
@@ -120,6 +121,33 @@ def _print_summary(
             f"  [red]{n_attach_failed:{w}d}[/red] attachments failed "
             f"(see warnings above)"
         )
+
+
+def collect_keepass_uris(
+    keepass_file_path: str,
+    keepass_password: str | None,
+    keepass_keyfile_path: str | None,
+) -> list[str]:
+    """Return every URL in a KeePass DB (primary ``url`` + additional-URL fields).
+
+    Read-only helper for the ``--report-uris keepass`` collision report: it
+    gathers exactly the values migration would fold into ``login.uris``
+    (``entry.url`` plus ``KP2A_URL*`` / ``URL_*`` custom fields), so the report
+    previews post-migration collisions without writing anything.
+    """
+    kp = PyKeePass(
+        filename=keepass_file_path,
+        password=keepass_password,
+        keyfile=keepass_keyfile_path,
+    )
+    uris: list[str] = []
+    for entry in kp.entries:
+        if entry.url:
+            uris.append(entry.url)
+        for key, value in entry.custom_properties.items():
+            if value and is_additional_url_key(key):
+                uris.append(value)
+    return uris
 
 
 class Converter:

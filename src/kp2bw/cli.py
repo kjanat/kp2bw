@@ -14,9 +14,16 @@ from rich.markup import escape
 from . import VERBOSE, __title__, __version__
 from ._console import console
 from .bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient, ensure_bw_available
-from .convert import Converter
+from .convert import Converter, collect_keepass_uris
 from .exceptions import BitwardenClientError, ConversionError
-from .uri_mapping import UriMatchValue, match_value_names, parse_match_name
+from .uri_mapping import (
+    UriMatchValue,
+    collision_groups,
+    match_value_names,
+    parse_match_name,
+    registrable_domain,
+    uri_host,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +291,21 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--report-uris",
+        dest="report_uris",
+        metavar="SOURCE",
+        choices=("keepass", "bitwarden"),
+        help=(
+            "Print a read-only URI collision report and exit (changes nothing): "
+            "groups login URLs by registrable domain and lists the ones with "
+            "multiple hosts -- the entries that all surface together under "
+            "Bitwarden base-domain match. SOURCE is 'keepass' (reads the KeePass "
+            "db) or 'bitwarden' (reads the live vault). Honors -o/-c for the "
+            "bitwarden source (env: KP2BW_REPORT_URIS)"
+        ),
+        default=None,
+    )
+    parser.add_argument(
         "-y",
         "--yes",
         dest="skip_confirm",
@@ -458,6 +480,66 @@ def _run_migrate_uris(
         )
 
 
+def _print_uri_report(uris: list[str], source: str) -> None:
+    """Print the read-only URI collision report to stdout (changes nothing).
+
+    Groups hosts by registrable domain and lists the multi-host groups -- the
+    logins that all surface together under Bitwarden's base-domain matching.
+    The header goes through the Rich console; the data lines are plain ``print``
+    so they copy/paste cleanly.
+    """
+    groups = collision_groups(uris)
+    bases = {registrable_domain(host) for u in uris if (host := uri_host(u))}
+    console.print(
+        f"[bold]URI collision report ({source})[/bold]: {len(uris)} URIs across "
+        f"{len(bases)} base domain(s); [bold]{len(groups)}[/bold] have multiple "
+        "hosts (these all surface together under Bitwarden base-domain match -- "
+        "switch them to Host match to separate them)."
+    )
+    if not groups:
+        print("# no base-domain collisions")
+        return
+    for base, hosts in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        print(f"{base} ({len(hosts)}): " + ", ".join(hosts))
+
+
+def _run_report_uris_bitwarden(
+    *,
+    bitwarden_password_arg: str | None,
+    org_id: str | None,
+    collection_id: str | None,
+) -> None:
+    """Read the live Bitwarden vault and print the URI collision report.
+
+    Read-only Bitwarden mode (no KeePass): lists in-scope items, gathers their
+    login URIs, and reports the base-domain collisions. Scope follows ``-o``/``-c``.
+    """
+    bw_pw = _read_password(
+        bitwarden_password_arg, "Please enter your Bitwarden password: "
+    )
+    try:
+        with BitwardenServeClient(
+            bw_pw, org_id=org_id, collection_id=collection_id
+        ) as bw:
+            items = bw.list_items(organization_id=org_id, collection_id=collection_id)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
+        sys.exit(130)
+    except (BitwardenClientError, ConversionError) as exc:
+        _fail(exc)
+
+    uris: list[str] = []
+    for item in items:
+        login = item.get("login")
+        if login is None:
+            continue
+        for entry in login.get("uris") or []:
+            value = entry.get("uri")
+            if value:
+                uris.append(value)
+    _print_uri_report(uris, "bitwarden")
+
+
 # Third-party loggers whose DEBUG/INFO chatter is valuable in the always-on file
 # log but noise on the console. The loggers stay at DEBUG (so the file keeps
 # everything); console handlers attach a ConsoleNoiseFilter to drop their
@@ -627,6 +709,11 @@ def main() -> None:
         migrate_uris = _resolve_bool_option(
             args.migrate_uris, "KP2BW_MIGRATE_URIS", default=False
         )
+        report_uris = _with_env(args.report_uris, "KP2BW_REPORT_URIS")
+        if report_uris not in (None, "keepass", "bitwarden"):
+            raise ValueError(
+                f"Invalid KP2BW_REPORT_URIS={report_uris!r}; use 'keepass' or 'bitwarden'"
+            )
         interpret_uri_syntax = _resolve_bool_option(
             args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
         )
@@ -655,9 +742,10 @@ def main() -> None:
                 _argparser().print_help()
                 sys.exit(2)
 
-    # --strip-ids is a Bitwarden-only finalize step: no KeePass database is read,
-    # so the path requirement (and the KeePass password prompt below) is skipped.
-    if not strip_ids and not args.keepass_file:
+    # Bitwarden-only modes read no KeePass database, so the path requirement
+    # (and the KeePass password prompt below) is skipped for them.
+    bitwarden_only = strip_ids or migrate_uris or report_uris == "bitwarden"
+    if not bitwarden_only and not args.keepass_file:
         _ = sys.stderr.write(
             "ERROR: KeePass database path is required "
             "(positional FILE or KP2BW_KEEPASS_FILE)\n\n"
@@ -683,12 +771,36 @@ def main() -> None:
     if log_path is not None:
         logger.info(f"Writing full debug log to {log_path}")
 
+    # --report-uris keepass reads only the KeePass database (no Bitwarden, no bw
+    # CLI), so it short-circuits before the bw availability check.
+    if report_uris == "keepass":
+        kp_pw = _read_password(
+            args.kp_pw, "Please enter your KeePass 2.x db password: "
+        )
+        assert args.keepass_file is not None
+        try:
+            uris = collect_keepass_uris(args.keepass_file, kp_pw, args.kp_keyfile)
+        except (OSError, ValueError) as exc:
+            _fail(exc)
+        _print_uri_report(uris, "keepass")
+        return
+
     # Verify the Bitwarden CLI is available before prompting for secrets, so the
     # user isn't asked for passwords only to hit a missing-`bw` failure later.
     try:
         ensure_bw_available()
     except BitwardenClientError as exc:
         _fail(exc)
+
+    # --report-uris bitwarden reads the live vault (no KeePass) and prints a
+    # read-only collision report.
+    if report_uris == "bitwarden":
+        _run_report_uris_bitwarden(
+            bitwarden_password_arg=args.bw_pw,
+            org_id=args.bw_org,
+            collection_id=args.bw_coll,
+        )
+        return
 
     # --strip-ids short-circuits migration entirely: it only touches Bitwarden
     # (remove kp2bw's dedup stamps), so it needs neither the bw-setup spiel nor a

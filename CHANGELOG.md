@@ -10,6 +10,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`--report-uris keepass|bitwarden` -- a read-only URI collision report** (env `KP2BW_REPORT_URIS`). Groups every
+  login URL by registrable domain (a curated two-level public-suffix heuristic, so `10bis.co.il` stays whole) and lists
+  the domains with more than one host -- exactly the logins that all surface together under Bitwarden's base-domain
+  matching. `keepass` reads the database (previewing post-migration collisions); `bitwarden` reads the live vault
+  (honouring `-o`/`-c`). It changes nothing -- it just prints, so you can decide which entries to switch to Host match
+  (or flip your account's default URI match detection).
+
 - **Additional URLs and Android packages migrate as Bitwarden login URIs, not custom fields** -- a KeePass(XC) entry's
   additional URLs (`KP2A_URL`/`KP2A_URL_n`, plus the plainer `URL`/`URL_n` convention) and Android packages
   (`AndroidApp`/`AndroidApp_n`, including the no-underscore `AndroidApp1` variant) were copied verbatim into custom
