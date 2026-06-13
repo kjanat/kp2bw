@@ -134,6 +134,8 @@ Every run writes a full DEBUG log to a per-user file even when the console stays
 complete record to share. On Windows that is `%LOCALAPPDATA%\kp2bw\logs`; override the file with `KP2BW_LOG_FILE` or the
 directory with `KP2BW_LOG_DIR`. `bw serve` errors include the server's actual message, and a slow or dropped request no
 longer aborts the run — failed entries are counted in the summary and a re-run safely picks up where it left off.
+Against a slow self-hosted server (e.g. Vaultwarden) where individual writes time out, raise the per-request HTTP
+timeout with `KP2BW_HTTP_TIMEOUT` (seconds; default 180) to let those creates finish in the first place.
 
 See [TROUBLESHOOTING].
 

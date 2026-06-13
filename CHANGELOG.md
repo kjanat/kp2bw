@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Configurable per-request HTTP timeout via `KP2BW_HTTP_TIMEOUT`** -- the timeout for a single `bw serve` request is
+  now overridable through the `KP2BW_HTTP_TIMEOUT` environment variable (seconds), so a slow self-hosted server (e.g.
+  Vaultwarden) where an individual item write outlasts the default no longer times out. Non-numeric or non-positive
+  values are ignored with a warning and the default is used. The built-in default is also raised from 60s to 180s, since
+  `bw serve` forwards writes to the (possibly remote) Bitwarden server and a single create can legitimately take longer
+  than local work. This complements the existing non-fatal-failure handling: raising the ceiling avoids the slow-request
+  failure in the first place, rather than only tolerating it on a re-run.
+
 ## [3.5.0] - 2026-06-10
 
 ### Added
