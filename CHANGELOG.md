@@ -6,10 +6,20 @@ All notable changes to this project will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] <!-- #28 -->
+## [Unreleased]
 
 ### Added
 
+- **Configurable per-request HTTP timeout via `KP2BW_HTTP_TIMEOUT`** -- the timeout for a single `bw serve` request is
+  now overridable through the `KP2BW_HTTP_TIMEOUT` environment variable (seconds), so a slow self-hosted server (e.g.
+  Vaultwarden) where an individual item write outlasts the default no longer times out. Non-numeric or non-positive
+  values are ignored with a warning and the default is used; values above the 3600s sanity ceiling are clamped (with a
+  warning) so a typo like `999999` can't silently hang a migration for hours. The value is applied as httpx's single
+  timeout, which stretches the connect/read/write/pool phases together rather than the slow-write phase alone. The
+  built-in default is also raised from 60s to 180s, since `bw serve` forwards writes to the (possibly remote) Bitwarden
+  server and a single create can legitimately take longer than local work. This complements the existing
+  non-fatal-failure handling: raising the ceiling avoids the slow-request failure in the first place, rather than only
+  tolerating it on a re-run. (#27)
 - **`--strip-ids` finalize mode (env `KP2BW_STRIP_IDS`) to remove kp2bw's `KP2BW_ID` dedup stamps** -- every migrated
   item carries a plain-text `KP2BW_ID` custom field (the KeePass UUID kp2bw matches on for idempotent re-runs). Once a
   user is satisfied the migration is complete and ready to fully adopt Bitwarden, `kp2bw --strip-ids` removes that stamp
@@ -18,7 +28,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   but it is **irreversible** and makes future migration re-runs unreliable: without the stamp a re-run falls back to
   folder + name matching -- the exact collision the stamp disambiguates -- so entries sharing a folder and title can be
   duplicated or mismatched. Because of that it confirms before changing anything (skippable with `-y` for callers who
-  know what they want) -- a deliberate final step, not a routine flag.
+  know what they want) -- a deliberate final step, not a routine flag. (#28)
 
 ## [3.5.0] - 2026-06-10
 

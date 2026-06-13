@@ -31,8 +31,22 @@ _SERVE_STARTUP_TIMEOUT_S: float = 60.0
 # Polling interval when waiting for serve to start.
 _SERVE_POLL_INTERVAL_S: float = 0.25
 
-# Default HTTP timeout for individual requests.
-_HTTP_TIMEOUT_S: float = 60.0
+# Default HTTP timeout for individual requests. `bw serve` forwards item writes
+# to the (possibly self-hosted/remote) Bitwarden server, so a single create can
+# take far longer than local work; this ceiling is deliberately generous and is
+# overridable via `KP2BW_HTTP_TIMEOUT`. httpx interprets a bare float as the
+# *single* timeout applied to connect, read, write, and pool phases together --
+# raising it stretches all four, not just the slow-write phase that motivates it.
+_HTTP_TIMEOUT_S: float = 180.0
+
+# Sanity ceiling on `KP2BW_HTTP_TIMEOUT`. Above this the value is clamped (with
+# a warning) rather than honoured verbatim: a single HTTP request that hangs for
+# more than an hour is almost certainly a typo (e.g. `999999`) rather than a
+# real tuning need, and a typo here can silently stall a migration for hours.
+_HTTP_TIMEOUT_MAX_S: float = 3600.0
+
+# Env var overriding the per-request HTTP timeout, in seconds.
+_HTTP_TIMEOUT_ENV: str = "KP2BW_HTTP_TIMEOUT"
 
 # Max length for sanitized CLI output snippets in logs/errors.
 _SANITIZED_OUTPUT_MAX_CHARS: int = 240
@@ -452,6 +466,47 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _resolve_http_timeout() -> float:
+    """Per-request HTTP timeout (seconds), overridable via ``KP2BW_HTTP_TIMEOUT``.
+
+    A slow or self-hosted Bitwarden/Vaultwarden server can make individual item
+    writes take far longer than the default, so the env var lets users raise the
+    ceiling without code changes. Non-numeric or non-positive values are ignored
+    with a warning and the built-in default is used. Values above
+    :data:`_HTTP_TIMEOUT_MAX_S` are clamped to that ceiling (with a warning) so a
+    typo like ``999999`` can't silently hang a migration for hours.
+
+    The returned float is handed to httpx as a single value, which applies it to
+    the *connect*, *read*, *write*, and *pool* phases together -- raising it
+    stretches all four, not just the slow-write phase that usually motivates it.
+    """
+    raw = os.environ.get(_HTTP_TIMEOUT_ENV)
+    if not raw:
+        return _HTTP_TIMEOUT_S
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            f"Ignoring invalid {_HTTP_TIMEOUT_ENV}={raw!r}; "
+            f"using default {_HTTP_TIMEOUT_S}s"
+        )
+        return _HTTP_TIMEOUT_S
+    if value <= 0:
+        logger.warning(
+            f"Ignoring non-positive {_HTTP_TIMEOUT_ENV}={raw!r}; "
+            f"using default {_HTTP_TIMEOUT_S}s"
+        )
+        return _HTTP_TIMEOUT_S
+    if value > _HTTP_TIMEOUT_MAX_S:
+        logger.warning(
+            f"Clamping {_HTTP_TIMEOUT_ENV}={raw!r} to the {_HTTP_TIMEOUT_MAX_S}s "
+            f"sanity ceiling; a single request rarely needs longer and a typo "
+            f"here can hang the migration for hours"
+        )
+        return _HTTP_TIMEOUT_MAX_S
+    return value
+
+
 class BitwardenServeClient:
     """Manage a ``bw serve`` process and provide HTTP API access.
 
@@ -465,6 +520,7 @@ class BitwardenServeClient:
     _port: int
     _base_url: str
     _http: httpx.Client
+    _http_timeout: float  # per-request timeout shared by sync + async clients
     _previous_sigterm: Callable[[int, FrameType | None], Any] | int | None
     _previous_sigint: Callable[[int, FrameType | None], Any] | int | None
     _folders: dict[str, str]  # name → id cache
@@ -502,9 +558,10 @@ class BitwardenServeClient:
         self._base_url = f"http://127.0.0.1:{self._port}"
         self._process = None
         self._closed = False
+        self._http_timeout = _resolve_http_timeout()
         self._http = httpx.Client(
             base_url=self._base_url,
-            timeout=_HTTP_TIMEOUT_S,
+            timeout=self._http_timeout,
         )
         self._org_id = org_id
         self._collection_id = collection_id
@@ -1256,7 +1313,7 @@ class BitwardenServeClient:
 
         async with httpx.AsyncClient(
             base_url=self._base_url,
-            timeout=_HTTP_TIMEOUT_S,
+            timeout=self._http_timeout,
         ) as client:
             tasks: list[asyncio.Task[None]] = []
             keys: list[tuple[str, str]] = []

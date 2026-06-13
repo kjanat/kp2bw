@@ -57,8 +57,8 @@ venv             = ".venv"
 typeCheckingMode = "strict"
 pythonVersion    = "3.14"
 
-# Tests legitimately exercise module-internal helpers (e.g. _run_strip_ids);
-# allow accessing private symbols there without weakening strict mode elsewhere.
+# Tests exercise module-internal helpers; allow private access here without
+# weakening strict mode elsewhere.
 [[tool.pyright.executionEnvironments]]
 root               = "tests"
 reportPrivateUsage = "none"
