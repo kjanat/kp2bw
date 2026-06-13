@@ -345,25 +345,65 @@ def terminate_serve(
     catches a worker that outlived or re-parented away from its wrapper.
     """
     if process.poll() is None:
-        if via_shell and os.name == "nt":
-            # terminate() would reach only the cmd.exe wrapper; take the tree.
-            _ = subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
-                check=False,
-                capture_output=True,
-                stdin=subprocess.DEVNULL,
-            )
-            try:
-                _ = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                logger.warning("bw serve did not exit after taskkill /T")
+        if os.name == "nt":
+            if via_shell:
+                # terminate() would reach only the cmd.exe wrapper; take the tree.
+                _ = subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                    check=False,
+                    capture_output=True,
+                    stdin=subprocess.DEVNULL,
+                )
+                try:
+                    _ = process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    logger.warning("bw serve did not exit after taskkill /T")
+            else:
+                process.terminate()
+                try:
+                    _ = process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    logger.warning("bw serve did not exit on SIGTERM, sending SIGKILL")
+                    process.kill()
+                    try:
+                        _ = process.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        logger.warning("bw serve did not exit after SIGKILL")
         else:
-            process.terminate()
+            # POSIX: bw is commonly a node launcher that spawns a worker; killing
+            # only the tracked PID orphans the worker -- it keeps the port and,
+            # when kp2bw's stdout is a pipe, holds it open so the parent pipeline
+            # never reaches EOF (a multi-minute "still running" hang). bw serve
+            # runs in its own session (start_new_session=True), so when the
+            # process leads its own group we signal the whole group to take the
+            # launcher and worker down together.
+            try:
+                pgid = os.getpgid(process.pid)
+            except ProcessLookupError:
+                pgid = None
+
+            def _signal(sig: int) -> None:
+                # Group-signal ONLY a real group leader (getpgid == pid, what
+                # start_new_session guarantees); otherwise a single-PID kill, so
+                # we never signal kp2bw's own group (e.g. a process a caller
+                # spawned without its own session).
+                if pgid is not None and pgid == process.pid:
+                    os.killpg(pgid, sig)
+                else:
+                    os.kill(process.pid, sig)
+
+            try:
+                _signal(signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 _ = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 logger.warning("bw serve did not exit on SIGTERM, sending SIGKILL")
-                process.kill()
+                try:
+                    _signal(signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 try:
                     _ = process.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
@@ -690,6 +730,12 @@ class BitwardenServeClient:
                 stderr=subprocess.PIPE,
                 cwd=self._bw_cwd,
                 env=env,
+                # POSIX: run bw serve in its own session/process group so teardown
+                # can kill the launcher *and* its node worker together (see
+                # terminate_serve). Without this an orphaned worker keeps the port
+                # and, when our stdout is a pipe, holds it open -> the parent
+                # pipeline hangs. Ignored on Windows (taskkill /T handles the tree).
+                start_new_session=True,
             )
         except FileNotFoundError as exc:
             raise BitwardenClientError(BW_NOT_FOUND_MSG) from exc

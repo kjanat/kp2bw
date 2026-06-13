@@ -10,6 +10,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`bw serve` is no longer orphaned on teardown (POSIX), which previously hung the process.** On Linux/macOS `bw` is
+  commonly a node launcher that spawns a worker; teardown signalled only the tracked PID, leaving the worker alive -- it
+  kept the port and, when kp2bw's stdout was a pipe, held the pipe open so the parent pipeline never reached EOF (a
+  multi-minute "still running" hang) and accumulated orphaned `bw serve` processes across runs. `bw serve` is now
+  started in its own session (`start_new_session=True`) and torn down by signalling the whole process group (SIGTERM,
+  then SIGKILL after a timeout), so the launcher and worker die together. Windows teardown (taskkill /T + port reap) is
+  unchanged.
+
 - **An empty environment variable no longer shadows the matching `.env` entry.** `KP2BW_KEEPASS_FILE=""` (or any
   empty-string export) used to override the `.env` value -- `load_dotenv(override=False)` treats an empty export as
   "set" -- producing a baffling "KeePass database path is required" even when `.env` clearly had it. `_load_dotenv` now
