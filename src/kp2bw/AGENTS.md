@@ -78,6 +78,13 @@ src/kp2bw/
   failing that it creates a new item. This stops distinct same-titled entries from collapsing onto one item (data loss)
   and keeps re-runs idempotent across title/folder edits. The legacy adoption is a one-time path for vaults imported
   before stable identity.
+- `--strip-ids` (`KP2BW_STRIP_IDS`, default off) is the finalize-mode inverse of the stamp above: it short-circuits
+  migration entirely (`main()` returns before any KeePass read or password prompt) and only touches Bitwarden, removing
+  the `KP2BW_ID` field from every in-scope item via `_run_strip_ids` (`cli.py`) → `strip_field_from_items`
+  (`bw_serve.py`, one full `update_item` `PUT` per stamped item). Scope mirrors a migration (`-o`/`-c`), so only items
+  kp2bw could have stamped are touched. It is **irreversible** and degrades future re-runs (they fall back to
+  `(folder, name)` matching), so an interactive run confirms first (skippable with `-y`/`KP2BW_YES`); a declined prompt
+  exits `0` (clean abort), Ctrl+C exits `130`. Re-runnable: a second pass finds nothing.
 - `--metadata` (default on) folds the KeePass metadata Bitwarden has no native slot for — **tags and expiry** — into a
   single readable **YAML** `KP2BW_META` text field (`_build_metadata_field`, via PyYAML
   `safe_dump(allow_unicode=
