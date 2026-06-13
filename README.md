@@ -122,9 +122,13 @@ nothing duplicates. Once you're satisfied the migration is complete and you're r
 kp2bw --strip-ids            # personal vault; add -o/-c to scope to an org/collection
 ```
 
-to remove that stamp from every migrated item and exit. No KeePass database is read. It asks for confirmation first
-(skip with `-y`) and is safe to repeat. Note that after stripping, a later migration re-matches by folder + name (and
-re-stamps) rather than by UUID.
+to remove that stamp from every migrated item and exit. No KeePass database is read.
+
+> [!WARNING]
+> This is **irreversible** and makes future migration re-runs unreliable. Without the stamp, a re-run can only match by
+> folder + name — the exact collision the stamp exists to prevent — so entries that share a folder and title may be
+> duplicated or mismatched on a later migration. `--strip-ids` confirms before changing anything (skip with `-y`). Only
+> run it once you're truly done migrating.
 
 ### `.env` file
 

@@ -235,9 +235,10 @@ def _argparser() -> MyArgParser:
         help=(
             "Finalize adoption: remove the KP2BW_ID dedup stamp kp2bw adds to "
             "every migrated item, then exit (no migration, no KeePass database "
-            "needed). Run once you're satisfied the migration is complete and "
-            "ready to fully adopt Bitwarden. Honors -o/--bitwarden-org and "
-            "-c/--bitwarden-collection for scope (env: KP2BW_STRIP_IDS)"
+            "needed). Run once you're ready to fully adopt Bitwarden. IRREVERSIBLE "
+            "and makes future migration re-runs unreliable, so it confirms first "
+            "(skip with -y). Honors -o/--bitwarden-org and -c/--bitwarden-collection "
+            "for scope (env: KP2BW_STRIP_IDS)"
         ),
         action="store_true",
         default=None,
@@ -310,19 +311,25 @@ def _run_strip_ids(
 ) -> None:
     """Remove kp2bw's ``KP2BW_ID`` dedup stamp from every migrated item, then stop.
 
-    The finalize step for users who trust their migration and want clean
-    Bitwarden items: no KeePass database is read.  Scope follows ``-o``/``-c``
-    exactly as a migration would.  The mutation is gated behind a confirmation
-    (skippable with ``-y``); answering ``n`` aborts without changes.  Errors
-    surface as an actionable message rather than a traceback.
+    The finalize step for users ready to fully adopt Bitwarden: no KeePass
+    database is read, and scope follows ``-o``/``-c`` exactly as a migration
+    would.  The operation is **irreversible** -- the stamp cannot be recovered --
+    and makes future migration re-runs unreliable: without it, entries that share
+    a folder + name (the very collision the stamp disambiguates) can be
+    duplicated or mismatched.  A loud confirmation states this before any change;
+    ``-y``/``--yes`` skips it for callers who know what they want.  Errors surface
+    as an actionable message rather than a traceback.
     """
     scope = _describe_scope(org_id, collection_id)
     if not skip_confirm:
         console.print(
-            f"This removes the [bold]{KP2BW_ID_FIELD_NAME}[/bold] field from "
-            f"every kp2bw-migrated item in [bold]{escape(scope)}[/bold]. Your "
-            "other vault data is left untouched, but re-runs will no longer be "
-            "matched by stamp (they fall back to folder + name)."
+            f"[bold yellow]Warning:[/bold yellow] this removes the "
+            f"[bold]{KP2BW_ID_FIELD_NAME}[/bold] field from every kp2bw-migrated "
+            f"item in [bold]{escape(scope)}[/bold]. Other vault data is "
+            "untouched, but this [bold]cannot be undone[/bold] and makes future "
+            "migration re-runs unreliable: without the stamp, entries sharing a "
+            "folder + name can be duplicated or mismatched. Only do this once "
+            "you are finished migrating and ready to fully adopt Bitwarden."
         )
         if not _confirm(f"Remove {KP2BW_ID_FIELD_NAME} stamps? [y/n]: "):
             console.print("[yellow]Aborted; nothing changed.[/yellow]")

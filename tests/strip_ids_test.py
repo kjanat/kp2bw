@@ -91,9 +91,84 @@ def assert_second_pass_is_noop() -> None:
         raise AssertionError(f"expected no updates, got {client.updates}")
 
 
+def assert_declined_confirmation_aborts_without_touching_vault() -> None:
+    """Answering 'n' at the prompt aborts before any client is built.
+
+    Stripping is irreversible, so an interactive run (``skip_confirm=False``)
+    must not reach ``bw serve`` unless the user explicitly confirms.
+    """
+    from unittest import mock
+
+    from kp2bw import cli
+
+    def _must_not_build(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("client built despite a declined confirmation")
+
+    with (
+        mock.patch("builtins.input", return_value="n"),
+        mock.patch.object(cli, "BitwardenServeClient", _must_not_build),
+    ):
+        try:
+            cli._run_strip_ids(
+                bitwarden_password_arg="bw-pw",
+                org_id=None,
+                collection_id=None,
+                skip_confirm=False,
+            )
+        except SystemExit as exc:
+            if exc.code != 2:
+                raise AssertionError(f"expected exit code 2, got {exc.code}")
+        else:
+            raise AssertionError("expected SystemExit on a declined confirmation")
+
+
+def assert_yes_skips_confirmation_prompt() -> None:
+    """``-y`` (``skip_confirm=True``) runs the strip without prompting at all.
+
+    The user is trusted to opt out of the confirmation; reaching ``input`` would
+    mean the override was ignored.
+    """
+    from typing import Self
+    from unittest import mock
+
+    from kp2bw import cli
+    from kp2bw.bw_serve import StripResult
+
+    class _FakeClient:
+        """Minimal context-manager stand-in exposing the one method called."""
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def strip_field_from_items(self, _field_name: str) -> StripResult:
+            return StripResult(scanned=3, stripped=0)
+
+    def _must_not_prompt(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("prompted despite -y (skip_confirm=True)")
+
+    def _make_client(*_args: object, **_kwargs: object) -> _FakeClient:
+        return _FakeClient()
+
+    with (
+        mock.patch("builtins.input", _must_not_prompt),
+        mock.patch.object(cli, "BitwardenServeClient", _make_client),
+    ):
+        cli._run_strip_ids(
+            bitwarden_password_arg="bw-pw",
+            org_id=None,
+            collection_id=None,
+            skip_confirm=True,
+        )
+
+
 def main() -> None:
     assert_only_stamped_items_stripped()
     assert_second_pass_is_noop()
+    assert_declined_confirmation_aborts_without_touching_vault()
+    assert_yes_skips_confirmation_prompt()
     print("strip ids test passed")
 
 

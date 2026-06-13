@@ -881,10 +881,13 @@ class BitwardenServeClient:
         field are skipped; each match is rewritten via a full :meth:`update_item`
         ``PUT``.  Returns the scanned/stripped counts for the caller to report.
 
-        Re-runnable and harmless to repeat: a second pass finds nothing to do.
-        After stripping, a later migration re-stamps via the one-time
-        ``(folder, name)`` legacy adoption, so this does not permanently break
-        idempotency -- it is simply the intended last step.
+        The strip itself is re-runnable (a second pass finds nothing), but it is
+        **irreversible** and degrades future migrations: the stamp is the stable
+        identity key, and without it a re-run falls back to ``(folder, name)``
+        matching -- the very collision the stamp exists to disambiguate -- so
+        entries sharing a folder and title can then be duplicated or mismatched.
+        It is therefore a deliberate final step, gated by a confirmation in the
+        CLI (skippable with ``-y`` for callers who know what they want).
         """
         items = self.list_items(
             organization_id=self._org_id,
