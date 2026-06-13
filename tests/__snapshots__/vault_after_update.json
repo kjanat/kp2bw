@@ -73,7 +73,7 @@
         "totp": null,
         "uris": [
           {
-            "match": 0,
+            "match": null,
             "uri": "https://例え.テスト"
           }
         ],
@@ -101,7 +101,7 @@
         "totp": "otpauth://totp/Example?secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=6&period=60",
         "uris": [
           {
-            "match": 0,
+            "match": null,
             "uri": "https://example.com"
           }
         ],
@@ -211,7 +211,7 @@
         "totp": "GEZDGNBVGY3TQOJQ",
         "uris": [
           {
-            "match": 0,
+            "match": null,
             "uri": "https://bank.example"
           }
         ],
@@ -256,7 +256,7 @@
         "totp": "otpauth://totp/SSH%20Box?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&algorithm=SHA256&digits=8&period=30",
         "uris": [
           {
-            "match": 0,
+            "match": null,
             "uri": "ssh://10.0.0.5"
           }
         ],

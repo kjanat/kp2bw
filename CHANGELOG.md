@@ -11,15 +11,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Additional URLs and Android packages migrate as Bitwarden login URIs, not custom fields** -- a KeePass(XC) entry's
-  additional URLs (`KP2A_URL`, `KP2A_URL_1`, …) and `AndroidApp` package ids were copied verbatim into custom fields,
-  where they were inert. They now become real entries in `login.uris`, so one login autofills across every site and app
-  it covered in KeePass, and each URI gets a per-URI match mode reproducing KeePassXC's behaviour: a plain URL → base
-  domain (`--uri-match` / `KP2BW_URI_MATCH` tunes this; `domain` default reproduces KeePassXC's host-based matching,
-  `default` defers to your Bitwarden account default), a double-quoted URL → exact, and a `*` wildcard → starts-with
-  (trailing path) or regex. `AndroidApp` becomes an `androidapp://` URI. Non-web schemes (`keepassxc://`, `cmd://`,
-  `kdbx://`, `file://`) and unresolved `{REF:…}` URLs are dropped rather than left as dead URIs.
-  `--no-interpret-uri-syntax` (`KP2BW_INTERPRET_URI_SYNTAX`) disables the quote/wildcard interpretation for a literal
-  import. Bitwarden applies a regex to the whole URL (unlike KeePassXC's separate host/path regexes), so complex
+  additional URLs (`KP2A_URL`/`KP2A_URL_n`, plus the plainer `URL`/`URL_n` convention) and Android packages
+  (`AndroidApp`/`AndroidApp_n`, including the no-underscore `AndroidApp1` variant) were copied verbatim into custom
+  fields, where they were inert. They now become real entries in `login.uris`, so one login autofills across every site
+  and app it covered in KeePass; free-text URL labels (`API Url`, `Alt. URL`, `Website`, …) are deliberately left as
+  custom fields. Each URI gets a per-URI match mode reproducing KeePassXC's behaviour: a plain URL → the account default
+  (`match` left unset -- what Bitwarden itself writes on export; `--uri-match` / `KP2BW_URI_MATCH` overrides, e.g.
+  `domain` forces base-domain to replicate KeePassXC's host-based matching), a double-quoted URL → exact, and a `*`
+  wildcard → starts-with (trailing path) or regex. `AndroidApp` becomes an `androidapp://` URI. Non-web schemes
+  (`keepassxc://`, `cmd://`, `kdbx://`, `file://`) and unresolved `{REF:…}` URLs are dropped rather than left as dead
+  URIs. `--no-interpret-uri-syntax` (`KP2BW_INTERPRET_URI_SYNTAX`) disables the quote/wildcard interpretation for a
+  literal import. Bitwarden applies a regex to the whole URL (unlike KeePassXC's separate host/path regexes), so complex
   wildcards are emitted as a best-effort whole-URL regex with a warning to review. Items imported before this are
   upgraded by a normal re-run (the change is detected and the item updated in place); for users who don't want to
   re-import, `kp2bw --migrate-uris` (env `KP2BW_MIGRATE_URIS`) is a Bitwarden-only one-shot pass that re-folds the

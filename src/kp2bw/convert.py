@@ -163,7 +163,7 @@ class Converter:
         migrate_metadata: bool = True,
         update_existing: bool = True,
         include_oversize_secrets: bool = False,
-        uri_match: UriMatchValue = 0,
+        uri_match: UriMatchValue = None,
         interpret_uri_syntax: bool = True,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""

@@ -50,17 +50,34 @@ def assert_match_names_parse() -> None:
 
 
 def assert_url_attribute_keys() -> None:
-    """Only KP2A_URL* and AndroidApp* are siphoned out of custom fields."""
-    for key in ("KP2A_URL", "KP2A_URL_1", "KP2A_URL_16", "AndroidApp", "AndroidApp_2"):
+    """URL-like (KP2A_URL*/URL*) and AndroidApp* keys are siphoned; others aren't."""
+    for key in (
+        "KP2A_URL",
+        "KP2A_URL_1",
+        "KP2A_URL_16",
+        "URL",
+        "URL_1",
+        "AndroidApp",
+        "AndroidApp_2",
+        "AndroidApp1",  # no-underscore variant
+    ):
         if not is_url_attribute_key(key):
             raise AssertionError(f"{key} should be a URL attribute")
-    for key in ("URL", "KP2A_URLX", "Notes", "AndroidApplication"):
+    # Free-text labels and near-misses must stay as custom fields.
+    for key in (
+        "API Url",
+        "Alt. URL",
+        "Website",
+        "KP2A_URLX",
+        "Notes",
+        "AndroidApplication",
+    ):
         if is_url_attribute_key(key):
             raise AssertionError(f"{key} should NOT be a URL attribute")
 
 
-def assert_plain_urls_get_base_domain_and_dedup() -> None:
-    """Plain primary + additional URLs become base-domain URIs, verbatim, deduped."""
+def assert_plain_urls_default_to_account_default_and_dedup() -> None:
+    """Plain primary + additional URLs default to match=None (account default), deduped."""
     got = _uris(
         primary_url="thuisbezorgd.nl",
         additional_urls=[
@@ -71,11 +88,24 @@ def assert_plain_urls_get_base_domain_and_dedup() -> None:
         android_packages=["com.takeaway.android"],
     )
     expected = [
-        ("thuisbezorgd.nl", 0),
-        ("https://takeaway.com", 0),
-        ("https://10bis.co.il", 0),
+        ("thuisbezorgd.nl", None),
+        ("https://takeaway.com", None),
+        ("https://10bis.co.il", None),
         ("androidapp://com.takeaway.android", None),
     ]
+    if got != expected:
+        raise AssertionError(f"got {got}, want {expected}")
+
+
+def assert_uri_match_domain_forces_base_domain() -> None:
+    """``plain_match=0`` forces base-domain on plain URLs (the KeePassXC-faithful opt-in)."""
+    got = _uris(
+        primary_url="example.com",
+        additional_urls=["https://alt.example"],
+        android_packages=[],
+        plain_match=0,
+    )
+    expected = [("example.com", 0), ("https://alt.example", 0)]
     if got != expected:
         raise AssertionError(f"got {got}, want {expected}")
 
@@ -130,7 +160,7 @@ def assert_literal_mode_skips_interpretation() -> None:
         android_packages=[],
         interpret_syntax=False,
     )
-    expected = [('"https://x/login"', 0), ("https://host/*", 0)]
+    expected = [('"https://x/login"', None), ("https://host/*", None)]
     if got != expected:
         raise AssertionError(f"literal mode: got {got}, want {expected}")
 
@@ -186,7 +216,8 @@ def assert_remap_noop_without_legacy_fields() -> None:
 def main() -> None:
     assert_match_names_parse()
     assert_url_attribute_keys()
-    assert_plain_urls_get_base_domain_and_dedup()
+    assert_plain_urls_default_to_account_default_and_dedup()
+    assert_uri_match_domain_forces_base_domain()
     assert_special_syntaxes_map_when_interpreting()
     assert_drops()
     assert_literal_mode_skips_interpretation()

@@ -237,10 +237,11 @@ def _argparser() -> MyArgParser:
         choices=match_value_names(),
         help=(
             "Match mode for plain URLs migrated into login URIs: "
-            "domain|host|startswith|exact|regex|never|default. 'domain' (default) "
-            "reproduces KeePassXC's host-based matching; 'default' defers to your "
-            "Bitwarden account default. Quoted-exact and wildcard URLs keep their "
-            "own modes regardless (env: KP2BW_URI_MATCH)"
+            "domain|host|startswith|exact|regex|never|default. 'default' (the "
+            "default) leaves match unset so Bitwarden uses your account default "
+            "-- what Bitwarden itself writes; 'domain' forces base-domain to "
+            "replicate KeePassXC's host-based matching regardless. Quoted-exact "
+            "and wildcard URLs keep their own modes (env: KP2BW_URI_MATCH)"
         ),
         default=None,
     )
@@ -630,7 +631,7 @@ def main() -> None:
             args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
         )
         uri_match: UriMatchValue = parse_match_name(
-            _with_env(args.uri_match, "KP2BW_URI_MATCH") or "domain"
+            _with_env(args.uri_match, "KP2BW_URI_MATCH") or "default"
         )
         verbose = _resolve_bool_option(args.verbose, "KP2BW_VERBOSE", default=False)
         debug = _resolve_bool_option(args.debug, "KP2BW_DEBUG", default=False)

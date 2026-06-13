@@ -23,7 +23,9 @@ to reproduce how KeePassXC itself would have matched that URL string:
 Two orthogonal knobs steer the behaviour:
 
 * ``plain_match`` -- what a no-encoded-intent (plain) string becomes. Defaults to
-  base domain (0); ``None`` defers to the user's Bitwarden account default.
+  ``None`` (defer to the user's Bitwarden account default -- what Bitwarden itself
+  writes on export); pass ``0`` for base-domain to faithfully replicate
+  KeePassXC's host-based matching regardless of the account default.
 * ``interpret_syntax`` -- whether the quote/wildcard conventions are honoured at
   all. With it off, every additional URL is treated as a plain string (the
   scheme/garbage drops still apply), for a deliberately literal import.
@@ -60,10 +62,15 @@ _MATCH_NAMES: dict[str, UriMatchValue] = {
     "null": None,
 }
 
-# KeePass2Android / KeePassXC additional-URL attribute names: KP2A_URL, KP2A_URL_1, ...
-_ADDITIONAL_URL_RE = re.compile(r"^KP2A_URL(_\d+)?$")
-# Android package attribute names: AndroidApp, AndroidApp_1, ...
-_ANDROID_APP_RE = re.compile(r"^AndroidApp(_\d+)?$")
+# Additional-URL attribute names: the KeePass2Android/KeePassXC ``KP2A_URL`` /
+# ``KP2A_URL_<n>`` convention, plus the plainer ``URL`` / ``URL_<n>`` convention
+# some entries use. Both are unambiguously "extra autofill URLs"; free-text
+# labels like "API Url" or "Alt. URL" are deliberately *not* matched -- folding
+# those would wrongly autofill API endpoints and other metadata.
+_ADDITIONAL_URL_RE = re.compile(r"^(?:KP2A_URL|URL)(_\d+)?$")
+# Android package attribute names. The underscore is optional so both the
+# ``AndroidApp_<n>`` and the no-underscore ``AndroidApp<n>`` variants are caught.
+_ANDROID_APP_RE = re.compile(r"^AndroidApp(_?\d+)?$")
 
 # Schemes that are never site URLs and must not become Bitwarden URIs.
 _DROP_SCHEMES: tuple[str, ...] = ("keepassxc://", "cmd://", "kdbx://", "file://")
@@ -114,11 +121,12 @@ def is_android_app_key(key: str) -> bool:
 def url_attribute_index(key: str) -> int:
     """Stable sort index for a URL attribute: bare name first, then by suffix.
 
-    ``KP2A_URL`` -> -1, ``KP2A_URL_2`` -> 2, ``KP2A_URL_10`` -> 10, so the emitted
-    URI order is deterministic across runs (the dedup content-diff compares the
-    ``uris`` list positionally, so a stable order avoids spurious "changed" runs).
+    ``KP2A_URL`` -> -1, ``KP2A_URL_2`` -> 2, ``KP2A_URL_10`` -> 10, and the
+    no-underscore ``AndroidApp1`` -> 1, so the emitted URI order is deterministic
+    across runs (the dedup content-diff compares the ``uris`` list positionally,
+    so a stable order avoids spurious "changed" runs).
     """
-    match = re.search(r"_(\d+)$", key)
+    match = re.search(r"(\d+)$", key)
     return int(match.group(1)) if match else -1
 
 
@@ -241,7 +249,7 @@ def build_login_uris(
     primary_url: str,
     additional_urls: list[str],
     android_packages: list[str],
-    plain_match: UriMatchValue = 0,
+    plain_match: UriMatchValue = None,
     interpret_syntax: bool = True,
 ) -> list[BwUri]:
     """Build the ordered, de-duplicated ``login.uris`` list for an entry.
@@ -283,7 +291,7 @@ def remap_item_fields_to_uris(
     fields: list[BwField],
     uris: list[BwUri],
     *,
-    plain_match: UriMatchValue = 0,
+    plain_match: UriMatchValue = None,
     interpret_syntax: bool = True,
 ) -> tuple[list[BwField], list[BwUri], bool]:
     """Re-fold an already-imported item's URL/app *custom fields* into URIs.
