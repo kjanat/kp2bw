@@ -10,6 +10,7 @@ from typing import cast
 
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwField, BwItemResponse, BwUri
+from kp2bw.uri_mapping import is_url_attribute_key
 
 
 def _login(item_id: str, field_names: list[str], uri: str) -> BwItemResponse:
@@ -49,8 +50,8 @@ class _MigrateClient(BitwardenServeClient):
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
         self.updated_ids.append(item_id)
-        fields = [f.get("name", "") for f in item.get("fields") or []]
-        if any(name.startswith(("KP2A_URL", "URL", "AndroidApp")) for name in fields):
+        fields = [f.get("name") or "" for f in item.get("fields") or []]
+        if any(is_url_attribute_key(name) for name in fields):
             raise AssertionError(f"{item_id} still carries a legacy URL/app field")
 
 

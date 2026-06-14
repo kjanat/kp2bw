@@ -26,6 +26,8 @@ from _snapshot import (
 )
 from pykeepass import Entry, PyKeePass, create_database
 
+from kp2bw.uri_mapping import is_url_attribute_key
+
 logger = logging.getLogger("e2e")
 
 SENSITIVE_ARG_FLAGS = {
@@ -686,7 +688,11 @@ def _assert_comprehensive_seed(vault: NormVault) -> None:
     # the keepassxc:// value must be dropped. (Runs unconditionally, so the
     # non-golden CI leg validates the fold too.)
     multi = _item_by_name(vault, "Multi URL")
-    multi_uris = {uri["uri"]: uri["match"] for uri in _login(multi)["uris"]}
+    multi_uri_list = _login(multi)["uris"]
+    multi_uri_values = [uri["uri"] for uri in multi_uri_list]
+    if len(set(multi_uri_values)) != len(multi_uri_values):
+        raise AssertionError(f"Multi URL has duplicate URIs: {multi_uri_values}")
+    multi_uris = {uri["uri"]: uri["match"] for uri in multi_uri_list}
     expected_multi_uris: dict[str, int | None] = {
         "https://multi.example": None,
         "https://alt-one.example": None,
@@ -703,7 +709,7 @@ def _assert_comprehensive_seed(vault: NormVault) -> None:
     leftover = [
         name
         for field in multi["fields"]
-        if (name := field["name"] or "").startswith(("KP2A_URL", "URL", "AndroidApp"))
+        if is_url_attribute_key(name := field["name"] or "")
     ]
     if leftover:
         raise AssertionError(f"Multi URL still carries legacy URL fields: {leftover}")
