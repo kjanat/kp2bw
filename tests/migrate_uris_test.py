@@ -50,8 +50,8 @@ class _MigrateClient(BitwardenServeClient):
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
         self.updated_ids.append(item_id)
         fields = [f.get("name", "") for f in item.get("fields") or []]
-        if any(name.startswith("KP2A_URL") for name in fields):
-            raise AssertionError(f"{item_id} still carries a KP2A_URL field")
+        if any(name.startswith(("KP2A_URL", "URL", "AndroidApp")) for name in fields):
+            raise AssertionError(f"{item_id} still carries a legacy URL/app field")
 
 
 def assert_only_login_items_with_legacy_fields_migrate() -> None:

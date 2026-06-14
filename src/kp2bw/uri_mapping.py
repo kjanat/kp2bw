@@ -270,33 +270,37 @@ def _classify_additional_url(
     s = raw.strip()
     if not s:
         return None
+    # Reasons are logged WITHOUT the URL value: this lands in the always-on debug
+    # log, which users are encouraged to share for troubleshooting, and entry URLs
+    # are vault data.
     if s.lower().startswith(_DROP_SCHEMES):
-        logger.debug(f"Dropping non-web URL from URIs: {s!r}")
+        logger.debug("Dropping a non-web-scheme URL from URIs")
         return None
     if _KP_REF_MARKER in s:
-        logger.debug(f"Dropping unresolved reference URL from URIs: {s!r}")
+        logger.debug("Dropping an unresolved field-reference URL from URIs")
         return None
     if _ILLEGAL_URL_CHARS.search(s):
-        logger.debug(f"Dropping URL with illegal characters from URIs: {s!r}")
+        logger.debug("Dropping a URL with illegal characters from URIs")
         return None
 
     if interpret_syntax:
         if len(s) >= 2 and s.startswith('"') and s.endswith('"'):
             inner = s[1:-1]
             if not inner or "*" in inner:
-                logger.debug(f"Dropping invalid quoted-exact URL: {s!r}")
+                logger.debug("Dropping an invalid quoted-exact URL")
                 return None
             return BwUri(uri=inner, match=3)
         if "*" in s:
             if _is_invalid_wildcard(s):
-                logger.debug(f"Dropping invalid wildcard URL: {s!r}")
+                logger.debug("Dropping an invalid wildcard URL")
                 return None
             prefix = _trailing_path_wildcard_prefix(s)
             if prefix is not None:
                 return BwUri(uri=prefix, match=2)
             logger.warning(
-                f"Wildcard URL {s!r} migrated as a regex match; review it in "
-                f"Bitwarden -- complex wildcard fidelity is best-effort"
+                "A wildcard URL was migrated as a regex match; review your "
+                "wildcard entries in Bitwarden -- complex wildcard fidelity is "
+                "best-effort"
             )
             return BwUri(uri=_glob_to_regex(s), match=4)
 

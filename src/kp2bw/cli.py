@@ -716,10 +716,11 @@ def main() -> None:
         migrate_uris = _resolve_bool_option(
             args.migrate_uris, "KP2BW_MIGRATE_URIS", default=False
         )
-        report_uris = _with_env(args.report_uris, "KP2BW_REPORT_URIS")
+        raw_report = _with_env(args.report_uris, "KP2BW_REPORT_URIS")
+        report_uris = raw_report.strip().lower() if raw_report else None
         if report_uris not in (None, "keepass", "bitwarden"):
             raise ValueError(
-                f"Invalid KP2BW_REPORT_URIS={report_uris!r}; use 'keepass' or 'bitwarden'"
+                f"Invalid KP2BW_REPORT_URIS={raw_report!r}; use 'keepass' or 'bitwarden'"
             )
         interpret_uri_syntax = _resolve_bool_option(
             args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
@@ -786,7 +787,13 @@ def main() -> None:
         )
         assert args.keepass_file is not None
         try:
-            uris = collect_keepass_uris(args.keepass_file, kp_pw, args.kp_keyfile)
+            uris = collect_keepass_uris(
+                args.keepass_file,
+                kp_pw,
+                args.kp_keyfile,
+                uri_match=uri_match,
+                interpret_uri_syntax=interpret_uri_syntax,
+            )
         except (OSError, ValueError) as exc:
             _fail(exc)
         _print_uri_report(uris, "keepass")

@@ -34,7 +34,6 @@ from .otp import resolve_otp
 from .uri_mapping import (
     UriMatchValue,
     build_login_uris,
-    is_additional_url_key,
     is_android_app_key,
     is_url_attribute_key,
     url_attribute_index,
@@ -123,17 +122,43 @@ def _print_summary(
         )
 
 
+def _entry_url_inputs(entry: Entry) -> tuple[str, list[str], list[str]]:
+    """``(primary url, additional URLs, android packages)`` for a KeePass entry.
+
+    Mirrors the extraction in :meth:`Converter._add_bw_entry_to_entries_dict`
+    (suffix-ordered for determinism) so callers that need an entry's would-be
+    ``login.uris`` -- the report and REF merging -- fold the same inputs the
+    migration does.
+    """
+    url_attrs: list[tuple[int, str]] = []
+    app_attrs: list[tuple[int, str]] = []
+    for key, value in entry.custom_properties.items():
+        if value and is_url_attribute_key(key):
+            bucket = app_attrs if is_android_app_key(key) else url_attrs
+            bucket.append((url_attribute_index(key), value))
+    return (
+        entry.url or "",
+        [v for _, v in sorted(url_attrs)],
+        [v for _, v in sorted(app_attrs)],
+    )
+
+
 def collect_keepass_uris(
     keepass_file_path: str,
     keepass_password: str | None,
     keepass_keyfile_path: str | None,
+    *,
+    uri_match: UriMatchValue = None,
+    interpret_uri_syntax: bool = True,
 ) -> list[str]:
-    """Return every URL in a KeePass DB (primary ``url`` + additional-URL fields).
+    """Return the login-URI values migration would write for every entry.
 
-    Read-only helper for the ``--report-uris keepass`` collision report: it
-    gathers exactly the values migration would fold into ``login.uris``
-    (``entry.url`` plus ``KP2A_URL*`` / ``URL_*`` custom fields), so the report
-    previews post-migration collisions without writing anything.
+    Read-only helper for the ``--report-uris keepass`` collision report: each
+    entry's primary URL plus its ``KP2A_URL*`` / ``URL_*`` / ``AndroidApp*``
+    attributes are run through the same :func:`build_login_uris` the migration
+    uses, so the report previews exactly the URIs that would be written --
+    including quote/wildcard transforms and dropped non-web schemes -- not the
+    raw values.
     """
     kp = PyKeePass(
         filename=keepass_file_path,
@@ -142,11 +167,17 @@ def collect_keepass_uris(
     )
     uris: list[str] = []
     for entry in kp.entries:
-        if entry.url:
-            uris.append(entry.url)
-        for key, value in entry.custom_properties.items():
-            if value and is_additional_url_key(key):
-                uris.append(value)
+        primary, additional, android = _entry_url_inputs(entry)
+        uris.extend(
+            bw_uri["uri"]
+            for bw_uri in build_login_uris(
+                primary_url=primary,
+                additional_urls=additional,
+                android_packages=android,
+                plain_match=uri_match,
+                interpret_syntax=interpret_uri_syntax,
+            )
+        )
     return uris
 
 
@@ -759,12 +790,22 @@ class Converter:
                     break
 
             if username_and_password_match and ref_result is not None:
-                # => add url to bw_item => username / pw identical
+                # => merge this entry's URLs into the referent (same creds). Fold
+                # the full set (primary + KP2A_URL*/URL_*/AndroidApp*) the same way
+                # migration would, and append only URIs not already present.
                 _, _, ref_item, _ = self._unpack_entry(ref_result)
-                if kp_entry.url:
-                    ref_item["login"]["uris"].append(
-                        BwUri(uri=kp_entry.url, match=self._uri_match)
-                    )
+                existing_uris = ref_item["login"]["uris"]
+                existing_values = {u.get("uri") for u in existing_uris}
+                primary, additional, android = _entry_url_inputs(kp_entry)
+                for bw_uri in build_login_uris(
+                    primary_url=primary,
+                    additional_urls=additional,
+                    android_packages=android,
+                    plain_match=self._uri_match,
+                    interpret_syntax=self._interpret_uri_syntax,
+                ):
+                    if bw_uri["uri"] not in existing_values:
+                        existing_uris.append(bw_uri)
                 canonical = ref_result
             else:
                 # => create new bitwarden item

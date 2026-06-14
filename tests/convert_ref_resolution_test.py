@@ -97,6 +97,11 @@ class ReferenceEntry(Entry):
         """Return ``None``; the double is not attached to any group."""
         return None
 
+    @property
+    def custom_properties(self) -> dict[str, str | None]:
+        """Return no extra properties; only ``url`` folds into the referent."""
+        return {}
+
 
 class ReferenceResolutionTestConverter(Converter):
     """Converter wired with stubbed lookups to exercise REF resolution alone."""

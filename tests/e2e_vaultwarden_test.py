@@ -681,6 +681,33 @@ def _assert_comprehensive_seed(vault: NormVault) -> None:
     if _field(long_field, "hint")["value"] != "see recovery_codes.txt":
         raise AssertionError("Short field beside the long one should stay inline")
 
+    # Additional URLs / Android packages fold into login.uris with per-URI match
+    # modes; the KP2A_URL*/URL_*/AndroidApp* custom fields must NOT survive, and
+    # the keepassxc:// value must be dropped. (Runs unconditionally, so the
+    # non-golden CI leg validates the fold too.)
+    multi = _item_by_name(vault, "Multi URL")
+    multi_uris = {uri["uri"]: uri["match"] for uri in _login(multi)["uris"]}
+    expected_multi_uris: dict[str, int | None] = {
+        "https://multi.example": None,
+        "https://alt-one.example": None,
+        "https://alt-two.example": None,
+        "https://alt-three.example": None,
+        "androidapp://com.multi.app": None,
+        "androidapp://com.multi.other": None,
+        "https://exact.example/login": 3,  # quoted -> exact
+        "https://multi.example/area/": 2,  # trailing wildcard -> starts-with
+        "https://.*\\.wild\\.example/.*": 4,  # host wildcard -> regex
+    }
+    if multi_uris != expected_multi_uris:
+        raise AssertionError(f"Multi URL uris/match wrong: {multi_uris}")
+    leftover = [
+        name
+        for field in multi["fields"]
+        if (name := field["name"] or "").startswith(("KP2A_URL", "URL", "AndroidApp"))
+    ]
+    if leftover:
+        raise AssertionError(f"Multi URL still carries legacy URL fields: {leftover}")
+
 
 def main() -> None:
     logging.basicConfig(
