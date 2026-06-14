@@ -339,6 +339,26 @@ def _create_keepass_snapshot(path: Path, password: str) -> None:
     # Empty Password: a login with a username but no password.
     _ = kp.add_entry(kp.root_group, "Empty Password", "lonely-user", "")
 
+    # Multi URL: exercises additional-URL -> login.uris folding end to end. The
+    # KP2A_URL*/URL_*/AndroidApp* custom fields must NOT survive as fields; they
+    # become login URIs with per-URI match modes -- plain -> account default
+    # (match unset), double-quoted -> exact, trailing-path wildcard ->
+    # starts-with, host wildcard -> regex -- plus androidapp:// for packages
+    # (bare and the no-underscore AndroidApp1 variant). The keepassxc:// value is
+    # a non-web scheme and is dropped entirely.
+    multi = kp.add_entry(
+        internet, "Multi URL", "multi-user", "multi-pass", url="https://multi.example"
+    )
+    multi.set_custom_property("KP2A_URL", "https://alt-one.example")
+    multi.set_custom_property("KP2A_URL_1", "https://alt-two.example")
+    multi.set_custom_property("URL_1", "https://alt-three.example")
+    multi.set_custom_property("AndroidApp", "com.multi.app")
+    multi.set_custom_property("AndroidApp1", "androidapp://com.multi.other")
+    multi.set_custom_property("KP2A_URL_2", '"https://exact.example/login"')
+    multi.set_custom_property("KP2A_URL_3", "https://multi.example/area/*")
+    multi.set_custom_property("KP2A_URL_4", "https://*.wild.example/*")
+    multi.set_custom_property("KP2A_URL_5", "keepassxc://by-uuid/dropme")
+
     kp.save()
 
 

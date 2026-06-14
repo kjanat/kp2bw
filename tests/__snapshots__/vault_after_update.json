@@ -192,6 +192,60 @@
     {
       "attachments": [],
       "favorite": false,
+      "fields": [],
+      "folder": "Internet",
+      "login": {
+        "fido2Credentials": [],
+        "password": "multi-pass",
+        "totp": null,
+        "uris": [
+          {
+            "match": null,
+            "uri": "androidapp://com.multi.app"
+          },
+          {
+            "match": null,
+            "uri": "androidapp://com.multi.other"
+          },
+          {
+            "match": 4,
+            "uri": "https://.*\\.wild\\.example/.*"
+          },
+          {
+            "match": null,
+            "uri": "https://alt-one.example"
+          },
+          {
+            "match": null,
+            "uri": "https://alt-three.example"
+          },
+          {
+            "match": null,
+            "uri": "https://alt-two.example"
+          },
+          {
+            "match": 3,
+            "uri": "https://exact.example/login"
+          },
+          {
+            "match": null,
+            "uri": "https://multi.example"
+          },
+          {
+            "match": 2,
+            "uri": "https://multi.example/area/"
+          }
+        ],
+        "username": "multi-user"
+      },
+      "name": "Multi URL",
+      "notes": "",
+      "token": "Internet/Multi URL",
+      "type": 1
+    },
+    {
+      "attachments": [],
+      "favorite": false,
       "fields": [
         {
           "name": "PIN",
