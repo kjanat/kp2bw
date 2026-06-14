@@ -6,20 +6,21 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 
 ## WHERE TO LOOK
 
-| Task                      | Location                         | Notes                                                    |
-| ------------------------- | -------------------------------- | -------------------------------------------------------- |
-| bw command resolution     | `tests/bw_serve_command_test.py` | Cross-platform argv wrapping + process teardown logic    |
-| Windows bw.cmd live smoke | `tests/windows_bw_cmd_smoke.py`  | Gated by `KP2BW_RUN_WIN_CMD_SMOKE=1`; Windows CI only    |
-| Package smoke validation  | `tests/smoke_test.py`            | Verifies built artifact behavior, metadata, entry points |
-| Stubs package validation  | `tests/stubs_smoke_test.py`      | Verifies `partial` marker + type-check consumption       |
-| Full migration e2e        | `tests/e2e_vaultwarden_test.py`  | Rich seed + idempotency + golden snapshots               |
-| Snapshot normalization    | `tests/_snapshot.py`             | Scrubs volatile fields, hashes attachments, golden diff  |
-| Golden snapshots          | `tests/__snapshots__/*.json`     | Committed expected vault state (pinned bw owns them)     |
-| Integration infra         | `tests/docker-compose.yml`       | Vaultwarden + test container orchestration               |
-| Vaultwarden image seeding | `tests/Dockerfile.vaultwarden`   | Pinned image + DB/key fixtures                           |
-| Test runner image         | `tests/Dockerfile.test`          | uv + lockfile-pinned bw CLI + test deps                  |
-| Reusable bw setup         | `.github/actions/setup-bw`       | Installs a chosen `@bitwarden/cli` (matrix-able)         |
-| Fixture retention rules   | `tests/fixtures/.gitignore`      | Allowlist keeps required DB/certs tracked                |
+| Task                      | Location                         | Notes                                                     |
+| ------------------------- | -------------------------------- | --------------------------------------------------------- |
+| bw command resolution     | `tests/bw_serve_command_test.py` | Cross-platform argv wrapping + process teardown logic     |
+| Manual-edit protection    | `tests/protect_edits_test.py`    | `KP2BW_SYNC` stamp, `_is_user_modified`, protect vs force |
+| Windows bw.cmd live smoke | `tests/windows_bw_cmd_smoke.py`  | Gated by `KP2BW_RUN_WIN_CMD_SMOKE=1`; Windows CI only     |
+| Package smoke validation  | `tests/smoke_test.py`            | Verifies built artifact behavior, metadata, entry points  |
+| Stubs package validation  | `tests/stubs_smoke_test.py`      | Verifies `partial` marker + type-check consumption        |
+| Full migration e2e        | `tests/e2e_vaultwarden_test.py`  | Rich seed + idempotency + golden snapshots                |
+| Snapshot normalization    | `tests/_snapshot.py`             | Scrubs volatile fields, hashes attachments, golden diff   |
+| Golden snapshots          | `tests/__snapshots__/*.json`     | Committed expected vault state (pinned bw owns them)      |
+| Integration infra         | `tests/docker-compose.yml`       | Vaultwarden + test container orchestration                |
+| Vaultwarden image seeding | `tests/Dockerfile.vaultwarden`   | Pinned image + DB/key fixtures                            |
+| Test runner image         | `tests/Dockerfile.test`          | uv + lockfile-pinned bw CLI + test deps                   |
+| Reusable bw setup         | `.github/actions/setup-bw`       | Installs a chosen `@bitwarden/cli` (matrix-able)          |
+| Fixture retention rules   | `tests/fixtures/.gitignore`      | Allowlist keeps required DB/certs tracked                 |
 
 ## CONVENTIONS
 

@@ -30,7 +30,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
-from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME
+from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME
 
 # A concrete recursive type for parsed JSON. Laundering ``json.loads``'s ``Any``
 # into this once (``as_object`` / ``parse_object``) means every later
@@ -247,10 +247,10 @@ def _norm_item(
         (
             _norm_field(f)
             for f in _objects(raw, "fields")
-            # kp2bw's stable-identity stamp is volatile per run (a KeePass UUID)
-            # and is implementation metadata, not migrated content -- drop it so
-            # the golden stays deterministic across runs.
-            if f.get("name") != KP2BW_ID_FIELD_NAME
+            # kp2bw's managed stamps are volatile per run (KP2BW_ID is a KeePass
+            # UUID; KP2BW_SYNC is a content hash) and are implementation metadata,
+            # not migrated content -- drop them so the golden stays deterministic.
+            if f.get("name") not in (KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME)
         ),
         key=lambda f: (f["name"] or "", f["type"], f["value"] or ""),
     )

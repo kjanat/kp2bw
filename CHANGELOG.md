@@ -26,6 +26,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Manual edits made in Bitwarden are no longer silently reverted on re-run** (issue #30). kp2bw is
+  KeePass-authoritative, so any difference on an existing item used to be overwritten with the KeePass value -- quietly
+  undoing a title you fixed, a note you added or a URI you corrected in Bitwarden. Every item kp2bw writes now carries a
+  hidden-from-noise `KP2BW_SYNC` content signature; a re-run that finds an item's current content no longer matching
+  that stamp knows a *user* edited it (kp2bw's own writes restamp, so they never self-trip) and **preserves the edit**,
+  reporting it as `protected` in the summary instead of clobbering it. `--force-update` (env `KP2BW_FORCE_UPDATE`) makes
+  KeePass win regardless. Unchanged re-runs stay idempotent (the stamp is excluded from the content diff), legacy/
+  unstamped items keep current behaviour, and `--strip-ids` now removes `KP2BW_SYNC` alongside `KP2BW_ID`.
+
 - **`--report-uris keepass|bitwarden` -- a read-only URI collision report** (env `KP2BW_REPORT_URIS`). Groups every
   login URL by registrable domain (a curated two-level public-suffix heuristic, so `10bis.co.il` stays whole) and lists
   the domains with more than one host -- exactly the logins that all surface together under Bitwarden's base-domain

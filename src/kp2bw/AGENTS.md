@@ -78,13 +78,26 @@ src/kp2bw/
   failing that it creates a new item. This stops distinct same-titled entries from collapsing onto one item (data loss)
   and keeps re-runs idempotent across title/folder edits. The legacy adoption is a one-time path for vaults imported
   before stable identity.
-- `--strip-ids` (`KP2BW_STRIP_IDS`, default off) is the finalize-mode inverse of the stamp above: it short-circuits
+- Manual-edit protection (issue #30, `--force-update` / `KP2BW_FORCE_UPDATE`, `Converter(force_update=...)` →
+  `self._force_update_all`): every written item carries a `KP2BW_SYNC` plain-text field holding
+  `_content_signature(item)` — a sha256 over exactly the surface `_content_differs` compares (name, notes,
+  `_fields_signature` with managed stamps excluded, `_login_signature`), stamped in `_add_bw_entry_to_entries_dict`,
+  read by `bw_serve.item_kp2bw_sync`, and itself excluded from the signature (in `_MANAGED_FIELD_NAMES`) so it never
+  causes a spurious diff. `_reconcile_existing_item` computes `_is_user_modified(existing)` =
+  `stamp != _content_signature(existing)`; when content differs **and** the item was user-edited **and** not
+  `force_update`/`_force_update_all`, it returns `"protected"` (no PUT, attachments skipped) instead of clobbering.
+  kp2bw's own writes restamp, so they never self-trip; an unstamped (legacy/first-run) item returns `False` and updates
+  normally to establish the stamp. The signature mechanism is deliberate over comparing Bitwarden's `revisionDate` to a
+  client timestamp — the server bumps `revisionDate` *after* kp2bw generates a stamp, so a timestamp compare would
+  false-trip every kp2bw-written item. The `protected` count is reported in the summary. Tests: `protect_edits_test.py`.
+- `--strip-ids` (`KP2BW_STRIP_IDS`, default off) is the finalize-mode inverse of the stamps above: it short-circuits
   migration entirely (`main()` returns before any KeePass read or password prompt) and only touches Bitwarden, removing
-  the `KP2BW_ID` field from every in-scope item via `_run_strip_ids` (`cli.py`) → `strip_field_from_items`
-  (`bw_serve.py`, one full `update_item` `PUT` per stamped item). Scope mirrors a migration (`-o`/`-c`), so only items
-  kp2bw could have stamped are touched. It is **irreversible** and degrades future re-runs (they fall back to
-  `(folder, name)` matching), so an interactive run confirms first (skippable with `-y`/`KP2BW_YES`); a declined prompt
-  exits `0` (clean abort), Ctrl+C exits `130`. Re-runnable: a second pass finds nothing.
+  the `KP2BW_ID` **and** `KP2BW_SYNC` fields from every in-scope item via `_run_strip_ids` (`cli.py`) →
+  `strip_field_from_items(*field_names)` (`bw_serve.py`, one full `update_item` `PUT` per stamped item). Scope mirrors a
+  migration (`-o`/`-c`), so only items kp2bw could have stamped are touched. It is **irreversible** and degrades future
+  re-runs (they fall back to `(folder, name)` matching), so an interactive run confirms first (skippable with
+  `-y`/`KP2BW_YES`); a declined prompt exits `0` (clean abort), Ctrl+C exits `130`. Re-runnable: a second pass finds
+  nothing.
 - `--metadata` (default on) folds the KeePass metadata Bitwarden has no native slot for — **tags and expiry** — into a
   single readable **YAML** `KP2BW_META` text field (`_build_metadata_field`, via PyYAML
   `safe_dump(allow_unicode=

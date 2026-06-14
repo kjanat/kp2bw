@@ -1,6 +1,7 @@
 import base64
 import binascii
 import copy
+import hashlib
 import logging
 import time
 from itertools import islice
@@ -20,7 +21,12 @@ from rich.progress import (
 
 from . import VERBOSE
 from ._console import console
-from .bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient
+from .bw_serve import (
+    KP2BW_ID_FIELD_NAME,
+    KP2BW_SYNC_FIELD_NAME,
+    BitwardenServeClient,
+    item_kp2bw_sync,
+)
 from .bw_types import (
     BwFido2Credential,
     BwField,
@@ -69,6 +75,7 @@ def _print_summary(
     n_created: int,
     n_updated: int,
     n_skipped: int,
+    n_protected: int,
     n_collection_update: int,
     n_attachments: int,
     n_update_failed: int,
@@ -85,6 +92,7 @@ def _print_summary(
                 n_created,
                 n_updated,
                 n_skipped,
+                n_protected,
                 n_collection_update,
                 n_attachments,
                 n_update_failed,
@@ -99,6 +107,11 @@ def _print_summary(
         console.print(f"  [blue]{n_updated:{w}d}[/blue] updated (changed in KeePass)")
     if n_skipped:
         console.print(f"  [dim]{n_skipped:{w}d}[/dim] skipped (unchanged)")
+    if n_protected:
+        console.print(
+            f"  [magenta]{n_protected:{w}d}[/magenta] protected (edited in "
+            f"Bitwarden; use --force-update to overwrite)"
+        )
     if n_collection_update:
         console.print(
             f"  [yellow]{n_collection_update:{w}d}[/yellow] added to collection"
@@ -221,6 +234,7 @@ class Converter:
         include_recyclebin: bool = False,
         migrate_metadata: bool = True,
         update_existing: bool = True,
+        force_update: bool = False,
         include_oversize_secrets: bool = False,
         uri_match: UriMatchValue = None,
         interpret_uri_syntax: bool = True,
@@ -239,6 +253,7 @@ class Converter:
         self._include_recyclebin = include_recyclebin
         self._migrate_metadata = migrate_metadata
         self._update_existing = update_existing
+        self._force_update_all = force_update
         self._include_oversize_secrets = include_oversize_secrets
         self._uri_match = uri_match
         self._interpret_uri_syntax = interpret_uri_syntax
@@ -513,6 +528,20 @@ class Converter:
             fido2_credentials=fido2_credentials,
             additional_urls=[v for _, v in sorted(url_attrs)],
             android_packages=[v for _, v in sorted(app_attrs)],
+        )
+
+        # Stamp the content signature kp2bw is writing, so a later re-run can tell
+        # a user's manual Bitwarden edit (signature no longer matches) from kp2bw's
+        # own prior write (this restamps it). Plain text, not hidden: like
+        # KP2BW_ID it is metadata, not a secret, and a hidden field is only
+        # UI-masked, not protected. Excluded from the content signature itself, so
+        # it never makes a re-run look "changed".
+        bw_item_object["fields"].append(
+            BwField(
+                name=KP2BW_SYNC_FIELD_NAME,
+                value=self._content_signature(bw_item_object),
+                type=0,
+            )
         )
 
         # get attachments to store later on. A value over the inline size limit
@@ -921,45 +950,70 @@ class Converter:
             return name, att.data
         return name, att[1].encode("UTF-8")
 
-    @staticmethod
+    # Custom fields kp2bw manages itself, never user content: excluded from the
+    # content signature so they can never make a re-run look "changed".
+    _MANAGED_FIELD_NAMES: frozenset[str] = frozenset({
+        KP2BW_ID_FIELD_NAME,
+        KP2BW_SYNC_FIELD_NAME,
+    })
+
+    @classmethod
     def _fields_signature(
+        cls,
         fields: list[BwField] | None,
     ) -> list[tuple[str, str, int]]:
         """Order-independent (name, value, type) signature of custom fields.
 
-        The ``KP2BW_ID`` identity stamp is excluded: it is kp2bw-managed metadata,
-        not user content, so it must never make a re-run look "changed" (and on a
-        legacy item it is absent, while the desired item always carries it).
+        The kp2bw-managed stamps (``KP2BW_ID`` identity, ``KP2BW_SYNC`` sync
+        signature) are excluded: they are metadata, not user content, so they
+        must never make a re-run look "changed" (and on a legacy item they are
+        absent, while the desired item always carries ``KP2BW_ID``).
         """
         return sorted(
             (
                 (f.get("name") or "", f.get("value") or "", f.get("type") or 0)
                 for f in (fields or [])
-                if (f.get("name") or "") != KP2BW_ID_FIELD_NAME
+                if (f.get("name") or "") not in cls._MANAGED_FIELD_NAMES
             ),
             key=lambda t: (t[0], t[2], t[1]),
         )
 
     @staticmethod
-    def _login_differs(existing: BwItemLogin | None, desired: BwItemLogin) -> bool:
+    def _login_signature(login: BwItemLogin | None) -> tuple[str, str, str, list[str]]:
+        """Signature of the login fields kp2bw owns (creds, totp, URIs)."""
+        if login is None:
+            return ("", "", "", [])
+        return (
+            login.get("username") or "",
+            login.get("password") or "",
+            login.get("totp") or "",
+            [u.get("uri", "") for u in (login.get("uris") or [])],
+        )
+
+    @classmethod
+    def _login_differs(cls, existing: BwItemLogin | None, desired: BwItemLogin) -> bool:
         """Compare the login fields kp2bw owns (creds, totp, URIs)."""
-        if existing is None:
-            existing = BwItemLogin(
-                uris=[],
-                username="",
-                password="",
-                totp=None,
-                passwordRevisionDate=None,
-            )
-        if (existing.get("username") or "") != (desired.get("username") or ""):
-            return True
-        if (existing.get("password") or "") != (desired.get("password") or ""):
-            return True
-        if (existing.get("totp") or "") != (desired.get("totp") or ""):
-            return True
-        ex_uris = [u.get("uri", "") for u in (existing.get("uris") or [])]
-        de_uris = [u.get("uri", "") for u in (desired.get("uris") or [])]
-        return ex_uris != de_uris
+        return cls._login_signature(existing) != cls._login_signature(desired)
+
+    @classmethod
+    def _content_signature(cls, item: BwItemResponse | BwItemCreate) -> str:
+        """Hex digest over exactly the content kp2bw manages on an item.
+
+        Covers name, notes, the custom-field signature (managed stamps excluded)
+        and the login signature -- the same surface :meth:`_content_differs`
+        compares, so the value stamped into ``KP2BW_SYNC`` on a write and the
+        value recomputed on the next run agree whenever a user has not touched
+        the item.  A user edit to any of these flips the digest; a kp2bw write
+        restamps it.  The digest leaks nothing: every input is already present in
+        cleartext on the same item to anyone who can read it.
+        """
+        blob = repr((
+            item.get("name") or "",
+            item.get("notes") or "",
+            cls._fields_signature(item.get("fields")),
+            cls._login_signature(item.get("login")),
+        ))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     @classmethod
     def _content_differs(cls, existing: BwItemResponse, desired: BwItemCreate) -> bool:
@@ -969,15 +1023,23 @@ class Converter:
         the login credentials/URIs) so an unchanged re-run stays idempotent and
         never issues a redundant PUT.
         """
-        if (existing.get("name") or "") != (desired.get("name") or ""):
-            return True
-        if (existing.get("notes") or "") != (desired.get("notes") or ""):
-            return True
-        if cls._fields_signature(existing.get("fields")) != cls._fields_signature(
-            desired.get("fields")
-        ):
-            return True
-        return cls._login_differs(existing.get("login"), desired["login"])
+        return cls._content_signature(existing) != cls._content_signature(desired)
+
+    @classmethod
+    def _is_user_modified(cls, existing: BwItemResponse) -> bool:
+        """True if a user edited *existing*'s managed content since kp2bw's write.
+
+        Compares the item's current content signature against the ``KP2BW_SYNC``
+        stamp kp2bw wrote last time.  A mismatch means the managed content
+        changed outside kp2bw (kp2bw restamps on every write, so its own updates
+        never trip this).  An unstamped item -- legacy, or not yet written since
+        the feature shipped -- returns ``False`` so the next run establishes the
+        stamp rather than freezing it behind ``--force-update``.
+        """
+        stamp = item_kp2bw_sync(existing)
+        if stamp is None:
+            return False
+        return stamp != cls._content_signature(existing)
 
     @staticmethod
     def _build_update_payload(
@@ -1081,7 +1143,7 @@ class Converter:
         kp_uuid: str,
         force_update: bool = False,
     ) -> tuple[
-        Literal["updated", "collection", "skipped", "failed"],
+        Literal["updated", "collection", "skipped", "protected", "failed"],
         list[AttachmentItem],
         dict[str, str],
     ]:
@@ -1089,7 +1151,8 @@ class Converter:
 
         Returns ``(outcome, upload_attachments, stale_by_name)`` where *outcome*
         is one of ``"updated"`` (content PUT), ``"collection"`` (membership-only
-        PUT), ``"skipped"`` (no change) or ``"failed"`` (the PUT was rejected);
+        PUT), ``"skipped"`` (no change), ``"protected"`` (a manual Bitwarden edit
+        preserved instead of clobbered) or ``"failed"`` (the PUT was rejected);
         *upload_attachments* are the files to (re-)upload -- those the item does
         not have yet plus those whose content changed; and *stale_by_name* maps
         a changed file's name to the id of the stale copy to delete once its
@@ -1100,10 +1163,18 @@ class Converter:
         content is unchanged -- used when adopting a legacy item so its missing
         ``KP2BW_ID`` stamp is backfilled.  It still respects ``--no-update`` (the
         PUT is gated by ``self._update_existing``).
+
+        When the item was edited in Bitwarden since kp2bw last wrote it (its
+        ``KP2BW_SYNC`` signature no longer matches), the overwrite is skipped and
+        ``"protected"`` returned so the manual edit survives -- unless
+        ``self._force_update_all`` (``--force-update``) makes KeePass win.  Legacy
+        adoption (*force_update*) and unstamped items are never protected.
         """
         name = bw_item["name"]
         item_id = existing["id"]
-        outcome: Literal["updated", "collection", "skipped", "failed"] = "skipped"
+        outcome: Literal["updated", "collection", "skipped", "protected", "failed"] = (
+            "skipped"
+        )
 
         # kp2bw only ever creates login items, so a non-login vault item sharing
         # this (folder, name) is a name collision we must not mutate -- neither
@@ -1121,9 +1192,26 @@ class Converter:
         try:
             # Content sync: PUT only when the KeePass-derived content changed
             # (keeps re-runs idempotent).
-            if self._update_existing and (
-                force_update or self._content_differs(existing, bw_item)
-            ):
+            content_differs = self._content_differs(existing, bw_item)
+            if self._update_existing and (force_update or content_differs):
+                # Protect a manual Bitwarden edit: when the content genuinely
+                # diverged (not a forced legacy-adoption PUT) and the item was
+                # touched in Bitwarden since kp2bw last wrote it, preserve the
+                # edit instead of clobbering it -- unless --force-update makes
+                # KeePass win. Skip attachments too: a protected item is left
+                # wholly untouched rather than half-synced.
+                if (
+                    content_differs
+                    and not force_update
+                    and not self._force_update_all
+                    and self._is_user_modified(existing)
+                ):
+                    logger.warning(
+                        f"-- Entry {name!r}: modified in Bitwarden since the last "
+                        f"sync; preserving your edit (use --force-update to "
+                        f"overwrite with KeePass)"
+                    )
+                    return "protected", [], {}
                 payload = self._build_update_payload(existing, bw_item)
                 bw.update_item(item_id, payload)
                 bw.update_dedup_entry(kp_uuid, payload)
@@ -1208,6 +1296,7 @@ class Converter:
 
         n_skipped = 0
         n_updated = 0
+        n_protected = 0
         n_collection_update = 0
         n_created = 0
         n_create_failed = 0
@@ -1290,6 +1379,8 @@ class Converter:
                         n_updated += 1
                     elif outcome == "collection":
                         n_collection_update += 1
+                    elif outcome == "protected":
+                        n_protected += 1
                     elif outcome == "failed":
                         n_update_failed += 1
                     else:  # "skipped" — content unchanged (attachments, if any,
@@ -1411,6 +1502,7 @@ class Converter:
             n_created,
             n_updated,
             n_skipped,
+            n_protected,
             n_collection_update,
             n_attachments,
             n_update_failed,

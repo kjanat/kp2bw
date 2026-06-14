@@ -143,7 +143,7 @@ def assert_yes_skips_confirmation_prompt() -> None:
         def __exit__(self, *_exc: object) -> None:
             return None
 
-        def strip_field_from_items(self, _field_name: str) -> StripResult:
+        def strip_field_from_items(self, *_field_names: str) -> StripResult:
             return StripResult(scanned=3, stripped=0)
 
     def _must_not_prompt(*_args: object, **_kwargs: object) -> str:

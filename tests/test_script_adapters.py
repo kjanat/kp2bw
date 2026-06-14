@@ -55,6 +55,10 @@ def test_migrate_uris_script() -> None:
     _run_script_main("migrate_uris_test.py")
 
 
+def test_protect_edits_script() -> None:
+    _run_script_main("protect_edits_test.py")
+
+
 def test_otp_script() -> None:
     _run_script_main("otp_test.py")
 

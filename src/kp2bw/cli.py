@@ -13,7 +13,12 @@ from rich.markup import escape
 
 from . import VERBOSE, __title__, __version__
 from ._console import console
-from .bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient, ensure_bw_available
+from .bw_serve import (
+    KP2BW_ID_FIELD_NAME,
+    KP2BW_SYNC_FIELD_NAME,
+    BitwardenServeClient,
+    ensure_bw_available,
+)
 from .convert import Converter, collect_keepass_uris
 from .exceptions import BitwardenClientError, ConversionError
 from .uri_mapping import (
@@ -231,6 +236,18 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--force-update",
+        dest="force_update",
+        help=(
+            "Overwrite existing Bitwarden entries with KeePass content even when "
+            "they were edited in Bitwarden since the last run. By default such "
+            "manually-edited items are protected (skipped) so your edits survive; "
+            "this makes KeePass win regardless (env: KP2BW_FORCE_UPDATE)"
+        ),
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
         "--include-oversize-secrets",
         dest="include_oversize_secrets",
         help=(
@@ -378,31 +395,37 @@ def _run_strip_ids(
     collection_id: str | None,
     skip_confirm: bool,
 ) -> None:
-    """Remove kp2bw's ``KP2BW_ID`` dedup stamp from every migrated item, then stop.
+    """Remove kp2bw's ``KP2BW_ID``/``KP2BW_SYNC`` stamps from every item, then stop.
 
     The finalize step for users ready to fully adopt Bitwarden: no KeePass
     database is read, and scope follows ``-o``/``-c`` exactly as a migration
-    would.  The operation is **irreversible** -- the stamp cannot be recovered --
-    and makes future migration re-runs unreliable: without it, entries that share
-    a folder + name (the very collision the stamp disambiguates) can be
-    duplicated or mismatched.  A loud confirmation states this before any change;
-    ``-y``/``--yes`` skips it for callers who know what they want.  Errors surface
-    as an actionable message rather than a traceback.
+    would.  Drops both the ``KP2BW_ID`` dedup key and the ``KP2BW_SYNC`` edit-
+    protection signature.  The operation is **irreversible** -- the stamps cannot
+    be recovered -- and makes future migration re-runs unreliable: without
+    ``KP2BW_ID``, entries that share a folder + name (the very collision it
+    disambiguates) can be duplicated or mismatched, and without ``KP2BW_SYNC``
+    manual-edit protection no longer applies.  A loud confirmation states this
+    before any change; ``-y``/``--yes`` skips it for callers who know what they
+    want.  Errors surface as an actionable message rather than a traceback.
     """
     scope = _describe_scope(org_id, collection_id)
     try:
         if not skip_confirm:
             console.print(
                 f"[bold yellow]Warning:[/bold yellow] this removes the "
-                f"[bold]{KP2BW_ID_FIELD_NAME}[/bold] field from every "
+                f"[bold]{KP2BW_ID_FIELD_NAME}[/bold] and "
+                f"[bold]{KP2BW_SYNC_FIELD_NAME}[/bold] fields from every "
                 f"kp2bw-migrated item in [bold]{escape(scope)}[/bold]. Other "
                 "vault data is untouched, but this [bold]cannot be undone[/bold] "
                 "and makes future migration re-runs unreliable: without the "
-                "stamp, entries sharing a folder + name can be duplicated or "
-                "mismatched. Only do this once you are finished migrating and "
-                "ready to fully adopt Bitwarden."
+                "stamps, entries sharing a folder + name can be duplicated or "
+                "mismatched and manual-edit protection no longer applies. Only do "
+                "this once you are finished migrating and ready to fully adopt "
+                "Bitwarden."
             )
-            if not _confirm(f"Remove {KP2BW_ID_FIELD_NAME} stamps? [y/n]: "):
+            if not _confirm(
+                f"Remove {KP2BW_ID_FIELD_NAME}/{KP2BW_SYNC_FIELD_NAME} stamps? [y/n]: "
+            ):
                 console.print("[yellow]Aborted; nothing changed.[/yellow]")
                 sys.exit(0)
 
@@ -412,7 +435,9 @@ def _run_strip_ids(
         with BitwardenServeClient(
             bw_pw, org_id=org_id, collection_id=collection_id
         ) as bw:
-            result = bw.strip_field_from_items(KP2BW_ID_FIELD_NAME)
+            result = bw.strip_field_from_items(
+                KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME
+            )
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
@@ -421,13 +446,13 @@ def _run_strip_ids(
 
     if result.stripped:
         console.print(
-            f"[green]Removed {KP2BW_ID_FIELD_NAME} from {result.stripped} of "
-            f"{result.scanned} item(s).[/green]"
+            f"[green]Removed {KP2BW_ID_FIELD_NAME}/{KP2BW_SYNC_FIELD_NAME} from "
+            f"{result.stripped} of {result.scanned} item(s).[/green]"
         )
     else:
         console.print(
-            f"No items carried a {KP2BW_ID_FIELD_NAME} stamp in {escape(scope)} "
-            f"({result.scanned} scanned); nothing to do."
+            f"No items carried a {KP2BW_ID_FIELD_NAME}/{KP2BW_SYNC_FIELD_NAME} "
+            f"stamp in {escape(scope)} ({result.scanned} scanned); nothing to do."
         )
 
 
@@ -702,6 +727,9 @@ def main() -> None:
         update_existing = _resolve_bool_option(
             args.update_existing, "KP2BW_UPDATE", default=True
         )
+        force_update = _resolve_bool_option(
+            args.force_update, "KP2BW_FORCE_UPDATE", default=False
+        )
         include_oversize_secrets = _resolve_bool_option(
             args.include_oversize_secrets,
             "KP2BW_INCLUDE_OVERSIZE_SECRETS",
@@ -883,6 +911,7 @@ def main() -> None:
         include_recyclebin=include_recyclebin,
         migrate_metadata=migrate_metadata,
         update_existing=update_existing,
+        force_update=force_update,
         include_oversize_secrets=include_oversize_secrets,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,

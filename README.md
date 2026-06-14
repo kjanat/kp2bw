@@ -12,7 +12,7 @@ with advantages over the built-in Bitwarden importer:
 - <details open><summary><b>Passkey migration</b></summary> KeePassXC FIDO2/passkey credentials (<code>KPEX_PASSKEY_*</code>) are converted to Bitwarden <code>fido2Credentials</code>.</details>
 - <details><summary><b>Custom properties &amp; attachments</b></summary> Imported as Bitwarden custom fields or attachments (values &gt;10k chars auto-upload as files).</details>
 - <details><summary><b>Long notes handling</b></summary> Notes exceeding 10k chars are uploaded as <code>notes.txt</code> attachments.</details>
-- <details><summary><b>Idempotent re-runs that sync changes</b></summary> Safe to run repeatedly; existing entries are updated in place when their KeePass content changed (notes, credentials, URIs, fields) and never duplicated. Each item is stamped with its KeePass UUID in a <code>KP2BW_ID</code> field, so distinct entries that share a title stay separate and a re-run is matched by identity rather than title.<br> Disable updates with <code>--no-update</code>.</details>
+- <details><summary><b>Idempotent re-runs that sync changes</b></summary> Safe to run repeatedly; existing entries are updated in place when their KeePass content changed (notes, credentials, URIs, fields) and never duplicated. Each item is stamped with its KeePass UUID in a <code>KP2BW_ID</code> field, so distinct entries that share a title stay separate and a re-run is matched by identity rather than title. Edits you make in Bitwarden are <b>protected</b>: a re-run preserves them instead of reverting to KeePass (a <code>KP2BW_SYNC</code> content stamp tells your edit apart from kp2bw's own writes); <code>--force-update</code> overrides.<br> Disable updates with <code>--no-update</code>.</details>
 - <details><summary><b>Nested folders</b></summary> KeePass folder hierarchy is recreated in Bitwarden.</details>
 - <details><summary><b>Recycle Bin filtering</b></summary> Deleted entries are automatically excluded.</details>
 - <details><summary><b>Expiry awareness</b></summary> Expired entries are marked <code>[EXPIRED]</code> in notes; optionally skip them entirely with <code>--skip-expired</code>.</details>
@@ -84,7 +84,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
-       [--metadata | --no-metadata] [--update | --no-update]
+       [--metadata | --no-metadata] [--update | --no-update] [--force-update]
        [--include-oversize-secrets] [--uri-match MODE]
        [--interpret-uri-syntax | --no-interpret-uri-syntax]
        [--migrate-uris] [--report-uris SOURCE] [--strip-ids] [-y] [-v] [-d]
@@ -106,12 +106,13 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--include-recycle-bin`                | Include Recycle Bin entries (excluded by default)                                                                         | `KP2BW_INCLUDE_RECYCLE_BIN`           |
 | `--metadata` / `--no-metadata`         | Toggle KeePass tags/expiry as a `KP2BW_META` field (default: on)                                                          | `KP2BW_MIGRATE_METADATA`              |
 | `--update` / `--no-update`             | Update existing entries changed in KeePass (default: on)                                                                  | `KP2BW_UPDATE`                        |
+| `--force-update`                       | Overwrite items even if edited in Bitwarden since the last run (default: protect such edits)                              | `KP2BW_FORCE_UPDATE`                  |
 | `--include-oversize-secrets`           | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off)                 | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
 | `--uri-match MODE`                     | Match mode for plain URLs: `default`(default, account default)/`domain`/`host`/`startswith`/`exact`/`regex`/`never`       | `KP2BW_URI_MATCH`                     |
 | `--interpret-uri-syntax`               | Honor KeePassXC quote/wildcard URL syntax on additional URLs (default: on; `--no-…` for literal)                          | `KP2BW_INTERPRET_URI_SYNTAX`          |
 | `--migrate-uris`                       | Upgrade existing items: re-fold legacy `KP2A_URL*`/`AndroidApp` fields into login URIs, then exit (no KeePass)            | `KP2BW_MIGRATE_URIS`                  |
 | `--report-uris SOURCE`                 | Print a read-only URI collision report (`keepass` or `bitwarden`) and exit; lists registrable domains with multiple hosts | `KP2BW_REPORT_URIS`                   |
-| `--strip-ids`                          | Finalize: remove the `KP2BW_ID` dedup stamp from migrated items, then exit (no migration; no KeePass db)                  | `KP2BW_STRIP_IDS`                     |
+| `--strip-ids`                          | Finalize: remove the `KP2BW_ID`/`KP2BW_SYNC` stamps from migrated items, then exit (no migration; no KeePass db)          | `KP2BW_STRIP_IDS`                     |
 | `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt                                                                          | `KP2BW_YES`                           |
 | `-v, --verbose`                        | Verbose output                                                                                                            | `KP2BW_VERBOSE`                       |
 | `-d, --debug`                          | Debug output — includes third-party library logs                                                                          | `KP2BW_DEBUG`                         |
@@ -141,6 +142,13 @@ Too many subdomains autofilling together? Under base-domain matching, every logi
 `example.com` subdomain. `kp2bw --report-uris keepass` (or `bitwarden`) prints a read-only collision report —
 registrable domains with multiple hosts — so you can see which entries pile up and switch those to **Host** match (or
 flip your Bitwarden account's default URI match detection to Host). It changes nothing; it just lists.
+
+Because kp2bw is KeePass-authoritative, a re-run would normally overwrite any difference on an existing item — quietly
+undoing a title, note or URI you fixed in Bitwarden. It doesn't: every item kp2bw writes carries a `KP2BW_SYNC` content
+signature, and a re-run that finds an item's current content no longer matching that stamp knows *you* edited it
+(kp2bw's own writes restamp, so they never self-trip) and **preserves your edit**, listing it as `protected` in the
+summary. Pass `--force-update` (env `KP2BW_FORCE_UPDATE`) to make KeePass win regardless. Unchanged re-runs stay
+idempotent, and items imported before this existed are adopted normally on their first re-run.
 
 Every migrated item carries a plain-text `KP2BW_ID` custom field — the KeePass UUID kp2bw uses to match entries on
 re-runs so nothing duplicates. Once you're satisfied the migration is complete and you're ready to fully adopt

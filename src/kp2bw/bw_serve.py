@@ -90,6 +90,14 @@ _BW_ITEM_TYPE_LOGIN: int = 1
 # collapse onto one item, and re-runs stay idempotent across title/folder edits.
 KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
 
+# Hidden custom-field name carrying a content signature of what kp2bw last wrote
+# to the item -- the basis for protecting Bitwarden-side manual edits on re-run.
+# A re-run that finds the item's current managed content no longer matching this
+# stamp knows a *user* edited it (kp2bw's own writes restamp it), and preserves
+# the edit instead of clobbering it.  Excluded from the content diff, like
+# KP2BW_ID, so it never makes a re-run look "changed".
+KP2BW_SYNC_FIELD_NAME: str = "KP2BW_SYNC"
+
 
 def item_kp2bw_id(item: BwItemResponse) -> str | None:
     """Return *item*'s KeePass-UUID stamp, or ``None`` if it is unstamped.
@@ -100,6 +108,19 @@ def item_kp2bw_id(item: BwItemResponse) -> str | None:
     """
     for field in item.get("fields") or []:
         if field.get("name") == KP2BW_ID_FIELD_NAME:
+            return field.get("value") or None
+    return None
+
+
+def item_kp2bw_sync(item: BwItemResponse) -> str | None:
+    """Return *item*'s ``KP2BW_SYNC`` content-signature stamp, or ``None``.
+
+    Absent on legacy items and on anything kp2bw has not written since the
+    feature shipped; such items are treated as un-protected (the next write
+    establishes the stamp).  See :meth:`Converter._is_user_modified`.
+    """
+    for field in item.get("fields") or []:
+        if field.get("name") == KP2BW_SYNC_FIELD_NAME:
             return field.get("value") or None
     return None
 
@@ -985,16 +1006,17 @@ class BitwardenServeClient:
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
 
-    def strip_field_from_items(self, field_name: str) -> StripResult:
-        """Remove a custom field from every in-scope item that carries it.
+    def strip_field_from_items(self, *field_names: str) -> StripResult:
+        """Remove the named custom field(s) from every in-scope item carrying any.
 
-        The finalize step for users adopting Bitwarden: drops kp2bw's
-        ``KP2BW_ID`` dedup stamp once a migration is trusted, leaving clean
-        items behind.  Scope mirrors a migration -- the configured
-        organisation/collection when set, otherwise the personal vault -- so
-        only items kp2bw could have stamped are touched.  Items lacking the
-        field are skipped; each match is rewritten via a full :meth:`update_item`
-        ``PUT``.  Returns the scanned/stripped counts for the caller to report.
+        The finalize step for users adopting Bitwarden: drops kp2bw's managed
+        stamps (``KP2BW_ID`` dedup key and the ``KP2BW_SYNC`` edit-protection
+        signature) once a migration is trusted, leaving clean items behind.
+        Scope mirrors a migration -- the configured organisation/collection when
+        set, otherwise the personal vault -- so only items kp2bw could have
+        stamped are touched.  An item carrying none of *field_names* is skipped;
+        each match is rewritten once via a full :meth:`update_item` ``PUT`` that
+        drops every named field present.  Returns the scanned/stripped counts.
 
         The strip itself is re-runnable (a second pass finds nothing), but it is
         **irreversible** and degrades future migrations: the stamp is the stable
@@ -1004,6 +1026,7 @@ class BitwardenServeClient:
         It is therefore a deliberate final step, gated by a confirmation in the
         CLI (skippable with ``-y`` for callers who know what they want).
         """
+        targets = frozenset(field_names)
         items = self.list_items(
             organization_id=self._org_id,
             collection_id=self._collection_id,
@@ -1011,15 +1034,16 @@ class BitwardenServeClient:
         stripped = 0
         for item in items:
             fields = item.get("fields") or []
-            if not any(field.get("name") == field_name for field in fields):
+            if not any(field.get("name") in targets for field in fields):
                 continue
             item["fields"] = [
-                field for field in fields if field.get("name") != field_name
+                field for field in fields if field.get("name") not in targets
             ]
             self.update_item(item["id"], item)
             stripped += 1
         logger.info(
-            f"Stripped {field_name} from {stripped} of {len(items)} scanned items"
+            f"Stripped {', '.join(field_names)} from {stripped} of "
+            f"{len(items)} scanned items"
         )
         return StripResult(scanned=len(items), stripped=stripped)
 
