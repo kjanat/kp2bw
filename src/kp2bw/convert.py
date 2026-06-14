@@ -979,13 +979,27 @@ class Converter:
         )
 
     @staticmethod
-    def _login_signature(login: BwItemLogin | None) -> tuple[str, str, str, list[str]]:
-        """Signature of the login fields kp2bw owns (creds, totp, URIs)."""
+    def _login_signature(
+        login: BwItemLogin | None,
+    ) -> tuple[str, str, str, list[str]]:
+        """Signature of the login fields kp2bw owns (creds, totp, URIs).
+
+        The password enters the signature as its own SHA-256 digest, never in
+        clear text: a change still flips the digest (so a password edited in
+        Bitwarden is still detected as a user modification), but the cleartext
+        credential is never materialised into the signature string or the stored
+        ``KP2BW_SYNC`` stamp -- the stamp is derived from a password *digest*,
+        not the password itself.
+        """
         if login is None:
             return ("", "", "", [])
+        password = login.get("password") or ""
+        password_digest = (
+            hashlib.sha256(password.encode("utf-8")).hexdigest() if password else ""
+        )
         return (
             login.get("username") or "",
-            login.get("password") or "",
+            password_digest,
             login.get("totp") or "",
             [u.get("uri", "") for u in (login.get("uris") or [])],
         )
