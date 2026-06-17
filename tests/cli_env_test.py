@@ -14,6 +14,7 @@ _MANAGED_ENV = (
     "KP2BW_KEEPASS_FILE",
     "KP2BW_KEEPASS_PASSWORD",
     "KP2BW_BITWARDEN_PASSWORD",
+    "KP2BW_CREATE_FOLDERS",
     "KP2BW_YES",
     "KP2BW_LOG_DIR",
 )
@@ -70,6 +71,7 @@ def assert_dotenv_supplies_keepass_file() -> None:
         _ = os.environ.pop("KP2BW_KEEPASS_FILE", None)
         os.environ["KP2BW_KEEPASS_PASSWORD"] = "kp-pw"
         os.environ["KP2BW_BITWARDEN_PASSWORD"] = "bw-pw"
+        os.environ["KP2BW_CREATE_FOLDERS"] = "0"
         os.environ["KP2BW_YES"] = "1"
         os.environ["KP2BW_LOG_DIR"] = tmp  # keep the run's log inside the temp dir
 
@@ -90,6 +92,8 @@ def assert_dotenv_supplies_keepass_file() -> None:
         db_path = _CapturingConverter.captured.get("keepass_file_path")
         if db_path != "from-dotenv.kdbx":
             raise AssertionError(f"expected db path from .env, got {db_path!r}")
+        if _CapturingConverter.captured.get("create_folders") is not False:
+            raise AssertionError("KP2BW_CREATE_FOLDERS=0 should disable folders")
     finally:
         sys.argv = original_argv
         # Release the log file (so rmtree works on Windows) without stripping

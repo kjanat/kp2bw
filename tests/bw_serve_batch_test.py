@@ -9,7 +9,7 @@ have.  These checks drive the per-item (and per-folder) guard in
 """
 
 from collections.abc import Iterable
-from typing import cast
+from typing import Any, cast
 
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemCreate
@@ -39,6 +39,7 @@ class _BatchClient(BitwardenServeClient):
         self._fail_items = set(fail_items or ())
         self._fail_folders = set(fail_folders or ())
         self.created: list[str] = []
+        self.created_payloads: list[dict[str, Any]] = []
         self.folders_created: list[str] = []
 
     def create_folder(self, name: str) -> str:
@@ -54,6 +55,7 @@ class _BatchClient(BitwardenServeClient):
         if name in self._fail_items:
             raise BitwardenClientError(f"simulated create timeout: {name}")
         self.created.append(name)
+        self.created_payloads.append(dict(item))
         return f"id-{name}"
 
 
@@ -123,11 +125,31 @@ def assert_folder_failure_skips_only_its_items() -> None:
         raise AssertionError("an item must not be created without its folder")
 
 
+def assert_no_folder_mode_does_not_create_or_bind_folders() -> None:
+    """Disabling folders leaves items at the root and never calls create_folder."""
+    bw = _BatchClient(fail_folders={"Bad"})
+    entries = {
+        "k1": ("Good", _item("a")),
+        "k2": ("Bad", _item("b")),
+    }
+    key_to_id = bw.create_items_batch(entries, create_folders=False)
+    if set(key_to_id) != {"k1", "k2"}:
+        raise AssertionError(f"all items should be created, got {set(key_to_id)}")
+    if bw.folders_created:
+        raise AssertionError(f"no folders should be created, got {bw.folders_created}")
+    folder_ids = [payload.get("folderId") for payload in bw.created_payloads]
+    if folder_ids != [None, None]:
+        raise AssertionError(
+            f"items should be created without folderId, got {folder_ids}"
+        )
+
+
 def main() -> None:
     """Run the script-style assertions and report success."""
     assert_item_failure_does_not_abort_batch()
     assert_failed_items_are_reported()
     assert_folder_failure_skips_only_its_items()
+    assert_no_folder_mode_does_not_create_or_bind_folders()
     print("bw serve batch test passed")
 
 
