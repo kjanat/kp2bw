@@ -1,6 +1,7 @@
 {
 	"private": true,
 	"type": "module",
+	"workspaces": ["docs"],
 	"scripts": {
 		"basedpyright": "uv run basedpyright",
 		"dprint:update": "dprint config update --yes --recursive",
