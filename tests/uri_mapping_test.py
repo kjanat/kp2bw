@@ -29,7 +29,7 @@ def _uris(
     android_packages: list[str] | None = None,
     plain_match: UriMatchValue = None,
     interpret_syntax: bool = True,
-) -> list[tuple[str, object]]:
+) -> list[tuple[str, UriMatchValue]]:
     """Run build_login_uris and return [(uri, match)] for terse assertions."""
     result = build_login_uris(
         primary_url=primary_url,

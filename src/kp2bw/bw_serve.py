@@ -734,7 +734,10 @@ class BitwardenServeClient:
             "--hostname",
             "127.0.0.1",
         ]
-        env = {**os.environ}
+        # Annotated so the type stays dict[str, str] after env.pop() below;
+        # without it the inferred type widens and subprocess.Popen's overload
+        # no longer resolves to Popen[bytes].
+        env: dict[str, str] = {**os.environ}
         if session:
             env["BW_SESSION"] = session
         else:
