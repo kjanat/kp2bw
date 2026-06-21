@@ -192,14 +192,14 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
-        "--no-folder",
+        "--folder",
         dest="create_folders",
         help=(
-            "Do not create personal Bitwarden folders from KeePass groups; "
-            "items are kept at the vault root unless collections apply "
-            "(env: KP2BW_CREATE_FOLDERS=0)"
+            "Create personal Bitwarden folders from KeePass groups (default: on, "
+            "but off when --bitwarden-org is set); --no-folder keeps items at the "
+            "vault root unless collections apply (env: KP2BW_CREATE_FOLDERS)"
         ),
-        action="store_false",
+        action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
@@ -749,10 +749,13 @@ def main() -> None:
             "KP2BW_INCLUDE_OVERSIZE_SECRETS",
             default=False,
         )
+        # Personal folders are a personal-vault concept; under --bitwarden-org
+        # they duplicate the collection tree, so default them off there. Explicit
+        # --folder/--no-folder or KP2BW_CREATE_FOLDERS still wins (issue #33).
         create_folders = _resolve_bool_option(
             args.create_folders,
             "KP2BW_CREATE_FOLDERS",
-            default=True,
+            default=not args.bw_org,
         )
         skip_confirm = _resolve_bool_option(
             args.skip_confirm, "KP2BW_YES", default=False

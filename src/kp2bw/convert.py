@@ -1380,6 +1380,12 @@ class Converter:
                 existing = bw.get_item_by_uuid(key)
                 adopted = False
                 if existing is None:
+                    # Fallback for pre-stamp legacy items only. Keyed on the
+                    # KeePass (folder, name); under --no-folder those items were
+                    # created with folderId=None, so this folder-based claim can
+                    # miss them and re-create. Harmless for anything kp2bw wrote
+                    # since: the UUID-stamp match above is folder-independent and
+                    # keeps re-runs idempotent.
                     existing = bw.claim_legacy_item(folder, bw_item["name"])
                     adopted = existing is not None
                 if existing is not None:
