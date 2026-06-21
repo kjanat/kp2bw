@@ -734,7 +734,10 @@ class BitwardenServeClient:
             "--hostname",
             "127.0.0.1",
         ]
-        env = {**os.environ}
+        # Annotated so the type stays dict[str, str] after env.pop() below;
+        # without it the inferred type widens and subprocess.Popen's overload
+        # no longer resolves to Popen[bytes].
+        env: dict[str, str] = {**os.environ}
         if session:
             env["BW_SESSION"] = session
         else:
@@ -1095,12 +1098,16 @@ class BitwardenServeClient:
         *,
         on_item_created: Callable[[], None] | None = None,
         on_item_failed: Callable[[str, BitwardenClientError], None] | None = None,
+        create_folders: bool = True,
     ) -> dict[str, str]:
         """Create folders and items via HTTP, returning ``{key: item_id}``.
 
         *entries* maps arbitrary keys to ``(folder_name, bw_item_dict)`` tuples.
         Folders are created/resolved first, then items are created sequentially
-        with the correct ``folderId`` bound.
+        with the correct ``folderId`` bound.  When *create_folders* is ``False``,
+        folder creation and ``folderId`` binding are skipped, leaving items in
+        the personal-vault root while any collection IDs on the items still
+        apply.
 
         A single create that fails (``bw serve`` drops or times out the request,
         surfaced as :class:`BitwardenClientError`) is non-fatal: the item is
@@ -1117,7 +1124,11 @@ class BitwardenServeClient:
         """
         # Ensure all required folders exist. A folder whose creation fails is
         # recorded so its items are skipped, not misplaced into the no-folder root.
-        folder_names = {fname for fname, _ in entries.values() if fname}
+        folder_names: set[str] = (
+            {fname for fname, _ in entries.values() if fname}
+            if create_folders
+            else set()
+        )
         failed_folders: set[str] = set()
         for fname in sorted(folder_names):
             try:
@@ -1143,7 +1154,11 @@ class BitwardenServeClient:
                 continue
             # Bind folder ID — shallow-copy rather than mutating the shared dict.
             item = copy.copy(bw_item)
-            item["folderId"] = self._folders.get(folder_name) if folder_name else None
+            item["folderId"] = (
+                self._folders.get(folder_name)
+                if create_folders and folder_name
+                else None
+            )
             try:
                 item_id = self.create_item(item)
             except BitwardenClientError as exc:

@@ -8,6 +8,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`--bitwarden-collection nested` -- recreate the full KeePass folder hierarchy as nested collections** (issue #33, PR
+  #34). `auto` only ever used the top-level folder name, so `Work/Servers/ssh` collapsed onto a single `Work` collection
+  and the nesting was lost. `nested` builds collections from the full `/`-joined path (`Work/Servers`), which Bitwarden
+  renders as a nested tree. Collections are matched by org + name and seeded from the existing set on connect, so an
+  unchanged tree is a no-op and entries sharing a path never duplicate a collection.
+
+- **`--folder` / `--no-folder` (env `KP2BW_CREATE_FOLDERS`) -- control whether personal-vault folders are created from
+  KeePass groups.** Defaults on for personal imports, so existing behaviour is unchanged there (issue #33, PR #34).
+
+### Changed
+
+- **An organization import (`--bitwarden-org`) no longer also builds a personal folder tree by default** (issue #33, PR
+  #34). Bitwarden folders are a personal-vault concept; the org-side equivalent is a collection, so creating both
+  double-filed every item -- the collection *and* a redundant personal-folder copy. With an org set, `--no-folder` is
+  now the default and items are filed into collections only. Pass `--folder` (or `KP2BW_CREATE_FOLDERS=1`) to restore
+  the personal folder tree alongside the collections. Personal imports (no `--bitwarden-org`) are unaffected.
+
 ## [3.6.0] - 2026-06-14
 
 ### Fixed

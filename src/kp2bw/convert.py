@@ -53,6 +53,12 @@ KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
 # Bitwarden item type for login entries (1=login, 2=secureNote, 3=card,
 # 4=identity).  kp2bw only ever creates and content-syncs login items.
 BW_ITEM_TYPE_LOGIN: int = 1
+AUTO_COLLECTION_MODE: str = "auto"
+NESTED_COLLECTION_MODE: str = "nested"
+COLLECTION_FOLDER_MODES: frozenset[str] = frozenset({
+    AUTO_COLLECTION_MODE,
+    NESTED_COLLECTION_MODE,
+})
 
 # Single custom field holding KeePass metadata Bitwarden has no native slot for
 # (tags, expiry) as readable YAML. Folds what used to be several rows into one,
@@ -209,6 +215,7 @@ class Converter:
     _migrate_metadata: bool
     _update_existing: bool
     _include_oversize_secrets: bool
+    _create_folders: bool
     _uri_match: UriMatchValue
     _interpret_uri_syntax: bool
     _kp_ref_entries: list[Entry]
@@ -236,6 +243,7 @@ class Converter:
         update_existing: bool = True,
         force_update: bool = False,
         include_oversize_secrets: bool = False,
+        create_folders: bool = True,
         uri_match: UriMatchValue = None,
         interpret_uri_syntax: bool = True,
     ) -> None:
@@ -255,6 +263,7 @@ class Converter:
         self._update_existing = update_existing
         self._force_update_all = force_update
         self._include_oversize_secrets = include_oversize_secrets
+        self._create_folders = create_folders
         self._uri_match = uri_match
         self._interpret_uri_syntax = interpret_uri_syntax
         self._kp_ref_entries = []
@@ -867,14 +876,20 @@ class Converter:
         self,
         bw: BitwardenServeClient,
         bw_item: BwItemCreate,
+        folder: str | None,
         firstlevel: str | None,
     ) -> str | None:
         """Resolve and set collection ID on *bw_item*."""
         collection_id: str | None = None
-        if self._bitwarden_coll_id == "auto":
-            if firstlevel:
-                logger.log(VERBOSE, f"Searching Collection {firstlevel}")
-                collection_id = bw.create_org_collection(firstlevel)
+        if self._bitwarden_coll_id in COLLECTION_FOLDER_MODES:
+            collection_name = (
+                folder
+                if self._bitwarden_coll_id == NESTED_COLLECTION_MODE
+                else firstlevel
+            )
+            if collection_name:
+                logger.log(VERBOSE, f"Searching Collection {collection_name}")
+                collection_id = bw.create_org_collection(collection_name)
         elif self._bitwarden_coll_id:
             collection_id = self._bitwarden_coll_id
 
@@ -889,6 +904,7 @@ class Converter:
         self,
         bw: BitwardenServeClient,
         bw_item: BwItemCreate,
+        folder: str | None,
         firstlevel: str | None,
     ) -> bool:
         """Resolve+set the collection for *bw_item*, reporting failure non-fatally.
@@ -900,7 +916,7 @@ class Converter:
         phases have (issue #24).
         """
         try:
-            self._resolve_collection(bw, bw_item, firstlevel)
+            self._resolve_collection(bw, bw_item, folder, firstlevel)
         except BitwardenClientError as exc:
             logger.warning(
                 f"Could not resolve the collection for {bw_item.get('name', '?')!r}; "
@@ -1292,7 +1308,8 @@ class Converter:
         # new and are imported into the target collection rather than skipped.
         fixed_coll_id = (
             self._bitwarden_coll_id
-            if self._bitwarden_coll_id and self._bitwarden_coll_id != "auto"
+            if self._bitwarden_coll_id
+            and self._bitwarden_coll_id not in COLLECTION_FOLDER_MODES
             else None
         )
 
@@ -1349,7 +1366,7 @@ class Converter:
                 # Resolve collection (mutates bw_item). A dropped collection
                 # POST is non-fatal: skip just this entry rather than abort the
                 # whole loop and strand every entry after it (issue #24).
-                if not self._resolve_collection_safely(bw, bw_item, firstlevel):
+                if not self._resolve_collection_safely(bw, bw_item, folder, firstlevel):
                     n_create_failed += 1
                     progress.advance(task1)
                     continue
@@ -1363,6 +1380,12 @@ class Converter:
                 existing = bw.get_item_by_uuid(key)
                 adopted = False
                 if existing is None:
+                    # Fallback for pre-stamp legacy items only. Keyed on the
+                    # KeePass (folder, name); under --no-folder those items were
+                    # created with folderId=None, so this folder-based claim can
+                    # miss them and re-create. Harmless for anything kp2bw wrote
+                    # since: the UUID-stamp match above is folder-independent and
+                    # keeps re-runs idempotent.
                     existing = bw.claim_legacy_item(folder, bw_item["name"])
                     adopted = existing is not None
                 if existing is not None:
@@ -1433,6 +1456,7 @@ class Converter:
                     import_entries,
                     on_item_created=_on_created,
                     on_item_failed=_on_create_failed,
+                    create_folders=self._create_folders,
                 )
             else:
                 key_to_id = {}

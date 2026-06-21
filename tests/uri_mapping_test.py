@@ -11,6 +11,7 @@ from typing import cast
 
 from kp2bw.bw_types import BwField, BwUri
 from kp2bw.uri_mapping import (
+    UriMatchValue,
     build_login_uris,
     collision_groups,
     is_url_attribute_key,
@@ -21,9 +22,22 @@ from kp2bw.uri_mapping import (
 )
 
 
-def _uris(**kwargs: object) -> list[tuple[str, object]]:
+def _uris(
+    *,
+    primary_url: str,
+    additional_urls: list[str],
+    android_packages: list[str] | None = None,
+    plain_match: UriMatchValue = None,
+    interpret_syntax: bool = True,
+) -> list[tuple[str, UriMatchValue]]:
     """Run build_login_uris and return [(uri, match)] for terse assertions."""
-    result = build_login_uris(**kwargs)  # pyright: ignore[reportArgumentType]
+    result = build_login_uris(
+        primary_url=primary_url,
+        additional_urls=additional_urls,
+        android_packages=android_packages or [],
+        plain_match=plain_match,
+        interpret_syntax=interpret_syntax,
+    )
     return [(u["uri"], u.get("match")) for u in result]
 
 

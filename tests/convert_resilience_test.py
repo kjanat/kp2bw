@@ -32,10 +32,14 @@ class ResilienceTestConverter(Converter):
         )
 
     def resolve_collection_safely(
-        self, bw: BitwardenServeClient, bw_item: BwItemCreate, firstlevel: str | None
+        self,
+        bw: BitwardenServeClient,
+        bw_item: BwItemCreate,
+        folder: str | None,
+        firstlevel: str | None,
     ) -> bool:
         """Public shim for the guarded collection resolution."""
-        return self._resolve_collection_safely(bw, bw_item, firstlevel)
+        return self._resolve_collection_safely(bw, bw_item, folder, firstlevel)
 
     def sync_safely(self, bw: BitwardenServeClient) -> None:
         """Public shim for the guarded pre-attachment sync."""
@@ -83,7 +87,7 @@ def assert_collection_failure_is_non_fatal() -> None:
     conv = ResilienceTestConverter()
     bw = _FakeBw(fail_collection=True)
     bw_item = _bw_item()
-    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team")
+    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team/Servers", "Team")
     if ok:
         raise AssertionError("a failed collection resolution must report False")
     if bw_item.get("collectionIds"):
@@ -94,12 +98,33 @@ def assert_collection_success_assigns_and_reports_true() -> None:
     conv = ResilienceTestConverter()
     bw = _FakeBw(coll_id="coll-9")
     bw_item = _bw_item()
-    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team")
+    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team/Servers", "Team")
     if not ok:
         raise AssertionError("a successful resolution must report True")
+    if bw.calls != ["Team"]:
+        raise AssertionError(
+            f"auto collection mode should use top-level folder, got {bw.calls}"
+        )
     if cast(Any, bw_item).get("collectionIds") != ["coll-9"]:
         raise AssertionError(
             f"resolution must assign the collection, got {bw_item.get('collectionIds')}"
+        )
+
+
+def assert_nested_collection_uses_full_folder_path() -> None:
+    conv = ResilienceTestConverter(coll_id="nested")
+    bw = _FakeBw(coll_id="coll-nested")
+    bw_item = _bw_item()
+    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team/Servers", "Team")
+    if not ok:
+        raise AssertionError("a successful nested resolution must report True")
+    if bw.calls != ["Team/Servers"]:
+        raise AssertionError(
+            f"nested collection mode should use full folder path, got {bw.calls}"
+        )
+    if cast(Any, bw_item).get("collectionIds") != ["coll-nested"]:
+        raise AssertionError(
+            f"nested resolution must assign the collection, got {bw_item.get('collectionIds')}"
         )
 
 
@@ -123,6 +148,7 @@ def main() -> None:
     """Run the script-style assertions and report success."""
     assert_collection_failure_is_non_fatal()
     assert_collection_success_assigns_and_reports_true()
+    assert_nested_collection_uses_full_folder_path()
     assert_pre_attachment_sync_failure_is_non_fatal()
     print("convert resilience test passed")
 

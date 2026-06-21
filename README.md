@@ -85,7 +85,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
        [--metadata | --no-metadata] [--update | --no-update] [--force-update]
-       [--include-oversize-secrets] [--uri-match MODE]
+       [--include-oversize-secrets] [--folder | --no-folder] [--uri-match MODE]
        [--interpret-uri-syntax | --no-interpret-uri-syntax]
        [--migrate-uris] [--report-uris SOURCE] [--strip-ids] [-y] [-v] [-d]
        [FILE]
@@ -98,8 +98,9 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `-K, --keepass-keyfile`                | KeePass key file                                                                                                          | `KP2BW_KEEPASS_KEYFILE`               |
 | `-b, --bitwarden-password`             | Bitwarden password (prompted if omitted)                                                                                  | `KP2BW_BITWARDEN_PASSWORD`            |
 | `-o, --bitwarden-org`                  | Bitwarden Organization ID                                                                                                 | `KP2BW_BITWARDEN_ORG`                 |
-| `-c, --bitwarden-collection`           | Collection ID, or `auto` to derive from top-level folder names                                                            | `KP2BW_BITWARDEN_COLLECTION`          |
+| `-c, --bitwarden-collection`           | Collection ID, `auto` for top-level folder names, or `nested` for full folder paths                                       | `KP2BW_BITWARDEN_COLLECTION`          |
 | `-t, --import-tags`                    | Only import entries with these tags                                                                                       | `KP2BW_IMPORT_TAGS` (comma-separated) |
+| `--folder` / `--no-folder`             | Create personal Bitwarden folders from KeePass groups (default: on, but off when `--bitwarden-org` is set)                | `KP2BW_CREATE_FOLDERS`                |
 | `--path-to-name` / `--no-path-to-name` | Prepend folder path to entry names (default: off)                                                                         | `KP2BW_PATH_TO_NAME`                  |
 | `--path-to-name-skip`                  | Skip first N folders in path prefix (default: 1)                                                                          | `KP2BW_PATH_TO_NAME_SKIP`             |
 | `--skip-expired`                       | Skip entries that have expired in KeePass                                                                                 | `KP2BW_SKIP_EXPIRED`                  |
@@ -119,6 +120,16 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `-V, --version`                        | Print the installed `kp2bw` version and exit                                                                              | -                                     |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
+
+### Organization collections
+
+Bitwarden folders are personal-vault metadata. When importing into an organization, use `--bitwarden-collection auto` to
+create/use one collection per top-level KeePass folder, or `--bitwarden-collection nested` to create/use collections
+from full KeePass paths such as `Work/Servers`.
+
+Because folders only duplicate the collection tree in your personal vault, `--bitwarden-org` defaults to **not**
+creating personal folders — items are filed only into collections. Pass `--folder` (or `KP2BW_CREATE_FOLDERS=1`) to
+restore the personal folder tree alongside the collections.
 
 ### URL handling
 

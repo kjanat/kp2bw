@@ -14,6 +14,8 @@ _MANAGED_ENV = (
     "KP2BW_KEEPASS_FILE",
     "KP2BW_KEEPASS_PASSWORD",
     "KP2BW_BITWARDEN_PASSWORD",
+    "KP2BW_BITWARDEN_ORG",
+    "KP2BW_CREATE_FOLDERS",
     "KP2BW_YES",
     "KP2BW_LOG_DIR",
 )
@@ -70,6 +72,7 @@ def assert_dotenv_supplies_keepass_file() -> None:
         _ = os.environ.pop("KP2BW_KEEPASS_FILE", None)
         os.environ["KP2BW_KEEPASS_PASSWORD"] = "kp-pw"
         os.environ["KP2BW_BITWARDEN_PASSWORD"] = "bw-pw"
+        os.environ["KP2BW_CREATE_FOLDERS"] = "0"
         os.environ["KP2BW_YES"] = "1"
         os.environ["KP2BW_LOG_DIR"] = tmp  # keep the run's log inside the temp dir
 
@@ -90,6 +93,8 @@ def assert_dotenv_supplies_keepass_file() -> None:
         db_path = _CapturingConverter.captured.get("keepass_file_path")
         if db_path != "from-dotenv.kdbx":
             raise AssertionError(f"expected db path from .env, got {db_path!r}")
+        if _CapturingConverter.captured.get("create_folders") is not False:
+            raise AssertionError("KP2BW_CREATE_FOLDERS=0 should disable folders")
     finally:
         sys.argv = original_argv
         # Release the log file (so rmtree works on Windows) without stripping
@@ -144,9 +149,65 @@ def assert_empty_env_var_defers_to_dotenv() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def assert_org_disables_personal_folders_by_default() -> None:
+    """`--bitwarden-org` flips the personal-folder default off (issue #33).
+
+    Folders only duplicate the collection tree inside the personal vault, so an
+    org import defaults to collections-only. Without an org the default stays on.
+    No explicit ``KP2BW_CREATE_FOLDERS`` is set, so only the org-aware default is
+    under test; an explicit override is covered by the dotenv test above.
+    """
+    original_cwd = Path.cwd()
+    original_argv = sys.argv
+    original_handlers = list(logging.getLogger().handlers)
+    saved_env = {key: os.environ.get(key) for key in _MANAGED_ENV}
+
+    tmp = tempfile.mkdtemp()
+    try:
+        os.environ["KP2BW_KEEPASS_FILE"] = "from-env.kdbx"
+        os.environ["KP2BW_KEEPASS_PASSWORD"] = "kp-pw"
+        os.environ["KP2BW_BITWARDEN_PASSWORD"] = "bw-pw"
+        os.environ["KP2BW_YES"] = "1"
+        os.environ["KP2BW_LOG_DIR"] = tmp
+        _ = os.environ.pop("KP2BW_CREATE_FOLDERS", None)
+        # Run from an empty dir so dotenv autoload can't pull a real project
+        # .env into the env under test.
+        os.chdir(tmp)
+        sys.argv = ["kp2bw"]
+
+        def _run() -> object:
+            with (
+                mock.patch.object(cli, "ensure_bw_available", lambda: None),
+                mock.patch.object(cli, "Converter", _CapturingConverter),
+            ):
+                cli.main()
+            return _CapturingConverter.captured.get("create_folders")
+
+        # Org set -> folders default off.
+        os.environ["KP2BW_BITWARDEN_ORG"] = "org-1"
+        if _run() is not False:
+            raise AssertionError("an org import should default to no personal folders")
+
+        # No org -> folders default on.
+        _ = os.environ.pop("KP2BW_BITWARDEN_ORG", None)
+        if _run() is not True:
+            raise AssertionError("without an org, personal folders should default on")
+    finally:
+        sys.argv = original_argv
+        _reset_root_logging(original_handlers)
+        os.chdir(original_cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+        for key, value in saved_env.items():
+            if value is None:
+                _ = os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def main() -> None:
     assert_dotenv_supplies_keepass_file()
     assert_empty_env_var_defers_to_dotenv()
+    assert_org_disables_personal_folders_by_default()
     print("cli env test passed")
 
 
