@@ -7,12 +7,12 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
-		"prepare": "svelte-kit sync || echo ''",
+		"prepare": "svelte-kit sync 2>&1",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test:unit": "vitest",
-		"test": "npm run test:unit -- --run",
-		"lint": "eslint ."
+		"test": "run test:unit run",
+		"lint": "eslint"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
@@ -25,6 +25,7 @@
 		"eslint-plugin-svelte": "^3.19.0",
 		"globals": "^17.6.0",
 		"playwright": "^1.60.0",
+		"runner-run": "catalog:",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"typescript": "^6.0.3",
