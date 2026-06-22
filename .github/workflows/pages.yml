@@ -1,0 +1,18 @@
+name: Pages
+on: { push: { branches: [master], paths: [docs/**, .github/workflows/pages.yml, bun.lock, package.json] }, workflow_dispatch: {} }
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: false }
+jobs:
+  pages:
+    environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: kjanat/runner@master
+      - uses: oven-sh/setup-bun@v2
+      - run: runner --dir=docs install build
+        env: { BASE_PATH: "/${{ github.event.repository.name }}", RUNNER_PM: bun }
+      - uses: actions/upload-pages-artifact@v5
+        with: { path: docs/build }
+      - id: deploy
+        uses: actions/deploy-pages@v5
