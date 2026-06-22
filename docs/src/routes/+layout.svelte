@@ -44,6 +44,14 @@
 		--accent-deep: #112016;
 		--focus: #9ff0ba;
 
+		/* Icon colors. */
+		--icon-folder: #d2b56f;
+		--icon-folder-bg: #211d12;
+		--icon-collection: var(--accent);
+		--icon-collection-bg: #101d16;
+		--icon-recycle: #d48670;
+		--icon-recycle-bg: #251713;
+
 		/* Type scale — body speaks, labels whisper (not everything tiny). */
 		--fs-label: 0.72rem;
 		--fs-small: 0.8rem;

@@ -39,8 +39,8 @@
 	}
 
 	.folder {
-		border-color: #d2b56f;
-		background: #211d12;
+		border-color: var(--icon-folder);
+		background: var(--icon-folder-bg);
 	}
 
 	.folder::before {
@@ -48,7 +48,7 @@
 		left: 1px;
 		width: 6px;
 		height: 3px;
-		border: 1px solid #d2b56f;
+		border: 1px solid var(--icon-folder);
 		border-bottom: 0;
 		background: var(--bg);
 	}
@@ -56,13 +56,13 @@
 	.collection {
 		width: 11px;
 		height: 11px;
-		border-color: var(--accent);
-		background: #101d16;
+		border-color: var(--icon-collection);
+		background: var(--icon-collection-bg);
 	}
 
 	.collection::before {
 		inset: 2px;
-		border: 1px solid var(--accent);
+		border: 1px solid var(--icon-collection);
 	}
 
 	.collection::after {
@@ -70,17 +70,17 @@
 		left: -3px;
 		width: 2px;
 		height: 2px;
-		background: var(--accent);
+		background: var(--icon-collection);
 		box-shadow:
-			13px 0 0 var(--accent),
-			6px -5px 0 var(--accent),
-			6px 5px 0 var(--accent);
+			13px 0 0 var(--icon-collection),
+			6px -5px 0 var(--icon-collection),
+			6px 5px 0 var(--icon-collection);
 	}
 
 	.recycle {
-		border-color: #d48670;
+		border-color: var(--icon-recycle);
 		border-radius: 0 0 3px 3px;
-		background: #251713;
+		background: var(--icon-recycle-bg);
 	}
 
 	.recycle::before {
@@ -88,7 +88,7 @@
 		left: -2px;
 		width: 13px;
 		height: 2px;
-		border: 1px solid #d48670;
+		border: 1px solid var(--icon-recycle);
 		background: var(--bg);
 	}
 
@@ -97,7 +97,7 @@
 		left: 3px;
 		width: 1px;
 		height: 5px;
-		background: #d48670;
-		box-shadow: 3px 0 0 #d48670;
+		background: var(--icon-recycle);
+		box-shadow: 3px 0 0 var(--icon-recycle);
 	}
 </style>

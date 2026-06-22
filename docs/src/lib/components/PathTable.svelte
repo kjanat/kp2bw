@@ -11,6 +11,39 @@
 
 	let collapsed = new SvelteSet<string>();
 
+	type RenderNode = {
+		id: string;
+		node: PreviewNode;
+		path: string[];
+	};
+
+	function renderNodes(
+		nodes: readonly PreviewNode[],
+		parentPath: readonly string[],
+	): RenderNode[] {
+		return nodes.map((node, index) => {
+			const ordinal = siblingOrdinal(nodes, node, index);
+			const path = [...parentPath, node.kind, node.name, String(ordinal)];
+
+			return { id: JSON.stringify(path), node, path };
+		});
+	}
+
+	function siblingOrdinal(
+		nodes: readonly PreviewNode[],
+		node: PreviewNode,
+		index: number,
+	): number {
+		let ordinal = 0;
+		for (let siblingIndex = 0; siblingIndex < index; siblingIndex += 1) {
+			const sibling = nodes[siblingIndex];
+			if (sibling?.kind === node.kind && sibling.name === node.name) {
+				ordinal += 1;
+			}
+		}
+		return ordinal;
+	}
+
 	function toggleNode(nodeId: string): void {
 		if (collapsed.has(nodeId)) {
 			collapsed.delete(nodeId);
@@ -47,10 +80,11 @@
 	}
 </script>
 
-{#snippet branch(nodes: PreviewNode[], prefix = '')}
+{#snippet branch(nodes: PreviewNode[], path: readonly string[])}
 	<ul>
-		{#each nodes as node, i (`${prefix}/${i}`)}
-			{@const nodeId = `${prefix}/${i}`}
+		{#each renderNodes(nodes, path) as entry (entry.id)}
+			{@const node = entry.node}
+			{@const nodeId = entry.id}
 			{@const canCollapse = node.children.length > 0}
 			{@const isCollapsed = collapsed.has(nodeId)}
 			<li>
@@ -98,7 +132,7 @@
 					{/if}
 				</div>
 				{#if canCollapse && !isCollapsed}
-					{@render branch(node.children, nodeId)}
+					{@render branch(node.children, entry.path)}
 				{/if}
 			</li>
 		{/each}
@@ -111,7 +145,7 @@
 			<h2>{keepass.title}</h2>
 		</div>
 		<div class="tree">
-			{@render branch(keepass.nodes, 'keepass')}
+			{@render branch(keepass.nodes, ['keepass'])}
 		</div>
 	</div>
 	<div class="panel">
@@ -119,7 +153,7 @@
 			<h2>{bitwarden.title}</h2>
 		</div>
 		<div class="tree">
-			{@render branch(bitwarden.nodes, 'bitwarden')}
+			{@render branch(bitwarden.nodes, ['bitwarden'])}
 		</div>
 	</div>
 </section>
@@ -199,15 +233,15 @@
 	}
 
 	.folder {
-		color: #d2b56f;
+		color: var(--icon-folder);
 	}
 
 	.collection {
-		color: #85d7ad;
+		color: var(--icon-collection);
 	}
 
 	.recycle {
-		color: #d48670;
+		color: var(--icon-recycle);
 	}
 
 	.item {
@@ -277,8 +311,8 @@
 	}
 
 	.icon[data-kind="folder"] {
-		border-color: #d2b56f;
-		background: #211d12;
+		border-color: var(--icon-folder);
+		background: var(--icon-folder-bg);
 	}
 
 	.icon[data-kind="folder"]::before {
@@ -286,7 +320,7 @@
 		left: 1px;
 		width: 7px;
 		height: 4px;
-		border: 1px solid #d2b56f;
+		border: 1px solid var(--icon-folder);
 		border-bottom: 0;
 		background: var(--panel);
 	}
@@ -294,13 +328,13 @@
 	.icon[data-kind="collection"] {
 		width: 14px;
 		height: 14px;
-		border-color: var(--accent);
-		background: #101d16;
+		border-color: var(--icon-collection);
+		background: var(--icon-collection-bg);
 	}
 
 	.icon[data-kind="collection"]::before {
 		inset: 3px;
-		border: 1px solid var(--accent);
+		border: 1px solid var(--icon-collection);
 	}
 
 	.icon[data-kind="collection"]::after {
@@ -308,17 +342,17 @@
 		left: -4px;
 		width: 2px;
 		height: 2px;
-		background: var(--accent);
+		background: var(--icon-collection);
 		box-shadow:
-			16px 0 0 var(--accent),
-			8px -6px 0 var(--accent),
-			8px 6px 0 var(--accent);
+			16px 0 0 var(--icon-collection),
+			8px -6px 0 var(--icon-collection),
+			8px 6px 0 var(--icon-collection);
 	}
 
 	.icon[data-kind="recycle"] {
-		border-color: #d48670;
+		border-color: var(--icon-recycle);
 		border-radius: 0 0 4px 4px;
-		background: #251713;
+		background: var(--icon-recycle-bg);
 	}
 
 	.icon[data-kind="recycle"]::before {
@@ -326,7 +360,7 @@
 		left: -2px;
 		width: 16px;
 		height: 2px;
-		border: 1px solid #d48670;
+		border: 1px solid var(--icon-recycle);
 		background: var(--panel);
 	}
 
@@ -335,8 +369,8 @@
 		left: 3px;
 		width: 1px;
 		height: 6px;
-		background: #d48670;
-		box-shadow: 4px 0 0 #d48670;
+		background: var(--icon-recycle);
+		box-shadow: 4px 0 0 var(--icon-recycle);
 	}
 
 	.icon[data-kind="item"] {

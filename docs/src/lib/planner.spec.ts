@@ -77,6 +77,15 @@ describe('planner', () => {
 		);
 	});
 
+	it('escapes backslashes before quotes in command arguments', () => {
+		expect(
+			commandForState({
+				...defaultPlannerState,
+				keepassFile: String.raw`C:\Vaults\test\".kdbx`,
+			}),
+		).toBe(String.raw`kp2bw "C:\\Vaults\\test\\\".kdbx"`);
+	});
+
 	it('maps top-level organization collections', () => {
 		const state = {
 			...orgState,
