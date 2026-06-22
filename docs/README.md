@@ -1,44 +1,35 @@
-# sv
+# kp2bw Migration Planner
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+This docs site helps you choose the safest KeePass-to-Bitwarden migration shape
+before running `kp2bw`.
 
-## Creating a project
+Open these pages in the docs site:
 
-If you're seeing this, you've probably already done this step. Congrats!
+- [Migration planner](./src/routes/+page.svelte) (served at `/`): choose
+  options, preview the trees, copy the command.
+- [Detailed option guide](./src/routes/docs/+page.svelte) (served at `/docs`):
+  learn what each choice means before running it.
 
-```sh
-# create a new project
-npx sv create my-app
-```
+The planner shows the source KeePass tree beside the Bitwarden result tree and
+turns your choices into the exact `.env` values and `kp2bw` command to run.
 
-To recreate this project with the same configuration:
+## What It Helps Decide
 
-```sh
-# recreate this project
-bun x sv@0.16.1 create --template minimal --types ts --add mcp="ide:claude-code,opencode,other+setup:remote" vitest="usages:unit,component" eslint --install bun docs
-```
+- Personal vault import with folders, or a flat personal import.
+- Organization import into nested collections, top-level collections, one fixed
+  collection, or no generated hierarchy.
+- Whether an organization import should also create personal folders with
+  `--folder`.
+- Whether a rerun should protect Bitwarden edits, skip updates, or force KeePass
+  to win.
+- Which tags, expired entries, and Recycle Bin entries are included.
 
-## Developing
+## Important Defaults
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a
-development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target
-> environment.
+- Personal vault is the no-flag default: `kp2bw vault.kdbx`.
+- Organization imports default to collections only; personal folders stay off
+  unless `--folder` is selected.
+- Expired entries are included unless `--skip-expired` is selected.
+- Recycle Bin entries are excluded unless `--include-recycle-bin` is selected.
+- Tag-filtered commands include `--` before the KeePass file so the file path is
+  not parsed as another tag.
