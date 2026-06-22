@@ -3,6 +3,7 @@ import {
 	availableTags,
 	bitwardenTree,
 	buildMigrationPlan,
+	commandDisplayForState,
 	commandForState,
 	defaultPlannerState,
 	deltaForItem,
@@ -11,28 +12,47 @@ import {
 	previewFixture,
 	previewForState,
 	sampleOrganizationId,
+	sanitizePlannerState,
 	sourceTree,
 } from './planner';
 import type { PreviewNode } from './planner';
 
+// The default is now a personal import (mirrors `kp2bw vault.kdbx` with no -o);
+// org-specific behaviour is exercised from this explicit baseline.
+const orgState = {
+	...defaultPlannerState,
+	destination: 'org' as const,
+	mapping: 'org-nested' as const,
+};
+
 describe('planner', () => {
-	it('defaults to nested organization collections without personal folders', () => {
+	it('defaults to a personal-vault import with folders', () => {
 		expect(defaultPlannerState).toMatchObject({
-			destination: 'org',
-			mapping: 'org-nested',
+			destination: 'personal',
+			mapping: 'personal-folders',
 			keepassFile: 'vault.kdbx',
-			organizationId: sampleOrganizationId,
 		});
-		expect(bitwardenTree(defaultPlannerState).map((node) => node.name)).toEqual([
+		const [myVault, orgVault] = bitwardenTree(defaultPlannerState);
+		expect(myVault).toMatchObject({ name: 'My vault' });
+		expect(myVault?.children[0]).toMatchObject({ name: 'Folders' });
+		expect(orgVault).toMatchObject({
+			name: 'Organization vault',
+			count: 0,
+			children: [expect.objectContaining({ name: 'No organization changes' })],
+		});
+	});
+
+	it('builds nested organization collections without personal folders', () => {
+		expect(bitwardenTree(orgState).map((node) => node.name)).toEqual([
 			'My vault',
 			'Organization vault',
 		]);
-		expect(bitwardenTree(defaultPlannerState)[0]).toMatchObject({
+		expect(bitwardenTree(orgState)[0]).toMatchObject({
 			name: 'My vault',
 			count: 0,
 			children: [expect.objectContaining({ name: 'No personal folders created' })],
 		});
-		expect(bitwardenTree(defaultPlannerState)[1]).toMatchObject({
+		expect(bitwardenTree(orgState)[1]).toMatchObject({
 			name: 'Organization vault',
 			children: [
 				{
@@ -47,25 +67,25 @@ describe('planner', () => {
 
 	it('builds an organization command from state values', () => {
 		const state = {
-			...defaultPlannerState,
+			...orgState,
 			organizationId: '22222222-2222-2222-2222-222222222222',
 			keepassFile: 'source vault.kdbx',
 		};
 
 		expect(commandForState(state)).toBe(
-			'kp2bw -o 22222222-2222-2222-2222-222222222222 -c nested --no-folder "source vault.kdbx"',
+			'kp2bw -o 22222222-2222-2222-2222-222222222222 -c nested "source vault.kdbx"',
 		);
 	});
 
 	it('maps top-level organization collections', () => {
 		const state = {
-			...defaultPlannerState,
+			...orgState,
 			mapping: 'org-top' as const,
 			keepassFile: 'source.kdbx',
 		};
 
 		expect(commandForState(state)).toBe(
-			`kp2bw -o ${sampleOrganizationId} -c auto --no-folder source.kdbx`,
+			`kp2bw -o ${sampleOrganizationId} -c auto source.kdbx`,
 		);
 		const collections = bitwardenTree(state)[1]?.children[0]?.children;
 		expect(collections?.find((node) => node.name === 'Work')?.count).toBe(4);
@@ -125,7 +145,7 @@ describe('planner', () => {
 	it('keeps skipped entries visible and marks them skipped in Bitwarden', () => {
 		const preview = previewForState({
 			...defaultPlannerState,
-			skipExpired: true,
+			includeExpired: false,
 		});
 
 		expect(treeNames(preview.keepass)).toContain('Archive Box');
@@ -133,13 +153,13 @@ describe('planner', () => {
 		expect(findTreeNode(preview.keepass, 'Archive Box')?.action).toBeUndefined();
 		expect(findTreeNode(preview.keepass, 'Archive Box')?.muted).toBeUndefined();
 		expect(findTreeNode(preview.bitwarden, 'Archive Box')?.action).toBe('skip');
-		expect(preview.stats.items).toBe(filteredItems({ ...defaultPlannerState, skipExpired: true }).length);
+		expect(preview.stats.items).toBe(filteredItems({ ...defaultPlannerState, includeExpired: false }).length);
 	});
 
 	it('keeps Recycle Bin visible in KeePass while excluding it from Bitwarden by default', () => {
-		const preview = previewForState(defaultPlannerState);
+		const preview = previewForState(orgState);
 		const withRecycleBin = previewForState({
-			...defaultPlannerState,
+			...orgState,
 			includeRecycleBin: true,
 		});
 
@@ -201,12 +221,104 @@ describe('planner', () => {
 		const state = {
 			...defaultPlannerState,
 			tagInput: 'finance',
-			skipExpired: true,
+			includeExpired: false,
 		};
 
 		expect(filteredItems(state).map((item) => item.name)).toEqual(['Stripe', 'Payroll']);
 		expect(sourceTree()[0]?.children.map((node) => node.name)).toContain('Recycle Bin');
 		expect(commandForState(state)).toContain('-t finance --skip-expired');
+	});
+
+	it('adds --folder and a personal folder tree when org folders are enabled', () => {
+		const state = { ...orgState, orgFolders: true };
+
+		expect(commandForState(state)).toContain('-c nested --folder');
+
+		const [myVault, orgVault] = bitwardenTree(state);
+		expect(myVault).toMatchObject({ name: 'My vault' });
+		expect(myVault?.count).toBeGreaterThan(0);
+		expect(myVault?.children[0]).toMatchObject({ name: 'Folders' });
+		// --folder double-files: collections stay populated alongside folders.
+		expect(orgVault?.count).toBe(myVault?.count);
+	});
+
+	it('omits --folder for org imports unless opted in', () => {
+		const command = commandForState(orgState);
+		expect(command).not.toContain('--folder');
+		expect(bitwardenTree(orgState)[0]?.children[0]).toMatchObject({
+			name: 'No personal folders created',
+		});
+	});
+
+	it('treats the Expired filter as inclusion with the CLI default on', () => {
+		// Default keeps expired (no --skip-expired); unticking adds the flag.
+		expect(defaultPlannerState.includeExpired).toBe(true);
+		expect(commandForState(defaultPlannerState)).not.toContain('--skip-expired');
+		expect(
+			commandForState({ ...defaultPlannerState, includeExpired: false }),
+		).toContain('--skip-expired');
+	});
+
+	it('ends option parsing with -- so a trailing tag filter cannot swallow the file', () => {
+		// -t is nargs="+"; without -- argparse would read vault.kdbx as a tag.
+		const state = { ...defaultPlannerState, tagInput: 'ops' };
+		const command = commandForState(state);
+
+		expect(command).toContain('-t ops -- vault.kdbx');
+		expect(command.endsWith('-- vault.kdbx')).toBe(true);
+	});
+
+	it('omits the -- separator when no tag filter is set', () => {
+		expect(commandForState(defaultPlannerState)).not.toContain(' -- ');
+	});
+
+	it('keeps a short command on one line but wraps a long one with backslashes', () => {
+		expect(commandDisplayForState(defaultPlannerState)).not.toContain('\n');
+
+		const long = commandDisplayForState({
+			...defaultPlannerState,
+			tagInput: 'admin, dev, finance, hr, legacy, ops',
+			includeRecycleBin: true,
+			rerunMode: 'keepass-wins',
+		});
+		expect(long).toContain(' \\\n  ');
+		// Joining the wrapped lines back must reproduce the one-line command.
+		expect(long.replaceAll(' \\\n  ', ' ')).toBe(
+			commandForState({
+				...defaultPlannerState,
+				tagInput: 'admin, dev, finance, hr, legacy, ops',
+				includeRecycleBin: true,
+				rerunMode: 'keepass-wins',
+			}),
+		);
+	});
+
+	it('sanitizes persisted state: keeps valid values, repairs junk and mismatches', () => {
+		const custom = {
+			...defaultPlannerState,
+			destination: 'personal' as const,
+			mapping: 'personal-flat' as const,
+			tagInput: 'ops',
+			includeExpired: false,
+		};
+		expect(sanitizePlannerState(custom)).toEqual(custom);
+
+		// Non-objects and unknown/wrong-typed fields fall back to defaults.
+		expect(sanitizePlannerState(null)).toEqual(defaultPlannerState);
+		expect(sanitizePlannerState('nope')).toEqual(defaultPlannerState);
+		expect(
+			sanitizePlannerState({ destination: 'mars', includeExpired: 'yes' }),
+		).toMatchObject({
+			destination: defaultPlannerState.destination,
+			includeExpired: true,
+		});
+
+		// A mapping that doesn't belong to the destination is reset to that
+		// destination's default so the radio group is never left unselected.
+		expect(
+			sanitizePlannerState({ destination: 'personal', mapping: 'org-nested' })
+				.mapping,
+		).toBe('personal-folders');
 	});
 
 	it('uses a .env block for credentials', () => {

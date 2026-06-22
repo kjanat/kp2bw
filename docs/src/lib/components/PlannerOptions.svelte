@@ -6,78 +6,31 @@
 	type Choice<T extends string> = {
 		value: T;
 		label: string;
-		help: string;
-		href: `/docs#${string}`;
 	};
 
 	let { state }: { state: PlannerState } = $props();
 
+	// Labels are self-describing; the per-option rationale lives in the docs
+	// page, reached via the section-level help marks (Tree mapping / Running
+	// again), so the controls stay compact instead of a wall of ? buttons.
 	const orgMappings: Choice<Mapping>[] = [
-		{
-			value: 'org-nested',
-			label: 'Org collections: full paths',
-			help:
-				'KeePass group Work/Servers becomes organization collection Work/Servers.',
-			href: '/docs#full-path-collections',
-		},
-		{
-			value: 'org-top',
-			label: 'Org collections: top folder only',
-			help:
-				'KeePass Work/Servers and Work/Engineering both land in collection Work.',
-			href: '/docs#top-folder-collections',
-		},
-		{
-			value: 'org-fixed',
-			label: 'One existing collection',
-			help:
-				'Every item lands in the collection ID below. KeePass groups are not recreated.',
-			href: '/docs#single-collection',
-		},
-		{
-			value: 'org-flat',
-			label: 'Flat organization import',
-			help: 'No generated collections and no personal folders.',
-			href: '/docs#flat-org',
-		},
+		{ value: 'org-nested', label: 'Org collections: full paths' },
+		{ value: 'org-top', label: 'Org collections: top folder only' },
+		{ value: 'org-fixed', label: 'One existing collection' },
+		{ value: 'org-flat', label: 'Flat organization import' },
 	];
 
 	const personalMappings: Choice<Mapping>[] = [
-		{
-			value: 'personal-folders',
-			label: 'Personal folders',
-			help: 'KeePass groups become personal Bitwarden folders.',
-			href: '/docs#personal-folders',
-		},
-		{
-			value: 'personal-flat',
-			label: 'Flat personal import',
-			help: 'No Bitwarden folders. Items stay at the personal vault root.',
-			href: '/docs#flat-personal',
-		},
+		{ value: 'personal-folders', label: 'Personal folders' },
+		{ value: 'personal-flat', label: 'Flat personal import' },
 	];
 
 	const reruns: Choice<RerunMode>[] = [
-		{
-			value: 'keepass-wins',
-			label: 'KeePass is still my main vault',
-			help:
-				'Use KeePass as the source of truth and push it over Bitwarden edits.',
-			href: '/docs#force-update',
-		},
-		{
-			value: 'safe',
-			label: 'Mostly Bitwarden, sync forgotten KeePass edits',
-			help:
-				'Update migrated items when Bitwarden has not been edited since the last kp2bw run.',
-			href: '/docs#safe-rerun',
-		},
+		{ value: 'keepass-wins', label: 'KeePass is still my main vault' },
+		{ value: 'safe', label: 'Mostly Bitwarden, sync forgotten KeePass edits' },
 		{
 			value: 'no-update',
 			label: 'Testing migrations; keep the existing Vaultwarden DB',
-			help:
-				'Create missing items only and leave existing migrated Bitwarden items untouched.',
-			href: '/docs#no-update',
 		},
 	];
 
@@ -103,6 +56,80 @@
 </script>
 
 <section class="options">
+	<!--
+		Target-independent options first. Toggling Target adds/removes Org ID,
+		swaps the mapping list (4 org vs 2 personal) and the folders opt-in, so
+		keeping it below means a toggle only reflows the bottom of the panel
+		instead of shoving every field down.
+	-->
+	<div class="fields">
+		<label class="field file-field">
+			<span>KeePass file</span>
+			<input bind:value={state.keepassFile} spellcheck="false">
+		</label>
+		<label class="field file-field">
+			<span>Key file</span>
+			<input bind:value={state.keyFile} spellcheck="false">
+		</label>
+		<label class="field tag-field">
+			<span>Tags</span>
+			<input bind:value={state.tagInput} spellcheck="false">
+		</label>
+		<div
+			class="tag-chips"
+			aria-label="Available tags in the mock KeePass vault"
+		>
+			{#each tagChoices as tag (tag)}
+				<button
+					type="button"
+					class:active={activeTags.includes(tag)}
+					aria-pressed={activeTags.includes(tag)}
+					onclick={() => toggleTag(tag)}
+				>
+					{tag}
+				</button>
+			{/each}
+		</div>
+	</div>
+
+	<fieldset class="filters">
+		<legend>Filters</legend>
+		<div class="choice">
+			<label>
+				<input type="checkbox" bind:checked={state.includeExpired}>
+				Expired
+			</label>
+		</div>
+		<div class="choice">
+			<label>
+				<input type="checkbox" bind:checked={state.includeRecycleBin}>
+				Recycle bin
+			</label>
+		</div>
+	</fieldset>
+
+	<fieldset>
+		<legend>
+			Running again <HelpMark
+				text="Pick the situation you are in when this command hits an existing Bitwarden vault."
+				href="/docs#reruns"
+			/>
+		</legend>
+		{#each reruns as rerun (rerun.value)}
+			<div class="choice">
+				<label>
+					<input
+						type="radio"
+						name="rerun"
+						value={rerun.value}
+						bind:group={state.rerunMode}
+					>
+					{rerun.label}
+				</label>
+			</div>
+		{/each}
+	</fieldset>
+
 	<fieldset class="target">
 		<legend>
 			Target <HelpMark
@@ -114,28 +141,25 @@
 			<input
 				type="radio"
 				name="destination"
-				checked={state.destination === 'org'}
-				onchange={() => setDestination('org')}
-			>
-			Organization
-		</label>
-		<label>
-			<input
-				type="radio"
-				name="destination"
 				checked={state.destination === 'personal'}
 				onchange={() => setDestination('personal')}
 			>
 			Personal
 		</label>
+		<label>
+			<input
+				type="radio"
+				name="destination"
+				checked={state.destination === 'org'}
+				onchange={() => setDestination('org')}
+			>
+			Organization
+		</label>
 	</fieldset>
 
 	{#if state.destination === 'org'}
 		<label class="field">
-			<span>Org ID <HelpMark
-					text="Bitwarden organization ID passed to kp2bw."
-					href="/docs#organization-id"
-				/></span>
+			<span>Org ID</span>
 			<input bind:value={state.organizationId} spellcheck="false">
 		</label>
 	{/if}
@@ -158,118 +182,36 @@
 					>
 					{mapping.label}
 				</label>
-				<HelpMark text={mapping.help} href={mapping.href} />
 			</div>
 		{/each}
 	</fieldset>
+
+	{#if state.destination === 'org'}
+		<div class="choice">
+			<label>
+				<input type="checkbox" bind:checked={state.orgFolders}>
+				Also create personal folders
+			</label>
+			<HelpMark
+				text="Org imports skip personal folders by default. Tick this to also build the KeePass folder tree in your personal vault (kp2bw --folder)."
+				href="/docs#personal-folders-under-org"
+			/>
+		</div>
+	{/if}
 
 	{#if state.mapping === 'org-fixed'}
 		<label class="field">
-			<span>Collection ID <HelpMark
-					text="Existing collection all imported items should land in."
-					href="/docs#collection-id"
-				/></span>
+			<span>Collection ID</span>
 			<input bind:value={state.collectionId} spellcheck="false">
 		</label>
 	{/if}
-
-	<div class="fields">
-		<label class="field file-field">
-			<span>KeePass file <HelpMark
-					text="Path to the KeePass database."
-					href="/docs#keepass-file"
-				/></span>
-			<input bind:value={state.keepassFile} spellcheck="false">
-		</label>
-		<label class="field file-field">
-			<span>Key file <HelpMark
-					text="Optional KeePass key file."
-					href="/docs#key-file"
-				/></span>
-			<input bind:value={state.keyFile} spellcheck="false">
-		</label>
-		<label class="field tag-field">
-			<span>Tags <HelpMark
-					text="Comma-separated KeePass tags to import. Empty imports all tags."
-					href="/docs#tag-filter"
-				/></span>
-			<input bind:value={state.tagInput} spellcheck="false">
-		</label>
-		<div
-			class="tag-chips"
-			aria-label="Available tags in the mock KeePass vault"
-		>
-			{#each tagChoices as tag (tag)}
-				<button
-					type="button"
-					class:active={activeTags.includes(tag)}
-					aria-pressed={activeTags.includes(tag)}
-					onclick={() => toggleTag(tag)}
-				>
-					{tag}
-				</button>
-			{/each}
-		</div>
-	</div>
-
-	<fieldset class="filters">
-		<legend>
-			Filters <HelpMark
-				text="Controls which KeePass entries are omitted."
-				href="/docs#filters"
-			/>
-		</legend>
-		<div class="choice">
-			<label>
-				<input type="checkbox" bind:checked={state.skipExpired}>
-				Skip expired
-			</label>
-			<HelpMark
-				text="Expired entries are imported by default. This omits them."
-				href="/docs#skip-expired"
-			/>
-		</div>
-		<div class="choice">
-			<label>
-				<input type="checkbox" bind:checked={state.includeRecycleBin}>
-				Include Recycle Bin
-			</label>
-			<HelpMark
-				text="Recycle Bin entries are excluded by default."
-				href="/docs#recycle-bin"
-			/>
-		</div>
-	</fieldset>
-
-	<fieldset>
-		<legend>
-			Running again <HelpMark
-				text="Pick the situation you are in when this command hits an existing Bitwarden vault."
-				href="/docs#reruns"
-			/>
-		</legend>
-		{#each reruns as rerun (rerun.value)}
-			<div class="choice">
-				<label>
-					<input
-						type="radio"
-						name="rerun"
-						value={rerun.value}
-						bind:group={state.rerunMode}
-					>
-					{rerun.label}
-				</label>
-				<HelpMark text={rerun.help} href={rerun.href} />
-			</div>
-		{/each}
-	</fieldset>
 </section>
 
 <style>
 	.options {
 		min-width: 0;
-		border: 1px solid #2f372f;
-		background: #151914;
+		border: 1px solid var(--edge);
+		background: var(--panel);
 		padding: 14px;
 	}
 
@@ -302,7 +244,7 @@
 		align-items: center;
 		gap: 6px;
 		margin-bottom: 6px;
-		color: #aab0a3;
+		color: var(--text-muted);
 		font-size: 0.72rem;
 		text-transform: uppercase;
 	}
@@ -314,9 +256,9 @@
 		gap: 8px;
 		justify-content: space-between;
 		min-width: 0;
-		border: 1px solid #2d342d;
+		border: 1px solid var(--edge);
 		padding: 8px;
-		color: #f0ecdc;
+		color: var(--text);
 	}
 
 	.target > label {
@@ -338,15 +280,15 @@
 
 	input[type="radio"],
 	input[type="checkbox"] {
-		accent-color: #8ecf9f;
+		accent-color: var(--accent);
 	}
 
 	input:not([type="radio"]):not([type="checkbox"]) {
 		width: 100%;
 		min-height: 34px;
-		border: 1px solid #303a31;
-		background: #10130f;
-		color: #f0ecdc;
+		border: 1px solid var(--edge);
+		background: var(--field);
+		color: var(--text);
 		padding: 0 8px;
 	}
 
@@ -364,24 +306,24 @@
 
 	.tag-chips button {
 		min-height: 26px;
-		border: 1px solid #303a31;
-		background: #10130f;
-		color: #c7c9bd;
+		border: 1px solid var(--edge);
+		background: var(--field);
+		color: var(--text-dim);
 		padding: 0 8px;
 		font: inherit;
-		font-size: 0.78rem;
+		font-size: var(--fs-small);
 		cursor: pointer;
 	}
 
+	/* Focus is intentionally NOT merged with :hover/.active here: a keyboard
+	   user needs the global :focus-visible ring to tell focus from selected. */
 	.tag-chips button:hover,
-	.tag-chips button:focus-visible,
 	.tag-chips button.active {
-		border-color: #8ecf9f;
-		color: #f0ecdc;
-		outline: none;
+		border-color: var(--accent);
+		color: var(--text);
 	}
 
 	.tag-chips button.active {
-		background: #112016;
+		background: var(--accent-deep);
 	}
 </style>

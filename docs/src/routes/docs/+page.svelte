@@ -183,35 +183,43 @@
 					collections and no personal folders. That keeps shared data in the org
 					model instead of creating a private folder tree beside it.
 				</p>
+				<p id="personal-folders-under-org">
+					Want both? Pass <code>--folder</code> alongside <code>-o</code> (the
+					planner's <strong>Also create personal folders</strong> toggle) and
+					every item is filed into its org collection <em>and</em> a personal
+					folder — the same double-filing Bitwarden's own org import does.
+					Leave it off unless you specifically want that private copy.
+				</p>
 				<div class="fact-grid">
 					<article id="full-path-collections">
 						<h3>Full-path collections</h3>
 						<p>
-							<code>-c nested --no-folder</code>: KeePass
-							<code>Work/Servers</code> becomes collection
-							<code>Work/Servers</code>.
+							<code>-c nested</code>: KeePass <code>Work/Servers</code> becomes
+							collection <code>Work/Servers</code>. With <code>-o</code> set,
+							personal folders are already off, so no extra flag is needed.
 						</p>
 					</article>
 					<article id="top-folder-collections">
 						<h3>Top-folder collections</h3>
 						<p>
-							<code>-c auto --no-folder</code>: KeePass
-							<code>Work/Servers</code> and <code>Work/Engineering</code> both
-							land in collection <code>Work</code>.
+							<code>-c auto</code>: KeePass <code>Work/Servers</code> and
+							<code>Work/Engineering</code> both land in collection
+							<code>Work</code>.
 						</p>
 					</article>
 					<article id="single-collection">
 						<h3>Single collection</h3>
 						<p>
-							<code>-c 11111111-1111-1111-1111-111111111111 --no-folder</code>:
-							every imported item lands in one existing collection.
+							<code>-c 11111111-1111-1111-1111-111111111111</code>: every
+							imported item lands in one existing collection.
 						</p>
 					</article>
 					<article id="flat-org">
 						<h3>Flat organization</h3>
 						<p>
-							<code>--no-folder</code> without collection creation: items are
-							created without a generated hierarchy.
+							<code>-o</code> with no collection mapping: items are created in
+							the organization without a generated hierarchy or personal
+							folders.
 						</p>
 					</article>
 					<article id="personal-folders">
@@ -241,7 +249,7 @@
 KP2BW_KEEPASS_PASSWORD=&lt;keepass password&gt;
 KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;
 
-kp2bw -o 00000000-0000-0000-0000-000000000000 -c nested --no-folder vault.kdbx</code></pre>
+kp2bw -o 00000000-0000-0000-0000-000000000000 -c nested vault.kdbx</code></pre>
 				<p>
 					Choose top-level collections if you need fewer collections. Choose one
 					existing collection only when you intentionally want to flatten the
@@ -351,15 +359,8 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 
 <style>
 	.docs-page {
-		min-height: 100vh;
 		padding: 28px;
-		font-family:
-			"Aptos Mono",
-			"Cascadia Mono",
-			"SFMono-Regular",
-			Consolas,
-			"Liberation Mono",
-			monospace;
+		/* font-family inherited from :global(body) — no need to redeclare. */
 	}
 
 	.docs-hero,
@@ -371,13 +372,13 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 	.docs-hero {
 		display: grid;
 		gap: 10px;
-		border-bottom: 1px solid #30372f;
+		border-bottom: 1px solid var(--edge);
 		padding-bottom: 18px;
 	}
 
 	a {
 		width: fit-content;
-		color: #8ed9aa;
+		color: var(--accent);
 		text-decoration: none;
 	}
 
@@ -390,8 +391,8 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 	nav a,
 	h3 {
 		margin: 0;
-		color: #9c9587;
-		font-size: 0.74rem;
+		color: var(--text-muted);
+		font-size: var(--fs-label);
 		text-transform: uppercase;
 	}
 
@@ -403,16 +404,18 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 	}
 
 	h1 {
-		max-width: 12ch;
+		max-width: 16ch;
 		margin: 0;
-		font-family: Georgia, "Times New Roman", serif;
-		font-size: clamp(2.4rem, 5vw, 4.5rem);
-		line-height: 1;
+		font-family: var(--mono);
+		font-size: clamp(2.2rem, 4.5vw, 3.6rem);
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		line-height: 1.05;
 	}
 
 	.docs-hero span {
 		max-width: 74ch;
-		color: #bcb5a5;
+		color: var(--text-dim);
 		line-height: 1.55;
 	}
 
@@ -434,8 +437,8 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 		align-content: start;
 		gap: 10px;
 		height: fit-content;
-		border: 1px solid #30372f;
-		background: #171a16;
+		border: 1px solid var(--edge);
+		background: var(--panel);
 		padding: 14px;
 	}
 
@@ -446,21 +449,23 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 
 	section {
 		min-width: 0;
-		border: 1px solid #30372f;
-		background: #171a16;
-		padding: 20px;
+		border: 1px solid var(--edge);
+		background: var(--panel);
+		padding: 24px 24px 26px;
 	}
 
 	section > h2 {
-		margin: 5px 0 10px;
-		font-size: 1.25rem;
-		line-height: 1.35;
+		margin: 4px 0 14px;
+		color: var(--text);
+		font-size: clamp(1.2rem, 2vw, 1.45rem);
+		font-weight: 700;
+		line-height: 1.3;
 	}
 
 	p,
 	li {
 		max-width: 78ch;
-		color: #d6ceb9;
+		color: var(--text-dim);
 		line-height: 1.62;
 	}
 
@@ -471,8 +476,8 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 
 	pre {
 		overflow: auto;
-		border: 1px solid #31513f;
-		background: #0f1812;
+		border: 1px solid var(--code-edge);
+		background: var(--code-bg);
 		padding: 14px;
 		color: #d8f3df;
 		white-space: pre;
@@ -481,14 +486,16 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 	.fact-grid {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 10px;
-		margin-top: 14px;
+		gap: 6px 22px;
+		margin-top: 16px;
 	}
 
+	/* Was a bordered box inside a bordered section (box-in-box). A left rule
+	   groups each fact without stacking another full border on the panel. */
 	.fact-grid article {
 		min-width: 0;
-		border: 1px solid #2b302a;
-		padding: 14px;
+		border-left: 2px solid var(--edge);
+		padding: 2px 0 6px 14px;
 	}
 
 	.fact-grid p {
@@ -499,19 +506,19 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
 		margin: 16px 0;
-		border-top: 1px solid #30372f;
-		border-left: 1px solid #30372f;
+		border-top: 1px solid var(--edge);
+		border-left: 1px solid var(--edge);
 	}
 
 	.mapping-grid > div {
 		min-width: 0;
-		border-right: 1px solid #30372f;
-		border-bottom: 1px solid #30372f;
+		border-right: 1px solid var(--edge);
+		border-bottom: 1px solid var(--edge);
 		padding: 10px;
 	}
 
 	.mapping-head {
-		color: #9c9587;
+		color: var(--text-muted);
 		font-size: 0.74rem;
 		text-transform: uppercase;
 	}
@@ -568,12 +575,12 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 			display: flex;
 			justify-content: space-between;
 			gap: 14px;
-			border-top: 1px solid #30372f;
+			border-top: 1px solid var(--edge);
 		}
 
 		.mapping-grid span {
 			display: inline;
-			color: #9c9587;
+			color: var(--text-muted);
 			font-size: 0.68rem;
 			text-transform: uppercase;
 		}

@@ -59,8 +59,11 @@ export type PlannerState = {
 	organizationId: string;
 	collectionId: string;
 	tagInput: string;
-	skipExpired: boolean;
+	includeExpired: boolean;
 	includeRecycleBin: boolean;
+	/* Org imports default to collections only; opt in to also build the
+	   personal folder tree (kp2bw --folder). Ignored for personal targets. */
+	orgFolders: boolean;
 	rerunMode: RerunMode;
 };
 
@@ -105,17 +108,76 @@ export const sampleOrganizationId = '00000000-0000-0000-0000-000000000000';
 export const sampleCollectionId = '11111111-1111-1111-1111-111111111111';
 
 export const defaultPlannerState: PlannerState = {
-	destination: 'org',
-	mapping: 'org-nested',
+	// Personal vault is the CLI's no-flag default (org needs an explicit -o), so
+	// the planner opens there too; pick Organization to plan a shared-org import.
+	destination: 'personal',
+	mapping: 'personal-folders',
 	keepassFile: 'vault.kdbx',
 	keyFile: '',
 	organizationId: sampleOrganizationId,
 	collectionId: sampleCollectionId,
 	tagInput: '',
-	skipExpired: false,
+	// CLI defaults: expired entries ARE imported; Recycle Bin is NOT.
+	includeExpired: true,
 	includeRecycleBin: false,
+	orgFolders: false,
 	rerunMode: 'safe',
 };
+
+export const PLANNER_STORAGE_KEY = 'kp2bw-planner-v1';
+
+const DESTINATIONS: readonly Destination[] = ['org', 'personal'];
+const ORG_MAPPINGS: readonly Mapping[] = [
+	'org-nested',
+	'org-top',
+	'org-fixed',
+	'org-flat',
+];
+const PERSONAL_MAPPINGS: readonly Mapping[] = ['personal-folders', 'personal-flat'];
+const RERUN_MODES: readonly RerunMode[] = ['safe', 'no-update', 'keepass-wins'];
+
+/** Rebuild a trusted PlannerState from untrusted parsed JSON (localStorage is
+ *  user-editable). Unknown or wrong-typed fields fall back to the default, and
+ *  the mapping is forced to match the destination so the radio group is never
+ *  left with nothing selected. */
+export function sanitizePlannerState(raw: unknown): PlannerState {
+	const base = { ...defaultPlannerState };
+	if (typeof raw !== 'object' || raw === null) return base;
+	const record: Record<string, unknown> = { ...raw };
+
+	const str = (key: string, fallback: string): string => {
+		const value = record[key];
+		return typeof value === 'string' ? value : fallback;
+	};
+	const bool = (key: string, fallback: boolean): boolean => {
+		const value = record[key];
+		return typeof value === 'boolean' ? value : fallback;
+	};
+	const oneOf = <T extends string>(
+		key: string,
+		allowed: readonly T[],
+		fallback: T,
+	): T => allowed.find((candidate) => candidate === record[key]) ?? fallback;
+
+	const destination = oneOf('destination', DESTINATIONS, base.destination);
+	const mappingPool = destination === 'org' ? ORG_MAPPINGS : PERSONAL_MAPPINGS;
+	const mapping = mappingPool.find((candidate) => candidate === record['mapping'])
+		?? (destination === 'org' ? 'org-nested' : 'personal-folders');
+
+	return {
+		destination,
+		mapping,
+		keepassFile: str('keepassFile', base.keepassFile),
+		keyFile: str('keyFile', base.keyFile),
+		organizationId: str('organizationId', base.organizationId),
+		collectionId: str('collectionId', base.collectionId),
+		tagInput: str('tagInput', base.tagInput),
+		includeExpired: bool('includeExpired', base.includeExpired),
+		includeRecycleBin: bool('includeRecycleBin', base.includeRecycleBin),
+		orgFolders: bool('orgFolders', base.orgFolders),
+		rerunMode: oneOf('rerunMode', RERUN_MODES, base.rerunMode),
+	};
+}
 
 export function selectedTags(tagInput: string): string[] {
 	return tagInput.split(',').map((tag) => tag.trim()).filter(Boolean);
@@ -139,7 +201,7 @@ export function exclusionReasonForItem(
 ): ExclusionReason | undefined {
 	const tags = selectedTags(state.tagInput);
 	if (!state.includeRecycleBin && item.recycle) return 'recycle-bin';
-	if (state.skipExpired && item.expired) return 'expired';
+	if (!state.includeExpired && item.expired) return 'expired';
 	if (tags.length > 0 && !tags.some((tag) => item.tags.includes(tag))) {
 		return 'tag-filter';
 	}
@@ -300,8 +362,23 @@ export function bitwardenTree(
 		{
 			name: 'My vault',
 			kind: 'root',
-			count: 0,
-			children: [emptyNode('No personal folders created')],
+			count: state.orgFolders ? importableCount : 0,
+			// --folder double-files: items land in collections AND personal folders.
+			children: state.orgFolders
+				? [
+					{
+						name: 'Folders',
+						kind: 'bucket',
+						count: importableCount,
+						children: treeWithItems(
+							plan,
+							(item) => item.targetPath,
+							'folder',
+							targetLeafState,
+						),
+					},
+				]
+				: [emptyNode('No personal folders created')],
 		},
 		{
 			name: 'Organization vault',
@@ -321,33 +398,60 @@ export function bitwardenTree(
 	];
 }
 
-export function commandForState(state: PlannerState): string {
-	const args = ['kp2bw'];
+/** Logical command pieces — each a flag with its own values — so the command
+ *  can be joined on one line or wrapped onto backslash-continued lines. */
+export function commandSegmentsForState(state: PlannerState): string[] {
+	const segments: string[] = ['kp2bw'];
 
 	if (state.destination === 'org') {
-		args.push('-o', quoteArg(state.organizationId || sampleOrganizationId));
-		if (state.mapping === 'org-nested') args.push('-c', 'nested');
-		if (state.mapping === 'org-top') args.push('-c', 'auto');
+		segments.push(`-o ${quoteArg(state.organizationId || sampleOrganizationId)}`);
+		if (state.mapping === 'org-nested') segments.push('-c nested');
+		if (state.mapping === 'org-top') segments.push('-c auto');
 		if (state.mapping === 'org-fixed') {
-			args.push('-c', quoteArg(state.collectionId || sampleCollectionId));
+			segments.push(`-c ${quoteArg(state.collectionId || sampleCollectionId)}`);
 		}
-		args.push('--no-folder');
+		// kp2bw >=3.7.0 defaults personal folders off whenever -o is set, so
+		// --no-folder is redundant for every org mapping. --folder opts back in
+		// to ALSO build the personal folder tree alongside the collections.
+		if (state.orgFolders) segments.push('--folder');
 	}
 
 	if (state.destination === 'personal' && state.mapping === 'personal-flat') {
-		args.push('--no-folder');
+		segments.push('--no-folder');
 	}
 
-	if (state.keyFile.trim()) args.push('-K', quoteArg(state.keyFile.trim()));
+	if (state.keyFile.trim()) segments.push(`-K ${quoteArg(state.keyFile.trim())}`);
 	const tags = selectedTags(state.tagInput);
-	if (tags.length > 0) args.push('-t', ...tags.map(quoteArg));
-	if (state.skipExpired) args.push('--skip-expired');
-	if (state.includeRecycleBin) args.push('--include-recycle-bin');
-	if (state.rerunMode === 'no-update') args.push('--no-update');
-	if (state.rerunMode === 'keepass-wins') args.push('--force-update');
+	if (tags.length > 0) segments.push(`-t ${tags.map(quoteArg).join(' ')}`);
+	if (!state.includeExpired) segments.push('--skip-expired');
+	if (state.includeRecycleBin) segments.push('--include-recycle-bin');
+	if (state.rerunMode === 'no-update') segments.push('--no-update');
+	if (state.rerunMode === 'keepass-wins') segments.push('--force-update');
 
-	args.push(quoteArg(state.keepassFile || 'passwords.kdbx'));
-	return args.join(' ');
+	// -t is nargs="+" and the KeePass FILE is an optional positional, so with no
+	// flag between them argparse swallows the filename as a tag. End option
+	// parsing with -- so the file is always read as the database path.
+	const file = quoteArg(state.keepassFile || 'passwords.kdbx');
+	segments.push(tags.length > 0 ? `-- ${file}` : file);
+
+	return segments;
+}
+
+export function commandForState(state: PlannerState): string {
+	return commandSegmentsForState(state).join(' ');
+}
+
+/** Column width past which the one-liner is wrapped onto backslash-continued
+ *  lines, so the Run box never needs a long horizontal scroll. */
+const COMMAND_WRAP_COLUMNS = 76;
+
+/** The command as shown in the Run box: one line when short, otherwise each
+ *  segment on its own bash line-continuation (`\`). Still copy-paste runnable. */
+export function commandDisplayForState(state: PlannerState): string {
+	const segments = commandSegmentsForState(state);
+	const oneLine = segments.join(' ');
+	if (oneLine.length <= COMMAND_WRAP_COLUMNS) return oneLine;
+	return segments.join(' \\\n  ');
 }
 
 export function envFileForState(): string {

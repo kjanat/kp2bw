@@ -12,7 +12,7 @@
 		justify-content: center;
 		gap: 6px 12px;
 		min-height: 22px;
-		color: #c7c9bd;
+		color: var(--text-dim);
 		font-size: 0.68rem;
 		line-height: 1;
 	}
@@ -50,19 +50,19 @@
 		height: 3px;
 		border: 1px solid #d2b56f;
 		border-bottom: 0;
-		background: #111411;
+		background: var(--bg);
 	}
 
 	.collection {
 		width: 11px;
 		height: 11px;
-		border-color: #8ecf9f;
+		border-color: var(--accent);
 		background: #101d16;
 	}
 
 	.collection::before {
 		inset: 2px;
-		border: 1px solid #8ecf9f;
+		border: 1px solid var(--accent);
 	}
 
 	.collection::after {
@@ -70,8 +70,11 @@
 		left: -3px;
 		width: 2px;
 		height: 2px;
-		background: #8ecf9f;
-		box-shadow: 13px 0 0 #8ecf9f, 6px -5px 0 #8ecf9f, 6px 5px 0 #8ecf9f;
+		background: var(--accent);
+		box-shadow:
+			13px 0 0 var(--accent),
+			6px -5px 0 var(--accent),
+			6px 5px 0 var(--accent);
 	}
 
 	.recycle {
@@ -86,7 +89,7 @@
 		width: 13px;
 		height: 2px;
 		border: 1px solid #d48670;
-		background: #111411;
+		background: var(--bg);
 	}
 
 	.recycle::after {

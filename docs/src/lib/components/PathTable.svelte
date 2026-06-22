@@ -135,20 +135,20 @@
 
 	.panel {
 		min-width: 0;
-		border: 1px solid #2f372f;
-		background: #151914;
+		border: 1px solid var(--edge);
+		background: var(--panel);
 		padding: 12px;
 	}
 
 	.head {
-		border-bottom: 1px solid #30372f;
+		border-bottom: 1px solid var(--edge);
 		padding-bottom: 8px;
 	}
 
 	h2,
 	span {
 		margin: 0;
-		color: #aab0a3;
+		color: var(--text-muted);
 		font-size: 0.72rem;
 		letter-spacing: 0;
 		text-transform: uppercase;
@@ -169,7 +169,7 @@
 
 	li li {
 		margin-left: 15px;
-		border-left: 1px solid #30372f;
+		border-left: 1px solid var(--edge);
 		padding-left: 10px;
 	}
 
@@ -194,7 +194,7 @@
 	}
 
 	.root {
-		color: #f0ecdc;
+		color: var(--text);
 		font-weight: 700;
 	}
 
@@ -235,7 +235,7 @@
 		height: 22px;
 		border: 0;
 		background: transparent;
-		color: #8ecf9f;
+		color: var(--accent);
 		padding: 0;
 		font: inherit;
 		font-size: 0.85rem;
@@ -249,8 +249,8 @@
 
 	button.twist:hover,
 	button.twist:focus-visible {
-		color: #f0ecdc;
-		outline: 1px solid #8ecf9f;
+		color: var(--text);
+		outline: 1px solid var(--accent);
 		outline-offset: 1px;
 	}
 
@@ -273,7 +273,7 @@
 
 	.icon[data-kind="root"],
 	.icon[data-kind="bucket"] {
-		border-color: #8ecf9f;
+		border-color: var(--accent);
 	}
 
 	.icon[data-kind="folder"] {
@@ -288,19 +288,19 @@
 		height: 4px;
 		border: 1px solid #d2b56f;
 		border-bottom: 0;
-		background: #151914;
+		background: var(--panel);
 	}
 
 	.icon[data-kind="collection"] {
 		width: 14px;
 		height: 14px;
-		border-color: #8ecf9f;
+		border-color: var(--accent);
 		background: #101d16;
 	}
 
 	.icon[data-kind="collection"]::before {
 		inset: 3px;
-		border: 1px solid #8ecf9f;
+		border: 1px solid var(--accent);
 	}
 
 	.icon[data-kind="collection"]::after {
@@ -308,8 +308,11 @@
 		left: -4px;
 		width: 2px;
 		height: 2px;
-		background: #8ecf9f;
-		box-shadow: 16px 0 0 #8ecf9f, 8px -6px 0 #8ecf9f, 8px 6px 0 #8ecf9f;
+		background: var(--accent);
+		box-shadow:
+			16px 0 0 var(--accent),
+			8px -6px 0 var(--accent),
+			8px 6px 0 var(--accent);
 	}
 
 	.icon[data-kind="recycle"] {
@@ -324,7 +327,7 @@
 		width: 16px;
 		height: 2px;
 		border: 1px solid #d48670;
-		background: #151914;
+		background: var(--panel);
 	}
 
 	.icon[data-kind="recycle"]::after {
@@ -366,15 +369,18 @@
 	}
 
 	.name {
-		overflow-wrap: anywhere;
+		min-width: 0;
 		color: inherit;
+		/* break-word wraps at spaces first (so "Production SSH" never splits
+		   mid-word like "Productio n"); only an unbreakable token breaks. */
+		overflow-wrap: break-word;
 		text-transform: none;
 	}
 
 	.count {
-		border: 1px solid #30372f;
+		border: 1px solid var(--edge);
 		padding: 1px 6px;
-		color: #8ecf9f;
+		color: var(--accent);
 		font-size: 0.68rem;
 	}
 
@@ -387,9 +393,9 @@
 
 	.action,
 	.delta {
-		border: 1px solid #30372f;
+		border: 1px solid var(--edge);
 		padding: 1px 6px;
-		color: #c7c9bd;
+		color: var(--text-dim);
 		font-size: 0.64rem;
 		line-height: 1.25;
 		text-transform: uppercase;
@@ -401,7 +407,7 @@
 	}
 
 	.delta[data-delta="new-in-keepass"] {
-		border-color: #8ecf9f;
+		border-color: var(--accent);
 		color: #9ff0ba;
 	}
 
@@ -421,7 +427,7 @@
 	}
 
 	.action[data-action="create"] {
-		border-color: #8ecf9f;
+		border-color: var(--accent);
 		background: #112016;
 		color: #9ff0ba;
 	}

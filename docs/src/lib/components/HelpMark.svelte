@@ -25,20 +25,19 @@
 		place-items: center;
 		width: 1.25rem;
 		height: 1.25rem;
-		border: 1px solid #667267;
+		border: 1px solid var(--edge-strong);
 		background: transparent;
-		color: #d9ded2;
+		color: var(--text-dim);
 		font: inherit;
-		font-size: 0.78rem;
+		font-size: var(--fs-small);
 		line-height: 1;
 		cursor: help;
 	}
 
 	.help:hover,
 	.help:focus-visible {
-		border-color: #8ecf9f;
-		color: #8ecf9f;
-		outline: none;
+		border-color: var(--accent);
+		color: var(--accent);
 	}
 
 	.popover {
@@ -48,11 +47,11 @@
 		right: 0;
 		display: none;
 		width: min(250px, 78vw);
-		border: 1px solid #4b594d;
-		background: #111411;
+		border: 1px solid var(--edge-strong);
+		background: var(--bg);
 		padding: 10px;
-		color: #f0ecdc;
-		font-size: 0.78rem;
+		color: var(--text);
+		font-size: var(--fs-small);
 		line-height: 1.4;
 		text-transform: none;
 		box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
@@ -66,13 +65,12 @@
 
 	a {
 		width: fit-content;
-		color: #8ecf9f;
+		color: var(--accent);
 		text-decoration: none;
 	}
 
 	a:hover,
 	a:focus-visible {
 		text-decoration: underline;
-		outline: none;
 	}
 </style>
