@@ -1,0 +1,176 @@
+{
+	"name": "KeePass database",
+	"keepass": [
+		{
+			"id": "root-admin",
+			"name": "Root Admin",
+			"group": null,
+			"tags": ["admin"],
+			"keepassRevision": "root-admin-kp-1",
+			"attachments": 1
+		},
+		{
+			"id": "stripe",
+			"name": "Stripe",
+			"group": "Internet/Banking",
+			"tags": ["finance"],
+			"keepassRevision": "stripe-kp-1",
+			"attachments": 2
+		},
+		{
+			"id": "payroll",
+			"name": "Payroll",
+			"group": "Internet/Banking",
+			"tags": ["finance", "hr"],
+			"keepassRevision": "payroll-kp-2"
+		},
+		{
+			"id": "github",
+			"name": "GitHub",
+			"group": "Work/Engineering",
+			"tags": ["dev"],
+			"keepassRevision": "github-kp-2",
+			"passkey": true
+		},
+		{
+			"id": "production-ssh",
+			"name": "Production SSH",
+			"group": "Work/Servers",
+			"tags": ["dev", "ops"],
+			"keepassRevision": "production-ssh-kp-1",
+			"attachments": 1
+		},
+		{
+			"id": "router",
+			"name": "Router",
+			"group": "Work/Servers",
+			"tags": ["ops"],
+			"keepassRevision": "router-kp-1"
+		},
+		{
+			"id": "shared-vpn",
+			"name": "Shared VPN",
+			"group": "Work/Shared",
+			"tags": ["ops"],
+			"keepassRevision": "shared-vpn-kp-2"
+		},
+		{
+			"id": "deprecated-vpn",
+			"name": "Deprecated VPN",
+			"group": "Work/Shared",
+			"tags": ["legacy", "ops"],
+			"keepassRevision": "deprecated-vpn-kp-1"
+		},
+		{
+			"id": "archive-box",
+			"name": "Archive Box",
+			"group": "Archive/2021",
+			"tags": ["legacy"],
+			"keepassRevision": "archive-box-kp-1",
+			"expired": true
+		},
+		{
+			"id": "retired-jira",
+			"name": "Retired Jira",
+			"group": "Recycle Bin/Old",
+			"tags": ["legacy"],
+			"keepassRevision": "retired-jira-kp-2",
+			"recycle": true
+		},
+		{
+			"id": "old-saas",
+			"name": "Old SaaS",
+			"group": "Recycle Bin/Old",
+			"tags": ["legacy"],
+			"keepassRevision": "old-saas-kp-1",
+			"recycle": true
+		}
+	],
+	"bitwarden": [
+		{
+			"id": "bw-stripe",
+			"kp2bwId": "stripe",
+			"name": "Stripe",
+			"group": "Internet/Banking",
+			"syncedKeePassRevision": "stripe-kp-1",
+			"syncedBitwardenRevision": "stripe-bw-1",
+			"currentBitwardenRevision": "stripe-bw-1",
+			"attachments": 2
+		},
+		{
+			"id": "bw-payroll",
+			"kp2bwId": "payroll",
+			"name": "Payroll",
+			"group": "Internet/Banking",
+			"syncedKeePassRevision": "payroll-kp-1",
+			"syncedBitwardenRevision": "payroll-bw-1",
+			"currentBitwardenRevision": "payroll-bw-1"
+		},
+		{
+			"id": "bw-github",
+			"kp2bwId": "github",
+			"name": "GitHub",
+			"group": "Work/Engineering",
+			"syncedKeePassRevision": "github-kp-1",
+			"syncedBitwardenRevision": "github-bw-1",
+			"currentBitwardenRevision": "github-bw-2",
+			"passkey": true
+		},
+		{
+			"id": "bw-production-ssh",
+			"kp2bwId": "production-ssh",
+			"name": "Production SSH",
+			"group": "Work/Servers",
+			"syncedKeePassRevision": "production-ssh-kp-1",
+			"syncedBitwardenRevision": "production-ssh-bw-1",
+			"currentBitwardenRevision": "production-ssh-bw-2",
+			"attachments": 1
+		},
+		{
+			"id": "bw-router",
+			"kp2bwId": "router",
+			"name": "Router",
+			"group": "Work/Servers",
+			"syncedKeePassRevision": "router-kp-1",
+			"syncedBitwardenRevision": "router-bw-1",
+			"currentBitwardenRevision": "router-bw-1"
+		},
+		{
+			"id": "bw-shared-vpn",
+			"kp2bwId": "shared-vpn",
+			"name": "Shared VPN",
+			"group": "Work/Shared",
+			"syncedKeePassRevision": "shared-vpn-kp-1",
+			"syncedBitwardenRevision": "shared-vpn-bw-1",
+			"currentBitwardenRevision": "shared-vpn-bw-1"
+		},
+		{
+			"id": "bw-deprecated-vpn",
+			"kp2bwId": "deprecated-vpn",
+			"name": "Deprecated VPN",
+			"group": "Recycle Bin/Old",
+			"syncedKeePassRevision": "deprecated-vpn-kp-1",
+			"syncedBitwardenRevision": "deprecated-vpn-bw-1",
+			"currentBitwardenRevision": "deprecated-vpn-bw-2",
+			"recycle": true
+		},
+		{
+			"id": "bw-archive-box",
+			"kp2bwId": "archive-box",
+			"name": "Archive Box",
+			"group": "Archive/2021",
+			"syncedKeePassRevision": "archive-box-kp-1",
+			"syncedBitwardenRevision": "archive-box-bw-1",
+			"currentBitwardenRevision": "archive-box-bw-1"
+		},
+		{
+			"id": "bw-retired-jira",
+			"kp2bwId": "retired-jira",
+			"name": "Retired Jira",
+			"group": "Work/Shared",
+			"syncedKeePassRevision": "retired-jira-kp-1",
+			"syncedBitwardenRevision": "retired-jira-bw-1",
+			"currentBitwardenRevision": "retired-jira-bw-1"
+		}
+	]
+}

@@ -210,7 +210,7 @@ See [TROUBLESHOOTING].
     to a `.txt` file attachment instead of dropping it, so you don't lose data. This applies to long notes as well as
     custom fields.
 
-["🧪 Test this PR"]: https://github.com/kjanat/kp2bw/pull/25#issuecomment-4661427123 "Example"
+["🧪 Test this PR"]: https://github.com/kjanat/kp2bw/pull/34#issuecomment-4763225590 "Example"
 [Bitwarden CLI]: https://bitwarden.com/help/cli/
 [TROUBLESHOOTING]: ./TROUBLESHOOTING.md
 [`.env.example`]: ./.env.example

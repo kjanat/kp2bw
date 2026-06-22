@@ -1,0 +1,8 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+	<title>
+		kp2bw
+	</title>
+	<rect width="64" height="64" fill="#111411" />
+	<rect x="9" y="9" width="46" height="46" fill="none" stroke="#8ecf9f" stroke-width="4" />
+	<path d="M22 18v28h6V35l10 11h8L33 32l12-14h-8L28 29V18z" fill="#eee9da" />
+</svg>
