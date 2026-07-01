@@ -10,7 +10,7 @@ jobs:
   autofix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
       - uses: oven-sh/setup-bun@v2
       - uses: astral-sh/setup-uv@v8.2.0
       - uses: kjanat/runner@master

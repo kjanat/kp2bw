@@ -7,7 +7,7 @@ jobs:
     environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
       - uses: kjanat/runner@master
       - uses: oven-sh/setup-bun@v2
       - run: runner --dir=docs install build

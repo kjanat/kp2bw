@@ -13,7 +13,7 @@ jobs:
     permissions: { contents: read }
     outputs: { matrix: "${{ steps.pin.outputs.matrix }}" }
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
         with: { persist-credentials: false }
       - name: Resolve pinned @bitwarden/cli version
         id: pin
@@ -44,7 +44,7 @@ jobs:
       KP2BW_SNAPSHOT_GOLDEN: ${{ !matrix.experimental }}
     strategy: { fail-fast: false, matrix: "${{ fromJson(needs.config.outputs.matrix) }}" }
     steps:
-      - uses: actions/checkout@v6.0.3
+      - uses: actions/checkout@v7.0.0
         with: { persist-credentials: false }
 
       - name: Build Vaultwarden image
