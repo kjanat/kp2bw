@@ -19,7 +19,7 @@ jobs:
         KP2BW_KEEPASS_PASSWORD=kppass KP2BW_BITWARDEN_PASSWORD=bwpass {cmd} vault.kdbx -y
     steps:
       - name: Check out PR comment script
-        uses: actions/checkout@v6.0.3
+        uses: actions/checkout@v7.0.0
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           sparse-checkout: scripts/pr-comment.mjs
