@@ -24,7 +24,7 @@
 		"@typescript/native-preview": "^7.0.0-dev",
 		"dprint": "^0.54.0",
 		"runner-run": "catalog:",
-		"tombi": "^1.1.4",
+		"tombi": "^1.1.5",
 		"typescript": "^6.0.3"
 	},
 	"catalog": {
