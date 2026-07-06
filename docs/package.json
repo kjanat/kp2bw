@@ -19,7 +19,7 @@
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.69.1",
 		"@sveltejs/vite-plugin-svelte": "^7.1.4",
-		"@types/node": "^24.13.2",
+		"@types/node": "^26.0.1",
 		"@vitest/browser-playwright": "^4.1.10",
 		"eslint": "^10.6.0",
 		"eslint-plugin-svelte": "^3.20.0",
