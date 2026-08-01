@@ -10,11 +10,11 @@ jobs:
   autofix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
       - uses: oven-sh/setup-bun@v2
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v9.0.0
       - uses: kjanat/runner@master
-      - uses: kjanat/install-dprint@v1
+      - uses: kjanat/install-dprint@v2
       - run: runner install --frozen --keep-going fmt:ci ruff:check:fix
 
       - if: ${{ github.event_name != 'pull_request' }}

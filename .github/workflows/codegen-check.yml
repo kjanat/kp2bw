@@ -10,8 +10,8 @@ jobs:
     permissions: { contents: read }
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7.0.0
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v9.0.0
 
       - name: Regenerate _bw_api_types.py from spec
         run: bash scripts/generate-bw-types.sh
