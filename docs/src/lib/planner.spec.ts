@@ -268,6 +268,14 @@ describe('planner', () => {
 		).toContain('--skip-expired');
 	});
 
+	it('adds --totp-pps only when the Pleasant Password Server source is picked', () => {
+		expect(defaultPlannerState.totpPps).toBe(false);
+		expect(commandForState(defaultPlannerState)).not.toContain('--totp-pps');
+		expect(
+			commandForState({ ...defaultPlannerState, totpPps: true }),
+		).toContain('--totp-pps');
+	});
+
 	it('ends option parsing with -- so a trailing tag filter cannot swallow the file', () => {
 		// -t is nargs="+"; without -- argparse would read vault.kdbx as a tag.
 		const state = { ...defaultPlannerState, tagInput: 'ops' };

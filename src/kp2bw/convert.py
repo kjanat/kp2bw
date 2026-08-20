@@ -244,6 +244,7 @@ class Converter:
     _create_folders: bool
     _uri_match: UriMatchValue
     _interpret_uri_syntax: bool
+    _totp_pps: bool
     _kp_ref_entries: list[Entry]
     _entries: dict[str, EntryValue]
     _member_reference_resolving_dict: dict[str, str]
@@ -272,6 +273,7 @@ class Converter:
         create_folders: bool = True,
         uri_match: UriMatchValue = None,
         interpret_uri_syntax: bool = True,
+        totp_pps: bool = False,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._keepass_file_path = keepass_file_path
@@ -292,6 +294,7 @@ class Converter:
         self._create_folders = create_folders
         self._uri_match = uri_match
         self._interpret_uri_syntax = interpret_uri_syntax
+        self._totp_pps = totp_pps
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -488,7 +491,10 @@ class Converter:
         # custom fields.  This decides which fields are folded into login.totp
         # (and must be dropped here) and which secrets must remain hidden.
         otp_result = resolve_otp(
-            entry.otp, custom_props, entry_label=entry.title or "_untitled"
+            entry.otp,
+            custom_props,
+            entry_label=entry.title or "_untitled",
+            totp_pps=self._totp_pps,
         )
         for warning in otp_result.warnings:
             logger.warning(f"{entry.title or '_untitled'}: {warning}")

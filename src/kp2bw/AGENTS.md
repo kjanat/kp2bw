@@ -11,6 +11,8 @@ src/kp2bw/
 ├── cli.py              # CLI parsing, prompts, env handling, run mode selection
 ├── convert.py          # Conversion orchestrator and entry transformation pipeline
 ├── bw_serve.py         # bw serve process lifecycle + HTTP CRUD + attachment upload
+├── otp.py              # KeePass/PPS OTP custom fields -> Bitwarden login.totp (pure, no I/O)
+├── uri_mapping.py      # KeePass URL syntax -> Bitwarden login URIs + match modes
 ├── bw_types.py         # Hand-written TypedDict types (supplements generated types)
 ├── _bw_api_types.py    # Auto-generated from specs/vault-management-api.json (DO NOT EDIT)
 ├── _console.py         # Shared Rich Console instance (stderr)
@@ -28,6 +30,7 @@ src/kp2bw/
 | Tune dedup/idempotency | `src/kp2bw/bw_serve.py`        | Existing item index + batch create behavior         |
 | Attachment behavior    | `src/kp2bw/bw_serve.py`        | Async upload path and multipart logic               |
 | Map KeePass fields     | `src/kp2bw/convert.py`         | Entry/custom field/TOTP/passkey mapping             |
+| OTP field resolution   | `src/kp2bw/otp.py`             | Field-name schemes, decoding, `otpauth://` emission |
 | API type definitions   | `src/kp2bw/bw_types.py`        | Hand-written TypedDicts supplementing codegen       |
 | Regenerate API types   | `scripts/generate-bw-types.sh` | Run after editing `specs/vault-management-api.json` |
 | Error contract         | `src/kp2bw/exceptions.py`      | Keep custom exception taxonomy central              |
@@ -106,6 +109,22 @@ src/kp2bw/
   `Created`/`Modified` timestamps are **not** migrated: Bitwarden manages its own creation/revision dates and the API
   cannot backdate them (a client-supplied `creationDate` is ignored on create and rejected on update), so the originals
   had no native home and were dropped rather than clutter every item.
+- OTP lives in `otp.py`, which is pure: `resolve_otp()` takes `entry.otp` plus the raw custom properties and returns an
+  `OtpMigration` (the `login.totp` value, the keys to drop, the keys to keep **hidden**, and warning strings the caller
+  logs). Precedence: a non-blank `entry.otp` URI wins outright and the secret fields are then kept hidden rather than
+  consumed; otherwise the TOTP fields are read. A default-config Base32 secret is emitted as the bare canonical secret,
+  anything else (other encoding, non-default digits/period/algorithm) as a self-describing `otpauth://` URI. HOTP has no
+  Bitwarden target: its secret is warned about and kept hidden.
+- Field *names* are a `_TotpScheme` (secret decoders in priority order, the Base32 key, length/period keys, optional
+  algorithm key), selected per call by `resolve_otp(..., totp_pps=...)`. The KeePass scheme reads
+  `TimeOtp-Secret-Base32`/`-Hex`/`-Base64`/`TimeOtp-Secret` plus `TimeOtp-Length`/`-Period`/`-Algorithm`; the Pleasant
+  Password Server scheme (`--totp-pps` / `KP2BW_TOTP_PPS` / `Converter(totp_pps=...)`, issue #45) reads `TOTPSecret`
+  (always Base32) plus `TOTPDigits`/`TOTPPeriod` and has no algorithm key, so `DEFAULT_ALGORITHM` (SHA-1) applies. The
+  schemes **replace** each other for reading: only the active one is decoded and consumed. Hiding is not scheme-scoped
+  -- `_ALL_SECRET_KEYS` spans **both** schemes plus HOTP, so a `TimeOtp-Secret-*` field under `--totp-pps` (or a
+  `TOTPSecret` field without it) is carried over as a **hidden** field instead of a visible one, upholding the module
+  invariant that no OTP secret is ever written in the clear. Config keys (`*-Length`/`Digits`, `*-Period`,
+  `TimeOtp-Algorithm`) hold no secret, so the inactive scheme's stay ordinary custom fields. Tests: `tests/otp_test.py`.
 - Dedup is org-scoped when `--bitwarden-org` is set and collection-scoped when a fixed `--bitwarden-collection` is
   given: `_build_dedup_index()` / `list_items()` pass `organization_id` / `collection_id`. Personal vault (both `None`)
   indexes all visible items.

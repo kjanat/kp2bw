@@ -8,6 +8,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`--totp-pps` (env `KP2BW_TOTP_PPS`) -- import TOTP from a Pleasant Password Server export** (issue #45, reported by
+  [DransfeldSK](https://github.com/DransfeldSK)). PPS writes TOTP into `TOTPSecret`, `TOTPDigits` and `TOTPPeriod`
+  instead of the KeePass `TimeOtp-Secret-Base32`, `TimeOtp-Length` and `TimeOtp-Period` fields, so those entries
+  migrated without a `login.totp`. The flag reads the PPS names instead: its secret is always Base32 and its algorithm
+  always SHA-1, matching what the PPS interface can produce. Only the selected naming is read, so a mixed database
+  migrates one of the two: the unread scheme's *secret* field is still carried over as a hidden custom field (never
+  visible), while its digit-count and period fields stay ordinary custom fields. An `otpauth://` URI in the entry's own
+  `otp` field still wins, and HOTP handling is unchanged.
+
 ### Fixed
 
 - **A wrong KeePass password now prints one line instead of two tracebacks** (issue #47, reported by

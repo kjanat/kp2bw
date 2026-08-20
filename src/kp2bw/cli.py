@@ -291,6 +291,19 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--totp-pps",
+        dest="totp_pps",
+        help=(
+            "Read TOTP from Pleasant Password Server's TOTPSecret/TOTPDigits/"
+            "TOTPPeriod custom fields instead of the KeePass TimeOtp-* ones. "
+            "PPS secrets are always Base32 and SHA-1. The two namings do not "
+            "coexist: with this flag TimeOtp-* fields stay ordinary custom "
+            "fields (env: KP2BW_TOTP_PPS)"
+        ),
+        action=BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
         "--interpret-uri-syntax",
         dest="interpret_uri_syntax",
         help=(
@@ -775,6 +788,7 @@ def main() -> None:
         interpret_uri_syntax = _resolve_bool_option(
             args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
         )
+        totp_pps = _resolve_bool_option(args.totp_pps, "KP2BW_TOTP_PPS", default=False)
         uri_match: UriMatchValue = parse_match_name(
             _with_env(args.uri_match, "KP2BW_URI_MATCH") or "default"
         )
@@ -938,6 +952,7 @@ def main() -> None:
         create_folders=create_folders,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,
+        totp_pps=totp_pps,
     )
     try:
         failures = c.convert()

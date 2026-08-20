@@ -64,6 +64,9 @@ export type PlannerState = {
 	/* Org imports default to collections only; opt in to also build the
 	   personal folder tree (kp2bw --folder). Ignored for personal targets. */
 	orgFolders: boolean;
+	/** Read TOTP from Pleasant Password Server's TOTPSecret/TOTPDigits/TOTPPeriod
+	 *  fields instead of the KeePass TimeOtp-* ones (kp2bw --totp-pps). */
+	totpPps: boolean;
 	rerunMode: RerunMode;
 };
 
@@ -121,6 +124,7 @@ export const defaultPlannerState: PlannerState = {
 	includeExpired: true,
 	includeRecycleBin: false,
 	orgFolders: false,
+	totpPps: false,
 	rerunMode: 'safe',
 };
 
@@ -175,6 +179,7 @@ export function sanitizePlannerState(raw: unknown): PlannerState {
 		includeExpired: bool('includeExpired', base.includeExpired),
 		includeRecycleBin: bool('includeRecycleBin', base.includeRecycleBin),
 		orgFolders: bool('orgFolders', base.orgFolders),
+		totpPps: bool('totpPps', base.totpPps),
 		rerunMode: oneOf('rerunMode', RERUN_MODES, base.rerunMode),
 	};
 }
@@ -425,6 +430,7 @@ export function commandSegmentsForState(state: PlannerState): string[] {
 	if (tags.length > 0) segments.push(`-t ${tags.map(quoteArg).join(' ')}`);
 	if (!state.includeExpired) segments.push('--skip-expired');
 	if (state.includeRecycleBin) segments.push('--include-recycle-bin');
+	if (state.totpPps) segments.push('--totp-pps');
 	if (state.rerunMode === 'no-update') segments.push('--no-update');
 	if (state.rerunMode === 'keepass-wins') segments.push('--force-update');
 
