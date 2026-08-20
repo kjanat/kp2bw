@@ -8,6 +8,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Migrating into an organization works again** (issue #43, PR #44 by [JJBlue](https://github.com/JJBlue), reported and
+  confirmed by [DransfeldSK](https://github.com/DransfeldSK)). Creating an org collection sent `organizationId` only in
+  the JSON body, so `bw serve` rejected every `POST /object/org-collection` with `organizationid option is required` and
+  any `--bitwarden-org` run aborted. The vault management API declares `organizationId` as a required *query* parameter
+  on that endpoint; it is now sent there as well.
+
 ## [3.7.1] - 2026-07-10
 
 ### Added

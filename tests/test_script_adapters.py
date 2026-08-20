@@ -35,6 +35,10 @@ def test_bw_serve_batch_script() -> None:
     _run_script_main("bw_serve_batch_test.py")
 
 
+def test_bw_serve_org_collection_script() -> None:
+    _run_script_main("bw_serve_org_collection_test.py")
+
+
 def test_bw_serve_timeout_script() -> None:
     _run_script_main("bw_serve_timeout_test.py")
 
