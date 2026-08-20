@@ -43,6 +43,12 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.0.1
       - run: uv sync
+      - name: Stamp build revision
+        run: |
+          sha="$(git rev-parse HEAD)"
+          printf '%s\n\n%s\n' \
+            '"""Build-time metadata; the release workflow stamps BUILD_SHA before ``uv build``."""' \
+            "BUILD_SHA: str | None = \"$sha\"" > src/kp2bw/_build_info.py
       - run: uv build --no-sources
 
       # Check that basic features work and we didn't miss to include crucial files

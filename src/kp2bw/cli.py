@@ -21,6 +21,7 @@ from .bw_serve import (
     ensure_bw_available,
 )
 from .convert import Converter, collect_keepass_uris
+from .doctor import collect_report, redact_report, render_report
 from .exceptions import BitwardenClientError, ConversionError
 from .uri_mapping import (
     UriMatchValue,
@@ -131,6 +132,27 @@ def _argparser() -> MyArgParser:
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
+    )
+
+    parser.add_argument(
+        "--doctor",
+        dest="doctor",
+        action="store_true",
+        help=(
+            "print environment diagnostics (kp2bw/bw/server versions, install "
+            "method, .env detection) and exit; exits non-zero when the bw CLI "
+            "is unusable"
+        ),
+    )
+
+    parser.add_argument(
+        "--redact",
+        dest="redact",
+        action="store_true",
+        help=(
+            "with --doctor: mask the server URL and home-anchored paths so the "
+            "report is safe to paste in a public issue"
+        ),
     )
 
     parser.add_argument(
@@ -726,6 +748,14 @@ def main() -> None:
     dotenv_path = _load_dotenv()
 
     args: Namespace = _argparser().parse_args()
+
+    if args.doctor:
+        report = collect_report()
+        if args.redact:
+            report = redact_report(report)
+        for line in render_report(report):
+            console.print(line, markup=False, highlight=False)
+        sys.exit(0 if report.healthy else 1)
 
     # string options: CLI > env > None/default
     args.keepass_file = _with_env(args.keepass_file, "KP2BW_KEEPASS_FILE")

@@ -120,6 +120,8 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `-v, --verbose`                        | Verbose output                                                                                                                                                                                      | `KP2BW_VERBOSE`                       |
 | `-d, --debug`                          | Debug output — includes third-party library logs                                                                                                                                                    | `KP2BW_DEBUG`                         |
 | `-V, --version`                        | Print the installed `kp2bw` version and exit                                                                                                                                                        | -                                     |
+| `--doctor`                             | Print environment diagnostics (kp2bw/bw/server versions, install method, `.env` detection) and exit; non-zero exit when the bw CLI is unusable                                                      | -                                     |
+| `--redact`                             | With `--doctor`: mask the server URL and home-anchored paths so the report is safe to paste in a public issue                                                                                       | -                                     |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 

@@ -10,6 +10,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`--doctor` (with optional `--redact`) -- one-shot environment diagnostics.** Prints kp2bw's version, source revision
+  (baked into release wheels, or read from a VCS install / git checkout), install method (pip/uv/pipx, editable), Python
+  runtime, whether a `.env` was picked up, and the Bitwarden CLI's path, version, `bw serve` support and configured
+  server, including the server product and version behind it (Bitwarden vs Vaultwarden). Exits non-zero when the bw CLI
+  is unusable. `--redact` masks the server URL and home-anchored paths so the report is safe to paste in a public issue.
+  Diagnosing #53 required digging all of this out of CI logs by hand; kp2bw and the e2e harness now also log these
+  versions at run start.
+
 - **`--totp-pps` (env `KP2BW_TOTP_PPS`) -- import TOTP from a Pleasant Password Server export** (issue #45, reported by
   [DransfeldSK](https://github.com/DransfeldSK)). PPS writes TOTP into `TOTPSecret`, `TOTPDigits` and `TOTPPeriod`
   instead of the KeePass `TimeOtp-Secret-Base32`, `TimeOtp-Length` and `TimeOtp-Period` fields, so those entries

@@ -95,6 +95,10 @@ def test_convert_keepass_open_script() -> None:
     _run_script_main("convert_keepass_open_test.py")
 
 
+def test_doctor_script() -> None:
+    _run_script_main("doctor_test.py")
+
+
 def test_windows_bw_cmd_smoke_script() -> None:
     if os.name != "nt":
         pytest.skip("windows bw .cmd smoke runs on Windows only")
