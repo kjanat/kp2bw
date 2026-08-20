@@ -1,4 +1,5 @@
 from datetime import datetime
+from logging import Logger
 
 from lxml.etree import Element
 from lxml.objectify import ObjectifiedElement
@@ -6,6 +7,9 @@ from pykeepass.attachment import Attachment
 from pykeepass.baseelement import BaseElement
 from pykeepass.group import Group
 from pykeepass.pykeepass import PyKeePass
+
+logger: Logger
+reserved_keys: list[str]
 
 class Entry(BaseElement):
     def __init__(
@@ -26,6 +30,12 @@ class Entry(BaseElement):
         element: Element | ObjectifiedElement | None = None,
         kp: PyKeePass | None = None,
     ) -> None: ...
+    def _get_string_field(self, key: str) -> str | None: ...
+    def _set_string_field(
+        self, key: str, value: str, protected: bool | None = None
+    ) -> None: ...
+    def _get_string_field_keys(self, exclude_reserved: bool = False) -> list[str]: ...
+    def _is_property_protected(self, key: str) -> bool: ...
     @property
     def index(self) -> int: ...
     def reindex(self, new_index: int) -> None: ...

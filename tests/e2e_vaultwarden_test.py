@@ -26,7 +26,7 @@ from _snapshot import (
     normalize_vault,
     parse_object,
 )
-from pykeepass import Entry, PyKeePass, create_database
+from pykeepass import PyKeePass, create_database
 
 from kp2bw.uri_mapping import is_url_attribute_key
 
@@ -380,12 +380,9 @@ def _update_keepass_snapshot(path: Path, password: str) -> None:
     """
     kp = PyKeePass(str(path), password=password)
 
-    # find_entries(first=True) is typed list|Entry|None. Fail fast with a clear
-    # message if the snapshot's Example entry is missing, then narrow to Entry.
-    found = kp.find_entries(title="Example", first=True)
-    if found is None:
+    example = kp.find_entries(title="Example", first=True)
+    if example is None:
         raise AssertionError("Fixture contract broken: 'Example' entry not found")
-    example = cast(Entry, found)
     example.notes = "updated recovery keys"
     example.password = "demo-pass-v2"
 
@@ -409,10 +406,9 @@ LONG_NOTE_V2 = "ROTATED-SECRET-" * 1000  # ~15k chars, comfortably over the limi
 def _edit_big_note_snapshot(path: Path, password: str, new_notes: str) -> None:
     """Replace the Big Note entry's long note to exercise attachment refresh."""
     kp = PyKeePass(str(path), password=password)
-    found = kp.find_entries(title="Big Note", first=True)
-    if found is None:
+    big = kp.find_entries(title="Big Note", first=True)
+    if big is None:
         raise AssertionError("Fixture contract broken: 'Big Note' entry not found")
-    big = cast(Entry, found)
     big.notes = new_notes
     kp.save()
 
