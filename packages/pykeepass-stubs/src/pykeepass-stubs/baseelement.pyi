@@ -1,10 +1,14 @@
 import uuid as _uuid
 from datetime import datetime
-from typing import Any, Literal, overload
+from typing import Any, Literal, TypeAlias, overload
 
 from lxml.etree import Element
+from pykeepass.attachment import Attachment
+from pykeepass.entry import Entry
 from pykeepass.group import Group
 from pykeepass.pykeepass import PyKeePass
+
+_CastResult: TypeAlias = Entry | Group | Attachment
 
 class BaseElement:
     _element: Element
@@ -23,8 +27,17 @@ class BaseElement:
         self,
         xpath: str,
         *,
+        first: Literal[False] = False,
+        cast: Literal[False] = False,
+        **kwargs: Any,
+    ) -> list[Element]: ...
+    @overload
+    def _xpath(
+        self,
+        xpath: str,
+        *,
         first: Literal[True],
-        cast: bool = ...,
+        cast: Literal[False] = False,
         **kwargs: Any,
     ) -> Element | None: ...
     @overload
@@ -32,11 +45,19 @@ class BaseElement:
         self,
         xpath: str,
         *,
-        first: Literal[False] = ...,
-        cast: bool = ...,
+        first: Literal[False] = False,
+        cast: Literal[True],
         **kwargs: Any,
-    ) -> list[Element]: ...
-    def _xpath(self, xpath: str, **kwargs: Any) -> list[Element] | Element | None: ...
+    ) -> list[_CastResult]: ...
+    @overload
+    def _xpath(
+        self,
+        xpath: str,
+        *,
+        first: Literal[True],
+        cast: Literal[True],
+        **kwargs: Any,
+    ) -> _CastResult | None: ...
     def _get_subelement_text(self, tag: str) -> str | None: ...
     def _set_subelement_text(self, tag: str, value: str) -> None: ...
     @property
@@ -51,13 +72,13 @@ class BaseElement:
     @property
     def icon(self) -> str | None: ...
     @icon.setter
-    def icon(self, value: str | None) -> None: ...
+    def icon(self, value: str) -> None: ...
     @property
     def _path(self) -> str: ...
     def _get_times_property(self, prop: str) -> datetime | None: ...
     def _set_times_property(self, prop: str, value: datetime) -> None: ...
     @property
-    def expires(self) -> bool: ...
+    def expires(self) -> bool | None: ...
     @expires.setter
     def expires(self, value: bool) -> None: ...
     @property

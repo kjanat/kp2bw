@@ -6,6 +6,7 @@
 		"lineWidth": 120,
 		"textWrap": "always",
 	},
+	"ruff": { "preview": true, "overrides": [{ "files": ["packages/**"], "preview": false }] },
 	"exec": {
 		"cwd": "${configDir}",
 		"commands": [{
