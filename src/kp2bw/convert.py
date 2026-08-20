@@ -9,6 +9,11 @@ from typing import Literal
 
 import yaml
 from pykeepass import Attachment, Entry, Group, PyKeePass
+from pykeepass.exceptions import (
+    CredentialsError,
+    HeaderChecksumError,
+    PayloadChecksumError,
+)
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -162,6 +167,29 @@ def _entry_url_inputs(entry: Entry) -> tuple[str, list[str], list[str]]:
     )
 
 
+def _open_keepass_database(
+    keepass_file_path: str,
+    keepass_password: str | None,
+    keepass_keyfile_path: str | None,
+) -> PyKeePass:
+    """Open a KeePass database, raising :class:`ConversionError` on unreadable input."""
+    try:
+        return PyKeePass(
+            filename=keepass_file_path,
+            password=keepass_password,
+            keyfile=keepass_keyfile_path,
+        )
+    except CredentialsError:
+        raise ConversionError(
+            f"Could not open KeePass database {keepass_file_path!r}: "
+            "wrong password or key file."
+        ) from None
+    except (HeaderChecksumError, PayloadChecksumError, OSError) as exc:
+        raise ConversionError(
+            f"Could not read KeePass database {keepass_file_path!r}: {exc}"
+        ) from None
+
+
 def collect_keepass_uris(
     keepass_file_path: str,
     keepass_password: str | None,
@@ -179,10 +207,8 @@ def collect_keepass_uris(
     including quote/wildcard transforms and dropped non-web schemes -- not the
     raw values.
     """
-    kp = PyKeePass(
-        filename=keepass_file_path,
-        password=keepass_password,
-        keyfile=keepass_keyfile_path,
+    kp = _open_keepass_database(
+        keepass_file_path, keepass_password, keepass_keyfile_path
     )
     uris: list[str] = []
     for entry in kp.entries:
@@ -678,10 +704,10 @@ class Converter:
     def _load_keepass_data(self) -> None:
         """Open the KeePass database and populate ``_entries`` with parsed items."""
         # aggregate entries
-        kp = PyKeePass(
-            filename=self._keepass_file_path,
-            password=self._keepass_password,
-            keyfile=self._keepass_keyfile_path,
+        kp = _open_keepass_database(
+            self._keepass_file_path,
+            self._keepass_password,
+            self._keepass_keyfile_path,
         )
 
         # reset data structures

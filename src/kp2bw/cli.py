@@ -844,7 +844,7 @@ def main() -> None:
                 uri_match=uri_match,
                 interpret_uri_syntax=interpret_uri_syntax,
             )
-        except (OSError, ValueError) as exc:
+        except (ConversionError, OSError, ValueError) as exc:
             _fail(exc)
         _print_uri_report(uris, "keepass")
         return

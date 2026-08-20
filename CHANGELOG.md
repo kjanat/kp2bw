@@ -10,6 +10,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A wrong KeePass password now prints one line instead of two tracebacks** (issue #47, reported by
+  [szotsaki](https://github.com/szotsaki)). Opening the database let `pykeepass`'s `CredentialsError` -- itself chained
+  onto `construct`'s `ChecksumError` -- escape to the top level. Opening now raises `ConversionError`, so the CLI
+  reports `Could not open KeePass database '<path>': wrong password or key file.` and exits non-zero. A missing,
+  unreadable, or non-KeePass file is reported the same way, on both the migration and the `--report-uris keepass` path.
+
 - **Migrating into an organization works again** (issue #43, PR #44 by [JJBlue](https://github.com/JJBlue), reported and
   confirmed by [DransfeldSK](https://github.com/DransfeldSK)). Creating an org collection sent `organizationId` only in
   the JSON body, so `bw serve` rejected every `POST /object/org-collection` with `organizationid option is required` and
