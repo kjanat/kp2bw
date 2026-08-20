@@ -9,6 +9,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-20
+
 ### Added
 
 - Stub coverage for runtime API the stubs previously omitted: `PyKeePass.payload`, the deprecated `find_entries_by_*`
