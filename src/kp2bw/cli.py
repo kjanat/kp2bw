@@ -1,6 +1,7 @@
 import getpass
 import logging
 import os
+import platform
 import sys
 from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from datetime import datetime
@@ -842,6 +843,11 @@ def main() -> None:
         logger.info(f"Loaded environment from {dotenv_path}")
     if log_path is not None:
         logger.info(f"Writing full debug log to {log_path}")
+    logger.log(
+        VERBOSE,
+        f"{__title__} {__version__} on Python {platform.python_version()} "
+        f"({sys.platform})",
+    )
 
     # --report-uris keepass reads only the KeePass database (no Bitwarden, no bw
     # CLI), so it short-circuits before the bw availability check.
