@@ -144,6 +144,19 @@
 							excluded by default.
 						</p>
 					</article>
+					<article id="totp-pps">
+						<h3>Pleasant Password Server TOTP</h3>
+						<p>
+							Adds <code>--totp-pps</code>. A KDBX exported from Pleasant
+							Password Server stores TOTP in <code>TOTPSecret</code>,
+							<code>TOTPDigits</code> and <code>TOTPPeriod</code> rather than
+							the KeePass <code>TimeOtp-*</code> fields, and its secret is
+							always Base32 with SHA-1. Only the selected naming is read, so a
+							database holding both migrates one of the two; the unread scheme's
+							secret field is still stored hidden rather than left visible,
+							while its digit and period fields stay ordinary custom fields.
+						</p>
+					</article>
 				</div>
 			</section>
 

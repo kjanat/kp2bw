@@ -110,6 +110,25 @@
 
 	<fieldset>
 		<legend>
+			OTP source <HelpMark
+				text="Pleasant Password Server exports TOTP under its own field names."
+				href="/docs#totp-pps"
+			/>
+		</legend>
+		<div class="choice">
+			<label>
+				<input type="checkbox" bind:checked={state.totpPps}>
+				Pleasant Password Server TOTP fields
+			</label>
+			<HelpMark
+				text="Reads TOTPSecret/TOTPDigits/TOTPPeriod instead of the KeePass TimeOtp-* fields (kp2bw --totp-pps). Leave off for a database written by KeePass or KeePassXC."
+				href="/docs#totp-pps"
+			/>
+		</div>
+	</fieldset>
+
+	<fieldset>
+		<legend>
 			Running again <HelpMark
 				text="Pick the situation you are in when this command hits an existing Bitwarden vault."
 				href="/docs#reruns"

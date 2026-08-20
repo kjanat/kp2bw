@@ -13,7 +13,7 @@ jobs:
     permissions: { contents: read }
     outputs: { matrix: "${{ steps.pin.outputs.matrix }}" }
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
         with: { persist-credentials: false }
       - name: Resolve pinned @bitwarden/cli version
         id: pin
@@ -44,7 +44,7 @@ jobs:
       KP2BW_SNAPSHOT_GOLDEN: ${{ !matrix.experimental }}
     strategy: { fail-fast: false, matrix: "${{ fromJson(needs.config.outputs.matrix) }}" }
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
         with: { persist-credentials: false }
 
       - name: Build Vaultwarden image
@@ -74,7 +74,7 @@ jobs:
           }
           Write-Host "Vaultwarden is healthy"
 
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v10.0.1
       - run: uv sync --frozen
 
       - name: Set up Bitwarden CLI (${{ matrix.bw-version }})

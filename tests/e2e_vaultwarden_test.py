@@ -3,9 +3,11 @@ import hashlib
 import json
 import logging
 import os
+import ssl
 import struct
 import subprocess
 import tempfile
+import urllib.request
 import zlib
 from pathlib import Path
 from typing import cast
@@ -496,6 +498,39 @@ def _run_migration(
     )
 
 
+def _bw_version(env: dict[str, str]) -> str:
+    """Return the ``bw`` CLI version, or ``unknown``."""
+    result = subprocess.run(
+        ["bw", "--version"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+    )
+    version = result.stdout.strip()
+    return version if result.returncode == 0 and version else "unknown"
+
+
+def _server_version(server_url: str, cert_path: Path) -> str:
+    """Return the server's name and version from ``/api/config``, or ``unknown``."""
+    context = ssl.create_default_context(cafile=str(cert_path))
+    try:
+        with urllib.request.urlopen(
+            f"{server_url}/api/config", context=context, timeout=10
+        ) as response:
+            config = cast(dict[str, object], json.loads(response.read()))
+    except (OSError, ValueError):
+        return "unknown"
+    server = config.get("server")
+    name = (
+        cast(dict[str, object], server).get("name")
+        if isinstance(server, dict)
+        else None
+    )
+    return f"{name or 'server'} {config.get('version') or 'unknown'}"
+
+
 def _assert_bw_serve_available(env: dict[str, str]) -> None:
     """Verify the bw CLI supports ``bw serve`` (required by the new transport)."""
     result = subprocess.run(
@@ -748,6 +783,8 @@ def main() -> None:
 
         logger.info("Checking bw serve availability")
         _assert_bw_serve_available(env)
+        logger.info(f"Using @bitwarden/cli {_bw_version(env)}")
+        logger.info(f"Using server {_server_version(server_url, cert_path)}")
         _ = _run(["bw", "config", "server", server_url], env=env)
 
         logger.info("Logging in to Bitwarden")

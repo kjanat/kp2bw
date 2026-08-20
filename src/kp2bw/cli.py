@@ -1,6 +1,7 @@
 import getpass
 import logging
 import os
+import platform
 import sys
 from argparse import ArgumentParser, BooleanOptionalAction, Namespace
 from datetime import datetime
@@ -20,6 +21,7 @@ from .bw_serve import (
     ensure_bw_available,
 )
 from .convert import Converter, collect_keepass_uris
+from .doctor import collect_report, redact_report, render_report
 from .exceptions import BitwardenClientError, ConversionError
 from .uri_mapping import (
     UriMatchValue,
@@ -130,6 +132,27 @@ def _argparser() -> MyArgParser:
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
+    )
+
+    parser.add_argument(
+        "--doctor",
+        dest="doctor",
+        action="store_true",
+        help=(
+            "print environment diagnostics (kp2bw/bw/server versions, install "
+            "method, .env detection) and exit; exits non-zero when the bw CLI "
+            "is unusable"
+        ),
+    )
+
+    parser.add_argument(
+        "--redact",
+        dest="redact",
+        action="store_true",
+        help=(
+            "with --doctor: mask the server URL and home-anchored paths so the "
+            "report is safe to paste in a public issue"
+        ),
     )
 
     parser.add_argument(
@@ -288,6 +311,19 @@ def _argparser() -> MyArgParser:
             "replicate KeePassXC's host-based matching regardless. Quoted-exact "
             "and wildcard URLs keep their own modes (env: KP2BW_URI_MATCH)"
         ),
+        default=None,
+    )
+    parser.add_argument(
+        "--totp-pps",
+        dest="totp_pps",
+        help=(
+            "Read TOTP from Pleasant Password Server's TOTPSecret/TOTPDigits/"
+            "TOTPPeriod custom fields instead of the KeePass TimeOtp-* ones. "
+            "PPS secrets are always Base32 and SHA-1. The two namings do not "
+            "coexist: with this flag TimeOtp-* fields stay ordinary custom "
+            "fields (env: KP2BW_TOTP_PPS)"
+        ),
+        action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
@@ -713,6 +749,14 @@ def main() -> None:
 
     args: Namespace = _argparser().parse_args()
 
+    if args.doctor:
+        report = collect_report()
+        if args.redact:
+            report = redact_report(report)
+        for line in render_report(report):
+            console.print(line, markup=False, highlight=False)
+        sys.exit(0 if report.healthy else 1)
+
     # string options: CLI > env > None/default
     args.keepass_file = _with_env(args.keepass_file, "KP2BW_KEEPASS_FILE")
     args.kp_pw = _with_env(args.kp_pw, "KP2BW_KEEPASS_PASSWORD")
@@ -775,6 +819,7 @@ def main() -> None:
         interpret_uri_syntax = _resolve_bool_option(
             args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
         )
+        totp_pps = _resolve_bool_option(args.totp_pps, "KP2BW_TOTP_PPS", default=False)
         uri_match: UriMatchValue = parse_match_name(
             _with_env(args.uri_match, "KP2BW_URI_MATCH") or "default"
         )
@@ -828,6 +873,11 @@ def main() -> None:
         logger.info(f"Loaded environment from {dotenv_path}")
     if log_path is not None:
         logger.info(f"Writing full debug log to {log_path}")
+    logger.log(
+        VERBOSE,
+        f"{__title__} {__version__} on Python {platform.python_version()} "
+        f"({sys.platform})",
+    )
 
     # --report-uris keepass reads only the KeePass database (no Bitwarden, no bw
     # CLI), so it short-circuits before the bw availability check.
@@ -844,7 +894,7 @@ def main() -> None:
                 uri_match=uri_match,
                 interpret_uri_syntax=interpret_uri_syntax,
             )
-        except (OSError, ValueError) as exc:
+        except (ConversionError, OSError, ValueError) as exc:
             _fail(exc)
         _print_uri_report(uris, "keepass")
         return
@@ -938,6 +988,7 @@ def main() -> None:
         create_folders=create_folders,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,
+        totp_pps=totp_pps,
     )
     try:
         failures = c.convert()

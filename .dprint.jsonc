@@ -1,5 +1,5 @@
-{ // git ls-remote https://github.com/kjanat/kjanat.git HEAD | awk '{print $1}' | xargs -r -I{} sed -i -E 's#(github\.com/kjanat/kjanat/raw/)[0-9a-f]{4,40}(/configs/dprint\.remote\.json)#\1{}\2#g' .dprint.jsonc
-	"extends": "https://github.com/kjanat/kjanat/raw/e5f1f67826482d79679c1eebc0e0221683b7107d/configs/dprint.remote.json",
+{ // git ls-remote https://github.com/kjanat/kjanat.git HEAD | awk '{print substr($1, 1, 8)}' | xargs -r -I{} sed -i -E 's#(github\.com/kjanat/kjanat/raw/)[0-9a-f]{4,40}(/configs/dprint\.remote\.json)#\1{}\2#g' .dprint.jsonc
+	"extends": "https://github.com/kjanat/kjanat/raw/ba61f5cb/configs/dprint.remote.json",
 	"dockerfile": { "associations": ["!*.ts"] },
 	"excludes": ["**/*fixtures*/**", "**/*snapshots*/**"],
 	"markdown": {

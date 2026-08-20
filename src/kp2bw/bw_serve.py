@@ -6,6 +6,7 @@ import copy
 import logging
 import ntpath
 import os
+import re
 import shutil
 import signal
 import socket
@@ -211,6 +212,24 @@ def ensure_bw_available() -> None:
     """
     if shutil.which("bw") is None:
         raise BitwardenClientError(BW_NOT_FOUND_MSG)
+
+
+def bw_cli_version(bw_cmd: list[str], bw_cwd: str | None) -> str | None:
+    """Return the resolved ``bw`` CLI's version string, or ``None``."""
+    try:
+        result = subprocess.run(
+            [*bw_cmd, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            stdin=subprocess.DEVNULL,
+            cwd=bw_cwd,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"\d{4}\.\d+\.\d+(?:[-+.][0-9A-Za-z.-]+)?", result.stdout)
+    return match.group(0) if match else None
 
 
 def _find_on_path(filename: str) -> str | None:
@@ -626,6 +645,10 @@ class BitwardenServeClient:
         # shims so an npm-installed CLI works rather than crashing later.
         self._bw_cmd, self._bw_cwd = resolve_bw_command()
         self._bw_via_shell = len(self._bw_cmd) > 1
+        logger.log(
+            VERBOSE,
+            f"Bitwarden CLI version {bw_cli_version(self._bw_cmd, self._bw_cwd) or 'unknown'}",
+        )
 
         self._port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{self._port}"

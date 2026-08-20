@@ -8,6 +8,39 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`--doctor` (with optional `--redact`) -- one-shot environment diagnostics.** Prints kp2bw's version, source revision
+  (baked into release wheels, or read from a VCS install / git checkout), install method (pip/uv/pipx, editable), Python
+  runtime, whether a `.env` was picked up, and the Bitwarden CLI's path, version, `bw serve` support and configured
+  server, including the server product and version behind it (Bitwarden vs Vaultwarden). Exits non-zero when the bw CLI
+  is unusable. `--redact` masks the server URL and home-anchored paths so the report is safe to paste in a public issue.
+  Diagnosing #53 required digging all of this out of CI logs by hand; kp2bw and the e2e harness now also log these
+  versions at run start.
+
+- **`--totp-pps` (env `KP2BW_TOTP_PPS`) -- import TOTP from a Pleasant Password Server export** (issue #45, reported by
+  [DransfeldSK](https://github.com/DransfeldSK)). PPS writes TOTP into `TOTPSecret`, `TOTPDigits` and `TOTPPeriod`
+  instead of the KeePass `TimeOtp-Secret-Base32`, `TimeOtp-Length` and `TimeOtp-Period` fields, so those entries
+  migrated without a `login.totp`. The flag reads the PPS names instead: its secret is always Base32 and its algorithm
+  always SHA-1, matching what the PPS interface can produce. Only the selected naming is read, so a mixed database
+  migrates one of the two: the unread scheme's *secret* field is still carried over as a hidden custom field (never
+  visible), while its digit-count and period fields stay ordinary custom fields. An `otpauth://` URI in the entry's own
+  `otp` field still wins, and HOTP handling is unchanged.
+
+### Fixed
+
+- **A wrong KeePass password now prints one line instead of two tracebacks** (issue #47, reported by
+  [szotsaki](https://github.com/szotsaki)). Opening the database let `pykeepass`'s `CredentialsError` -- itself chained
+  onto `construct`'s `ChecksumError` -- escape to the top level. Opening now raises `ConversionError`, so the CLI
+  reports `Could not open KeePass database '<path>': wrong password or key file.` and exits non-zero. A missing,
+  unreadable, or non-KeePass file is reported the same way, on both the migration and the `--report-uris keepass` path.
+
+- **Migrating into an organization works again** (issue #43, PR #44 by [JJBlue](https://github.com/JJBlue), reported and
+  confirmed by [DransfeldSK](https://github.com/DransfeldSK)). Creating an org collection sent `organizationId` only in
+  the JSON body, so `bw serve` rejected every `POST /object/org-collection` with `organizationid option is required` and
+  any `--bitwarden-org` run aborted. The vault management API declares `organizationId` as a required *query* parameter
+  on that endpoint; it is now sent there as well.
+
 ## [3.7.1] - 2026-07-10
 
 ### Added

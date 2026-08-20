@@ -35,6 +35,10 @@ def test_bw_serve_batch_script() -> None:
     _run_script_main("bw_serve_batch_test.py")
 
 
+def test_bw_serve_org_collection_script() -> None:
+    _run_script_main("bw_serve_org_collection_test.py")
+
+
 def test_bw_serve_timeout_script() -> None:
     _run_script_main("bw_serve_timeout_test.py")
 
@@ -85,6 +89,14 @@ def test_convert_update_script() -> None:
 
 def test_convert_resilience_script() -> None:
     _run_script_main("convert_resilience_test.py")
+
+
+def test_convert_keepass_open_script() -> None:
+    _run_script_main("convert_keepass_open_test.py")
+
+
+def test_doctor_script() -> None:
+    _run_script_main("doctor_test.py")
 
 
 def test_windows_bw_cmd_smoke_script() -> None:

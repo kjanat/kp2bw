@@ -9,6 +9,11 @@ from typing import Literal
 
 import yaml
 from pykeepass import Attachment, Entry, Group, PyKeePass
+from pykeepass.exceptions import (
+    CredentialsError,
+    HeaderChecksumError,
+    PayloadChecksumError,
+)
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -162,6 +167,29 @@ def _entry_url_inputs(entry: Entry) -> tuple[str, list[str], list[str]]:
     )
 
 
+def _open_keepass_database(
+    keepass_file_path: str,
+    keepass_password: str | None,
+    keepass_keyfile_path: str | None,
+) -> PyKeePass:
+    """Open a KeePass database, raising :class:`ConversionError` on unreadable input."""
+    try:
+        return PyKeePass(
+            filename=keepass_file_path,
+            password=keepass_password,
+            keyfile=keepass_keyfile_path,
+        )
+    except CredentialsError:
+        raise ConversionError(
+            f"Could not open KeePass database {keepass_file_path!r}: "
+            "wrong password or key file."
+        ) from None
+    except (HeaderChecksumError, PayloadChecksumError, OSError) as exc:
+        raise ConversionError(
+            f"Could not read KeePass database {keepass_file_path!r}: {exc}"
+        ) from None
+
+
 def collect_keepass_uris(
     keepass_file_path: str,
     keepass_password: str | None,
@@ -179,10 +207,8 @@ def collect_keepass_uris(
     including quote/wildcard transforms and dropped non-web schemes -- not the
     raw values.
     """
-    kp = PyKeePass(
-        filename=keepass_file_path,
-        password=keepass_password,
-        keyfile=keepass_keyfile_path,
+    kp = _open_keepass_database(
+        keepass_file_path, keepass_password, keepass_keyfile_path
     )
     uris: list[str] = []
     for entry in kp.entries:
@@ -218,6 +244,7 @@ class Converter:
     _create_folders: bool
     _uri_match: UriMatchValue
     _interpret_uri_syntax: bool
+    _totp_pps: bool
     _kp_ref_entries: list[Entry]
     _entries: dict[str, EntryValue]
     _member_reference_resolving_dict: dict[str, str]
@@ -246,6 +273,7 @@ class Converter:
         create_folders: bool = True,
         uri_match: UriMatchValue = None,
         interpret_uri_syntax: bool = True,
+        totp_pps: bool = False,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._keepass_file_path = keepass_file_path
@@ -266,6 +294,7 @@ class Converter:
         self._create_folders = create_folders
         self._uri_match = uri_match
         self._interpret_uri_syntax = interpret_uri_syntax
+        self._totp_pps = totp_pps
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -462,7 +491,10 @@ class Converter:
         # custom fields.  This decides which fields are folded into login.totp
         # (and must be dropped here) and which secrets must remain hidden.
         otp_result = resolve_otp(
-            entry.otp, custom_props, entry_label=entry.title or "_untitled"
+            entry.otp,
+            custom_props,
+            entry_label=entry.title or "_untitled",
+            totp_pps=self._totp_pps,
         )
         for warning in otp_result.warnings:
             logger.warning(f"{entry.title or '_untitled'}: {warning}")
@@ -678,10 +710,10 @@ class Converter:
     def _load_keepass_data(self) -> None:
         """Open the KeePass database and populate ``_entries`` with parsed items."""
         # aggregate entries
-        kp = PyKeePass(
-            filename=self._keepass_file_path,
-            password=self._keepass_password,
-            keyfile=self._keepass_keyfile_path,
+        kp = _open_keepass_database(
+            self._keepass_file_path,
+            self._keepass_password,
+            self._keepass_keyfile_path,
         )
 
         # reset data structures

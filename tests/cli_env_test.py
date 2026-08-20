@@ -16,6 +16,7 @@ _MANAGED_ENV = (
     "KP2BW_BITWARDEN_PASSWORD",
     "KP2BW_BITWARDEN_ORG",
     "KP2BW_CREATE_FOLDERS",
+    "KP2BW_TOTP_PPS",
     "KP2BW_YES",
     "KP2BW_LOG_DIR",
 )
@@ -204,10 +205,64 @@ def assert_org_disables_personal_folders_by_default() -> None:
                 os.environ[key] = value
 
 
+def assert_totp_pps_reaches_converter() -> None:
+    """`--totp-pps` and KP2BW_TOTP_PPS both arrive as Converter(totp_pps=True).
+
+    The flag only selects the Pleasant Password Server field names inside
+    ``resolve_otp``; this covers the CLI > env > default plumbing that gets it
+    there, which is where a new option usually goes missing.
+    """
+    original_cwd = Path.cwd()
+    original_argv = sys.argv
+    original_handlers = list(logging.getLogger().handlers)
+    saved_env = {key: os.environ.get(key) for key in _MANAGED_ENV}
+
+    tmp = tempfile.mkdtemp()
+    try:
+        os.environ["KP2BW_KEEPASS_FILE"] = "from-env.kdbx"
+        os.environ["KP2BW_KEEPASS_PASSWORD"] = "kp-pw"
+        os.environ["KP2BW_BITWARDEN_PASSWORD"] = "bw-pw"
+        os.environ["KP2BW_YES"] = "1"
+        os.environ["KP2BW_LOG_DIR"] = tmp
+        _ = os.environ.pop("KP2BW_TOTP_PPS", None)
+        os.chdir(tmp)
+
+        def _run(argv: list[str]) -> object:
+            sys.argv = argv
+            with (
+                mock.patch.object(cli, "ensure_bw_available", lambda: None),
+                mock.patch.object(cli, "Converter", _CapturingConverter),
+            ):
+                cli.main()
+            return _CapturingConverter.captured.get("totp_pps")
+
+        if _run(["kp2bw"]) is not False:
+            raise AssertionError("PPS TOTP field names must be off by default")
+        if _run(["kp2bw", "--totp-pps"]) is not True:
+            raise AssertionError("--totp-pps should enable the PPS field names")
+
+        os.environ["KP2BW_TOTP_PPS"] = "1"
+        if _run(["kp2bw"]) is not True:
+            raise AssertionError("KP2BW_TOTP_PPS=1 should enable the PPS field names")
+        if _run(["kp2bw", "--no-totp-pps"]) is not False:
+            raise AssertionError("--no-totp-pps must win over KP2BW_TOTP_PPS")
+    finally:
+        sys.argv = original_argv
+        _reset_root_logging(original_handlers)
+        os.chdir(original_cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+        for key, value in saved_env.items():
+            if value is None:
+                _ = os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def main() -> None:
     assert_dotenv_supplies_keepass_file()
     assert_empty_env_var_defers_to_dotenv()
     assert_org_disables_personal_folders_by_default()
+    assert_totp_pps_reaches_converter()
     print("cli env test passed")
 
 

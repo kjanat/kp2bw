@@ -15,9 +15,18 @@ This module resolves the KeePass fields into the lossless Bitwarden form:
   defaulting silently to 6/30/SHA-1.
 * HMAC-based OTP (HOTP) has no time-based target in Bitwarden, so its secret is
   preserved as a hidden custom field and the caller is warned.
-* Any OTP secret that cannot be migrated (HOTP, an undecodable value, or a
-  ``TimeOtp`` secret shadowed by an existing ``otp`` URI) is kept as a *hidden*
+* Any OTP secret that cannot be migrated (HOTP, an undecodable value, a
+  ``TimeOtp`` secret shadowed by an existing ``otp`` URI, or a secret written
+  under the field names of the scheme that is not active) is kept as a *hidden*
   custom field rather than silently dropped.
+
+Pleasant Password Server exports the same configuration under its own names
+(``TOTPSecret`` / ``TOTPDigits`` / ``TOTPPeriod``, secret always Base32 and
+algorithm always SHA-1).  ``resolve_otp(..., totp_pps=True)`` reads those field
+names in place of the KeePass ones.  Only the selected scheme is ever read for
+migration, but a secret field belonging to the other one still counts as a
+secret and is hidden; its digit-count/period/algorithm fields are not secret and
+stay ordinary custom fields.
 
 The module is deliberately free of ``pykeepass`` and ``logging`` dependencies:
 it takes plain strings and returns a record (warnings included as *messages*),
@@ -46,6 +55,10 @@ KP_TOTP_SECRET_BASE64_KEY: str = "TimeOtp-Secret-Base64"
 KP_TOTP_LENGTH_KEY: str = "TimeOtp-Length"
 KP_TOTP_PERIOD_KEY: str = "TimeOtp-Period"
 KP_TOTP_ALGORITHM_KEY: str = "TimeOtp-Algorithm"
+
+PPS_TOTP_SECRET_KEY: str = "TOTPSecret"
+PPS_TOTP_DIGITS_KEY: str = "TOTPDigits"
+PPS_TOTP_PERIOD_KEY: str = "TOTPPeriod"
 
 KP_HOTP_SECRET_UTF8_KEY: str = "HmacOtp-Secret"
 KP_HOTP_SECRET_HEX_KEY: str = "HmacOtp-Secret-Hex"
@@ -100,24 +113,58 @@ def _decode_base64(value: str) -> bytes:
     return base64.b64decode(cleaned, validate=True)
 
 
-# Secret key → decoder, in detection-priority order (Base32 is by far the most
-# common).  Only one is normally present; the order only disambiguates a
-# malformed entry that carries several.
-_TOTP_SECRET_DECODERS: tuple[tuple[str, Callable[[str], bytes]], ...] = (
-    (KP_TOTP_SECRET_BASE32_KEY, _decode_base32),
-    (KP_TOTP_SECRET_HEX_KEY, _decode_hex),
-    (KP_TOTP_SECRET_BASE64_KEY, _decode_base64),
-    (KP_TOTP_SECRET_UTF8_KEY, _decode_utf8),
-)
-_TOTP_SECRET_DECODER_BY_KEY: dict[str, Callable[[str], bytes]] = dict(
-    _TOTP_SECRET_DECODERS
+@dataclass(frozen=True)
+class _TotpScheme:
+    """One producer's TOTP custom-field naming, and how its secret is encoded.
+
+    ``secret_decoders`` maps each secret key to its decoder in detection-priority
+    order; only one key is normally present, and the order only disambiguates a
+    malformed entry that carries several.  ``base32_key`` is the key whose value
+    is Base32, the one encoding Bitwarden also accepts bare.  ``algorithm_key``
+    is ``None`` for a producer that has no algorithm field, in which case
+    :data:`DEFAULT_ALGORITHM` applies.
+    """
+
+    secret_decoders: tuple[tuple[str, Callable[[str], bytes]], ...]
+    base32_key: str
+    length_key: str
+    period_key: str
+    algorithm_key: str | None
+
+    @property
+    def secret_keys(self) -> frozenset[str]:
+        """Every secret key this scheme reads."""
+        return frozenset(key for key, _ in self.secret_decoders)
+
+    @property
+    def config_keys(self) -> frozenset[str]:
+        """Every digit-count / period / algorithm key this scheme reads."""
+        keys = {self.length_key, self.period_key}
+        if self.algorithm_key is not None:
+            keys.add(self.algorithm_key)
+        return frozenset(keys)
+
+
+_KEEPASS_TOTP_SCHEME: _TotpScheme = _TotpScheme(
+    secret_decoders=(
+        (KP_TOTP_SECRET_BASE32_KEY, _decode_base32),
+        (KP_TOTP_SECRET_HEX_KEY, _decode_hex),
+        (KP_TOTP_SECRET_BASE64_KEY, _decode_base64),
+        (KP_TOTP_SECRET_UTF8_KEY, _decode_utf8),
+    ),
+    base32_key=KP_TOTP_SECRET_BASE32_KEY,
+    length_key=KP_TOTP_LENGTH_KEY,
+    period_key=KP_TOTP_PERIOD_KEY,
+    algorithm_key=KP_TOTP_ALGORITHM_KEY,
 )
 
-_TOTP_CONFIG_KEYS: frozenset[str] = frozenset({
-    KP_TOTP_LENGTH_KEY,
-    KP_TOTP_PERIOD_KEY,
-    KP_TOTP_ALGORITHM_KEY,
-})
+_PPS_TOTP_SCHEME: _TotpScheme = _TotpScheme(
+    secret_decoders=((PPS_TOTP_SECRET_KEY, _decode_base32),),
+    base32_key=PPS_TOTP_SECRET_KEY,
+    length_key=PPS_TOTP_DIGITS_KEY,
+    period_key=PPS_TOTP_PERIOD_KEY,
+    algorithm_key=None,
+)
 
 _HOTP_SECRET_KEYS: frozenset[str] = frozenset({
     KP_HOTP_SECRET_UTF8_KEY,
@@ -126,10 +173,11 @@ _HOTP_SECRET_KEYS: frozenset[str] = frozenset({
     KP_HOTP_SECRET_BASE64_KEY,
 })
 
-# Every OTP *secret* field (TOTP + HOTP).  Any of these that is not consumed
-# into ``login.totp`` is sensitive and must be stored as a hidden custom field.
+# Every OTP *secret* field this module recognises: both TOTP schemes plus HOTP.
+# Any of these that is not consumed into ``login.totp`` is sensitive and must be
+# stored as a hidden custom field, whichever scheme is active.
 _ALL_SECRET_KEYS: frozenset[str] = (
-    frozenset(_TOTP_SECRET_DECODER_BY_KEY) | _HOTP_SECRET_KEYS
+    _KEEPASS_TOTP_SCHEME.secret_keys | _PPS_TOTP_SCHEME.secret_keys | _HOTP_SECRET_KEYS
 )
 
 
@@ -195,16 +243,18 @@ def _present_secret_keys(
     return frozenset(key for key in candidates if _nonempty(props, key) is not None)
 
 
-def _find_totp_secret(props: Mapping[str, str | None]) -> tuple[str, str] | None:
-    """Return ``(key, raw_value)`` for the present TimeOtp secret, or ``None``.
+def _find_totp_secret(
+    props: Mapping[str, str | None], scheme: _TotpScheme
+) -> tuple[str, str, Callable[[str], bytes]] | None:
+    """Return ``(key, raw_value, decoder)`` for the present TOTP secret, or ``None``.
 
     The raw (un-stripped) value is returned so encoding-specific decoders decide
     their own cleaning — notably the UTF-8 secret, whose literal bytes are the key.
     """
-    for key, _ in _TOTP_SECRET_DECODERS:
+    for key, decoder in scheme.secret_decoders:
         value = props.get(key)
         if value is not None and value.strip() != "":
-            return (key, value)
+            return (key, value, decoder)
     return None
 
 
@@ -229,48 +279,52 @@ def _parse_int_field(
 
 
 def _parse_config(
-    props: Mapping[str, str | None],
+    props: Mapping[str, str | None], scheme: _TotpScheme
 ) -> tuple[_TotpConfig, list[str]]:
-    """Resolve digit count, period and algorithm from the ``TimeOtp-*`` fields."""
+    """Resolve digit count, period and algorithm from *scheme*'s config fields."""
     warnings: list[str] = []
 
     digits = DEFAULT_DIGITS
-    raw_len = _nonempty(props, KP_TOTP_LENGTH_KEY)
+    raw_len = _nonempty(props, scheme.length_key)
     if raw_len is not None:
         parsed = _parse_int_field(
-            raw_len, KP_TOTP_LENGTH_KEY, DEFAULT_DIGITS, warnings=warnings
+            raw_len, scheme.length_key, DEFAULT_DIGITS, warnings=warnings
         )
         if parsed is not None:
             if parsed > MAX_SPEC_DIGITS:
                 warnings.append(
-                    f"{KP_TOTP_LENGTH_KEY}={parsed} exceeds the KeePass maximum of "
+                    f"{scheme.length_key}={parsed} exceeds the maximum of "
                     f"{MAX_SPEC_DIGITS}; clamping to {MAX_SPEC_DIGITS}."
                 )
                 digits = MAX_SPEC_DIGITS
             else:
                 if parsed < MIN_SPEC_DIGITS:
                     warnings.append(
-                        f"{KP_TOTP_LENGTH_KEY}={parsed} is below the usual minimum of "
+                        f"{scheme.length_key}={parsed} is below the usual minimum of "
                         f"{MIN_SPEC_DIGITS}; passing through."
                     )
                 digits = parsed
 
     period = DEFAULT_PERIOD
-    raw_period = _nonempty(props, KP_TOTP_PERIOD_KEY)
+    raw_period = _nonempty(props, scheme.period_key)
     if raw_period is not None:
         parsed = _parse_int_field(
-            raw_period, KP_TOTP_PERIOD_KEY, DEFAULT_PERIOD, warnings=warnings
+            raw_period, scheme.period_key, DEFAULT_PERIOD, warnings=warnings
         )
         if parsed is not None:
             period = parsed
 
     algorithm = DEFAULT_ALGORITHM
-    raw_alg = _nonempty(props, KP_TOTP_ALGORITHM_KEY)
+    raw_alg = (
+        _nonempty(props, scheme.algorithm_key)
+        if scheme.algorithm_key is not None
+        else None
+    )
     if raw_alg is not None:
         mapped = _ALGORITHM_MAP.get(raw_alg.upper())
         if mapped is None:
             warnings.append(
-                f"Unknown {KP_TOTP_ALGORITHM_KEY} {raw_alg!r}; using {DEFAULT_ALGORITHM}."
+                f"Unknown {scheme.algorithm_key} {raw_alg!r}; using {DEFAULT_ALGORITHM}."
             )
         else:
             algorithm = mapped
@@ -301,6 +355,7 @@ def resolve_otp(
     custom_properties: Mapping[str, str | None],
     *,
     entry_label: str,
+    totp_pps: bool = False,
 ) -> OtpMigration:
     """Resolve an entry's OTP fields into a Bitwarden ``login.totp`` value.
 
@@ -308,7 +363,16 @@ def resolve_otp(
     ``otpauth://`` URI when set).  *custom_properties* is ``entry.custom_properties``
     (raw ``TimeOtp-*`` / ``HmacOtp-*`` strings).  *entry_label* labels any
     generated ``otpauth://`` URI.
+
+    *totp_pps* reads TOTP from Pleasant Password Server's ``TOTPSecret`` /
+    ``TOTPDigits`` / ``TOTPPeriod`` fields instead of the KeePass ``TimeOtp-*``
+    ones: the PPS secret is always Base32 and its algorithm is always SHA-1, so
+    there is no algorithm field to read.  Only the selected scheme is read, so
+    the other scheme's fields are never migrated; its *secret* field is still
+    returned in ``hidden_keys``, while its digit-count/period/algorithm fields
+    stay ordinary custom fields.  HOTP handling is unaffected.
     """
+    scheme = _PPS_TOTP_SCHEME if totp_pps else _KEEPASS_TOTP_SCHEME
     warnings: list[str] = []
 
     # A blank/whitespace-only otp field counts as absent (mirroring _nonempty),
@@ -333,7 +397,7 @@ def resolve_otp(
             warnings=tuple(warnings),
         )
 
-    found = _find_totp_secret(custom_properties)
+    found = _find_totp_secret(custom_properties, scheme)
     if found is None:
         return OtpMigration(
             totp=None,
@@ -342,9 +406,9 @@ def resolve_otp(
             warnings=tuple(warnings),
         )
 
-    secret_key, raw_value = found
+    secret_key, raw_value, decoder = found
     try:
-        raw_bytes = _TOTP_SECRET_DECODER_BY_KEY[secret_key](raw_value)
+        raw_bytes = decoder(raw_value)
     except ValueError, binascii.Error:
         warnings.append(
             f"Could not decode TOTP secret field {secret_key!r}; "
@@ -372,17 +436,17 @@ def resolve_otp(
             warnings=tuple(warnings),
         )
 
-    config, config_warnings = _parse_config(custom_properties)
+    config, config_warnings = _parse_config(custom_properties, scheme)
     warnings.extend(config_warnings)
 
     present_config_keys = frozenset(
         key
-        for key in _TOTP_CONFIG_KEYS
+        for key in scheme.config_keys
         if _nonempty(custom_properties, key) is not None
     )
     consumed = present_config_keys | {secret_key}
 
-    if config.is_default and secret_key == KP_TOTP_SECRET_BASE32_KEY:
+    if config.is_default and secret_key == scheme.base32_key:
         # A default-config Base32 secret round-trips through Bitwarden's bare
         # form, which is friendlier than an opaque otpauth:// URI.  Emit the
         # canonical (uppercase, unpadded) encoding of the validated bytes so the

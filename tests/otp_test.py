@@ -18,6 +18,9 @@ from kp2bw.otp import (
     KP_TOTP_SECRET_BASE64_KEY,
     KP_TOTP_SECRET_HEX_KEY,
     KP_TOTP_SECRET_UTF8_KEY,
+    PPS_TOTP_DIGITS_KEY,
+    PPS_TOTP_PERIOD_KEY,
+    PPS_TOTP_SECRET_KEY,
     resolve_otp,
 )
 
@@ -458,6 +461,204 @@ def assert_empty_label_fallback() -> None:
         raise AssertionError(f"empty label must fall back to 'kp2bw', got {path!r}")
 
 
+def assert_pps_short_lowercase_secret() -> None:
+    # PPS writes Base32 in whatever case the source used; a 16-char lowercase
+    # secret must migrate as the canonical bare secret.
+    result = resolve_otp(
+        None,
+        {PPS_TOTP_SECRET_KEY: _B32.lower()},
+        entry_label="Acme",
+        totp_pps=True,
+    )
+    if result.totp != _B32:
+        raise AssertionError(f"expected bare secret {_B32!r}, got {result.totp!r}")
+    if result.consumed_keys != frozenset({PPS_TOTP_SECRET_KEY}):
+        raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
+    if result.hidden_keys:
+        raise AssertionError(f"expected no hidden keys, got {result.hidden_keys}")
+    if result.warnings:
+        raise AssertionError(f"expected no warnings, got {result.warnings}")
+
+
+def assert_pps_long_uppercase_secret() -> None:
+    raw = b"sixteen bytes ok"
+    secret = base64.b32encode(raw).rstrip(b"=").decode()
+    if len(secret) != 26:
+        raise AssertionError(f"test vector should be 26 chars, got {len(secret)}")
+    result = resolve_otp(
+        None, {PPS_TOTP_SECRET_KEY: secret}, entry_label="Acme", totp_pps=True
+    )
+    if result.totp is None or result.totp != secret:
+        raise AssertionError(f"expected bare secret {secret!r}, got {result.totp!r}")
+    if _decode_b32(result.totp) != raw:
+        raise AssertionError("PPS secret did not round-trip to the raw key")
+    if result.consumed_keys != frozenset({PPS_TOTP_SECRET_KEY}):
+        raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
+
+
+def assert_pps_config_overrides_build_otpauth() -> None:
+    props: Mapping[str, str | None] = {
+        PPS_TOTP_SECRET_KEY: _B32,
+        PPS_TOTP_DIGITS_KEY: "8",
+        PPS_TOTP_PERIOD_KEY: "60",
+    }
+    result = resolve_otp(None, props, entry_label="Acme Corp", totp_pps=True)
+    if result.totp is None or not result.totp.startswith("otpauth://totp/"):
+        raise AssertionError(f"expected otpauth URI, got {result.totp!r}")
+    params = _otpauth_params(result.totp)
+    if _decode_b32(params["secret"]) != _RAW:
+        raise AssertionError("otpauth secret does not round-trip to the raw key")
+    if params.get("digits") != "8":
+        raise AssertionError(f"expected digits=8, got {params.get('digits')}")
+    if params.get("period") != "60":
+        raise AssertionError(f"expected period=60, got {params.get('period')}")
+    if params.get("algorithm") != "SHA1":
+        raise AssertionError(
+            f"PPS has no algorithm field; expected SHA1, got {params.get('algorithm')}"
+        )
+    expected = frozenset({
+        PPS_TOTP_SECRET_KEY,
+        PPS_TOTP_DIGITS_KEY,
+        PPS_TOTP_PERIOD_KEY,
+    })
+    if result.consumed_keys != expected:
+        raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
+    if result.hidden_keys:
+        raise AssertionError(f"expected no hidden keys, got {result.hidden_keys}")
+
+
+def assert_pps_hotp_still_hidden() -> None:
+    props: Mapping[str, str | None] = {
+        PPS_TOTP_SECRET_KEY: _B32,
+        KP_HOTP_SECRET_BASE32_KEY: "GEZDGNBVGY3TQOJQ",
+    }
+    result = resolve_otp(None, props, entry_label="x", totp_pps=True)
+    if result.totp != _B32:
+        raise AssertionError(f"TOTP must still migrate, got {result.totp!r}")
+    if result.consumed_keys != frozenset({PPS_TOTP_SECRET_KEY}):
+        raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
+    if result.hidden_keys != frozenset({KP_HOTP_SECRET_BASE32_KEY}):
+        raise AssertionError(f"HOTP secret must be hidden, got {result.hidden_keys}")
+
+
+def assert_pps_undecodable_secret_hidden() -> None:
+    result = resolve_otp(
+        None, {PPS_TOTP_SECRET_KEY: "1890"}, entry_label="x", totp_pps=True
+    )
+    if result.totp is not None:
+        raise AssertionError(
+            f"undecodable secret must not migrate, got {result.totp!r}"
+        )
+    if result.consumed_keys:
+        raise AssertionError(f"nothing should be consumed, got {result.consumed_keys}")
+    if result.hidden_keys != frozenset({PPS_TOTP_SECRET_KEY}):
+        raise AssertionError(f"bad secret must be hidden, got {result.hidden_keys}")
+    if not any("decode" in w.lower() for w in result.warnings):
+        raise AssertionError(f"expected a decode warning, got {result.warnings}")
+
+
+def assert_pps_entry_otp_precedence() -> None:
+    uri = "otpauth://totp/Acme:bob?secret=GEZDGNBVGY3TQOJQ&issuer=Acme"
+    result = resolve_otp(
+        uri, {PPS_TOTP_SECRET_KEY: _B32}, entry_label="Acme", totp_pps=True
+    )
+    if result.totp != uri:
+        raise AssertionError(f"entry.otp must win, got {result.totp!r}")
+    if result.consumed_keys:
+        raise AssertionError(f"expected nothing consumed, got {result.consumed_keys}")
+    if result.hidden_keys != frozenset({PPS_TOTP_SECRET_KEY}):
+        raise AssertionError(
+            f"shadowed secret must be hidden, got {result.hidden_keys}"
+        )
+
+
+def assert_default_ignores_pps_fields() -> None:
+    # Without the flag the PPS fields are never read for migration, but the
+    # secret is still a secret: it must be hidden, not left visible. The config
+    # fields are not secret and stay ordinary custom fields.
+    props: Mapping[str, str | None] = {
+        PPS_TOTP_SECRET_KEY: _B32,
+        PPS_TOTP_DIGITS_KEY: "8",
+        PPS_TOTP_PERIOD_KEY: "60",
+    }
+    result = resolve_otp(None, props, entry_label="x")
+    if result.totp is not None:
+        raise AssertionError(f"PPS fields must need the flag, got {result.totp!r}")
+    if result.consumed_keys:
+        raise AssertionError(f"nothing should be consumed, got {result.consumed_keys}")
+    if result.hidden_keys != frozenset({PPS_TOTP_SECRET_KEY}):
+        raise AssertionError(
+            f"the unread PPS secret must still be hidden, got {result.hidden_keys}"
+        )
+
+
+def assert_pps_ignores_keepass_fields() -> None:
+    # Under the flag the TimeOtp-* fields are never read for migration, but the
+    # secret is still hidden; only its config fields stay ordinary.
+    props: Mapping[str, str | None] = {
+        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_LENGTH_KEY: "8",
+        KP_TOTP_PERIOD_KEY: "60",
+        KP_TOTP_ALGORITHM_KEY: "HMAC-SHA-256",
+    }
+    result = resolve_otp(None, props, entry_label="x", totp_pps=True)
+    if result.totp is not None:
+        raise AssertionError(
+            f"TimeOtp-* must not migrate under PPS, got {result.totp!r}"
+        )
+    if result.consumed_keys:
+        raise AssertionError(f"nothing should be consumed, got {result.consumed_keys}")
+    if result.hidden_keys != frozenset({KP_TOTP_SECRET_BASE32_KEY}):
+        raise AssertionError(
+            f"the unread KeePass secret must still be hidden, got {result.hidden_keys}"
+        )
+
+
+def assert_mixed_database_hides_every_secret() -> None:
+    # A vault holding both producers' entries: whichever scheme is selected, the
+    # other one's secret keys are hidden and never migrated. Config fields of the
+    # inactive scheme carry no secret and stay visible custom fields.
+    props: Mapping[str, str | None] = {
+        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_LENGTH_KEY: "8",
+        PPS_TOTP_SECRET_KEY: "GEZDGNBVGY3TQOJQ",
+        PPS_TOTP_DIGITS_KEY: "8",
+        KP_HOTP_SECRET_BASE32_KEY: "GEZDGNBVGY3TQOJQ",
+    }
+
+    default_result = resolve_otp(None, props, entry_label="x")
+    if default_result.consumed_keys != frozenset({
+        KP_TOTP_SECRET_BASE32_KEY,
+        KP_TOTP_LENGTH_KEY,
+    }):
+        raise AssertionError(
+            f"default must consume only TimeOtp-*, got {default_result.consumed_keys}"
+        )
+    if default_result.hidden_keys != frozenset({
+        PPS_TOTP_SECRET_KEY,
+        KP_HOTP_SECRET_BASE32_KEY,
+    }):
+        raise AssertionError(
+            f"unmigrated secrets must be hidden, got {default_result.hidden_keys}"
+        )
+
+    pps_result = resolve_otp(None, props, entry_label="x", totp_pps=True)
+    if pps_result.consumed_keys != frozenset({
+        PPS_TOTP_SECRET_KEY,
+        PPS_TOTP_DIGITS_KEY,
+    }):
+        raise AssertionError(
+            f"PPS must consume only its own fields, got {pps_result.consumed_keys}"
+        )
+    if pps_result.hidden_keys != frozenset({
+        KP_TOTP_SECRET_BASE32_KEY,
+        KP_HOTP_SECRET_BASE32_KEY,
+    }):
+        raise AssertionError(
+            f"unmigrated secrets must be hidden, got {pps_result.hidden_keys}"
+        )
+
+
 def main() -> None:
     assert_b32_anchor()
     assert_fallback_base32_default()
@@ -487,6 +688,15 @@ def main() -> None:
     assert_decoder_priority()
     assert_label_encoded()
     assert_empty_label_fallback()
+    assert_pps_short_lowercase_secret()
+    assert_pps_long_uppercase_secret()
+    assert_pps_config_overrides_build_otpauth()
+    assert_pps_hotp_still_hidden()
+    assert_pps_undecodable_secret_hidden()
+    assert_pps_entry_otp_precedence()
+    assert_default_ignores_pps_fields()
+    assert_pps_ignores_keepass_fields()
+    assert_mixed_database_hides_every_secret()
     print("otp resolution test passed")
 
 
