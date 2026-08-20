@@ -1301,6 +1301,7 @@ class BitwardenServeClient:
         data = self._request(
             "POST",
             "/object/org-collection",
+            params={"organizationId": self._org_id},
             json_body={
                 "organizationId": self._org_id,
                 "name": name,
