@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-08-20
+
 ### Added
 
 - **`--doctor` (with optional `--redact`) -- one-shot environment diagnostics.** Prints kp2bw's version, source revision
