@@ -23,12 +23,18 @@ jobs:
           if ($version -notmatch '\A\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?\z') {
           	Write-Host "::error::Unexpected @bitwarden/cli version in package.json: '$spec'"; exit 1
           }
-          $matrix = @{
-          	include = @(
-          		@{ experimental = $false; 'bw-version' = $version }
-          		@{ experimental = $true; 'bw-version' = 'latest' }
-          	)
-          } | ConvertTo-Json -Compress -Depth 4
+          $include = @(@{ experimental = $false; 'bw-version' = $version })
+          try {
+          	$latest = (Invoke-RestMethod 'https://registry.npmjs.org/@bitwarden/cli' -TimeoutSec 30).'dist-tags'.latest
+          } catch {
+          	$latest = $null
+          }
+          if ($latest -and $latest -ne $version) {
+          	$include += @{ experimental = $true; 'bw-version' = 'latest' }
+          } else {
+          	Write-Host "Skipping latest canary lane: npm latest ($latest) equals the pin ($version)"
+          }
+          $matrix = @{ include = $include } | ConvertTo-Json -Compress -Depth 4
           "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Matrix:"; $matrix | yq . -P
 
