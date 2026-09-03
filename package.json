@@ -26,7 +26,7 @@
 		"tsc7": "catalog:",
 		"typescript": "catalog:"
 	},
-	"packageManager": "bun@1.3.14",
+	"packageManager": "bun@1.4.0",
 	"catalog": {
 		"runner-run": "^0.25.1",
 		"typescript": "<7",
