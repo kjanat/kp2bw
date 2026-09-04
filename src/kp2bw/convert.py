@@ -1357,7 +1357,10 @@ class Converter:
                 (uri.get("uri", ""), uri.get("match"))
                 for uri in (login.get("uris") or [])
             ],
-            repr(login.get("fido2Credentials") or []),
+            repr([
+                tuple(sorted(credential.items(), key=lambda item: item[0]))
+                for credential in (login.get("fido2Credentials") or [])
+            ]),
         )
 
     @classmethod

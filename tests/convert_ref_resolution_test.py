@@ -10,7 +10,7 @@ from lxml.etree import Element
 from pykeepass import Attachment, Entry, Group, PyKeePass, create_database
 
 from kp2bw.bw_serve import KP2BW_SYNC_FIELD_NAME, BitwardenServeClient
-from kp2bw.bw_types import BwField, BwItemCreate, BwItemResponse
+from kp2bw.bw_types import BwFido2Credential, BwField, BwItemCreate, BwItemResponse
 from kp2bw.convert import MAX_BW_ITEM_LENGTH, Converter, EntryValue
 
 REFERENCE_ENTRY_UUID = UUID("12345678-1234-5678-1234-567812345678")
@@ -887,6 +887,49 @@ def assert_matching_ref_accepts_semantically_equal_totp() -> None:
         raise AssertionError("Equivalent-TOTP REF did not merge its URL")
 
 
+def assert_strict_signature_ignores_fido_key_order() -> None:
+    """Equivalent FIDO dictionaries retain one strict legacy signature."""
+    credential = BwFido2Credential(
+        credentialId="credential-id",
+        keyType="public-key",
+        keyAlgorithm="ECDSA",
+        keyCurve="P-256",
+        keyValue="key-value",
+        rpId="example.com",
+        rpName="Example",
+        userHandle="user-handle",
+        userName="user",
+        userDisplayName="User",
+        counter="0",
+        discoverable="true",
+        creationDate=None,
+    )
+    reordered = BwFido2Credential(
+        creationDate=credential["creationDate"],
+        discoverable=credential["discoverable"],
+        counter=credential["counter"],
+        userDisplayName=credential["userDisplayName"],
+        userName=credential["userName"],
+        userHandle=credential["userHandle"],
+        rpName=credential["rpName"],
+        rpId=credential["rpId"],
+        keyValue=credential["keyValue"],
+        keyCurve=credential["keyCurve"],
+        keyAlgorithm=credential["keyAlgorithm"],
+        keyType=credential["keyType"],
+        credentialId=credential["credentialId"],
+    )
+    first_login = _make_referenced_item()["login"]
+    first_login["fido2Credentials"] = [credential]
+    reordered_login = copy.deepcopy(first_login)
+    reordered_login["fido2Credentials"] = [reordered]
+
+    if Converter._strict_login_signature(
+        first_login
+    ) != Converter._strict_login_signature(reordered_login):
+        raise AssertionError("FIDO dictionary order changed the legacy signature")
+
+
 def assert_pre_fix_ref_output_upgrades_without_force() -> None:
     """Exact old URI-only output gains REF TOTP despite its known-stale stamp."""
     with tempfile.TemporaryDirectory(prefix="kp2bw-ref-upgrade-") as tmp_dir:
@@ -1270,6 +1313,7 @@ def main() -> None:
     assert_distinct_ref_protects_oversize_secrets()
     assert_matching_ref_merges_totp_and_restamps()
     assert_matching_ref_accepts_semantically_equal_totp()
+    assert_strict_signature_ignores_fido_key_order()
     assert_pre_fix_ref_output_upgrades_without_force()
     assert_conflicting_ref_totp_creates_separate_item()
     assert_conflicting_ref_totp_is_order_independent()
