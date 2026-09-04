@@ -24,6 +24,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   remains fail-closed; use `--force-update` once to accept the KeePass version.
 - Preserve Bitwarden password revision dates during legacy REF repair, and treat reordered keys in otherwise identical
   FIDO2 credentials as equivalent instead of falsely triggering manual-edit protection.
+- Make `--migrate-uris` preserve manually edited items and refresh `KP2BW_SYNC` after safely folding legacy URL fields,
+  preventing later migration runs from mistaking kp2bw's own upgrade for a user edit.
 
 ### Security
 

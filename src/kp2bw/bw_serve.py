@@ -21,6 +21,12 @@ from rich.markup import escape
 
 from . import VERBOSE
 from ._console import console
+from ._item_sync import (
+    KP2BW_ID_FIELD_NAME,
+    KP2BW_SYNC_FIELD_NAME,
+    content_signature,
+    stamp_content,
+)
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import BitwardenClientError
 from .uri_mapping import UriMatchValue, remap_item_fields_to_uris
@@ -85,20 +91,6 @@ _RESPONSE_ONLY_ITEM_KEYS: frozenset[str] = frozenset({
 # sharing a name are a user's own data and must never be adopted.
 _BW_ITEM_TYPE_LOGIN: int = 1
 
-# Hidden custom-field name kp2bw stamps on every item it creates, carrying the
-# source KeePass entry UUID.  This is the *stable identity key*: dedup matches on
-# it so two distinct entries that merely share a ``(folder, title)`` never
-# collapse onto one item, and re-runs stay idempotent across title/folder edits.
-KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
-
-# Hidden custom-field name carrying a content signature of what kp2bw last wrote
-# to the item -- the basis for protecting Bitwarden-side manual edits on re-run.
-# A re-run that finds the item's current managed content no longer matching this
-# stamp knows a *user* edited it (kp2bw's own writes restamp it), and preserves
-# the edit instead of clobbering it.  Excluded from the content diff, like
-# KP2BW_ID, so it never makes a re-run look "changed".
-KP2BW_SYNC_FIELD_NAME: str = "KP2BW_SYNC"
-
 
 def item_kp2bw_id(item: BwItemResponse) -> str | None:
     """Return *item*'s KeePass-UUID stamp, or ``None`` if it is unstamped.
@@ -141,11 +133,13 @@ class MigrateResult(NamedTuple):
     """Outcome of a :meth:`BitwardenServeClient.migrate_url_fields_to_uris` pass.
 
     *scanned* is every in-scope item inspected; *migrated* is the subset that
-    carried ``KP2A_URL*`` / ``AndroidApp`` fields and was rewritten to URIs.
+    carried ``KP2A_URL*`` / ``AndroidApp`` fields and was rewritten to URIs;
+    *protected* carried those fields but had a mismatched sync stamp.
     """
 
     scanned: int
     migrated: int
+    protected: int
 
 
 # Actionable message shown when the Bitwarden CLI cannot be located.
@@ -226,7 +220,7 @@ def bw_cli_version(bw_cmd: list[str], bw_cwd: str | None) -> str | None:
             stdin=subprocess.DEVNULL,
             cwd=bw_cwd,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return None
     match = re.search(r"\d{4}\.\d+\.\d+(?:[-+.][0-9A-Za-z.-]+)?", result.stdout)
     return match.group(0) if match else None
@@ -343,7 +337,7 @@ def _listening_pids(port: int) -> set[int]:
             stdin=subprocess.DEVNULL,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return set()
     return parse_listening_pids(result.stdout, port)
 
@@ -1091,6 +1085,7 @@ class BitwardenServeClient:
             collection_id=self._collection_id,
         )
         migrated = 0
+        protected = 0
         for item in items:
             if item.get("type") != _BW_ITEM_TYPE_LOGIN:
                 continue
@@ -1105,15 +1100,24 @@ class BitwardenServeClient:
             )
             if not changed:
                 continue
+            sync_stamp = item_kp2bw_sync(item)
+            if sync_stamp is not None and sync_stamp != content_signature(item):
+                logger.warning(
+                    f"Skipping {item.get('name', '?')!r}: modified in Bitwarden "
+                    "since the last kp2bw sync"
+                )
+                protected += 1
+                continue
             item["fields"] = new_fields
             login["uris"] = new_uris
             item["login"] = login
+            stamp_content(item)
             self.update_item(item["id"], item)
             migrated += 1
         logger.info(
             f"Migrated URL fields to URIs on {migrated} of {len(items)} scanned items"
         )
-        return MigrateResult(scanned=len(items), migrated=migrated)
+        return MigrateResult(scanned=len(items), migrated=migrated, protected=protected)
 
     def create_items_batch(
         self,

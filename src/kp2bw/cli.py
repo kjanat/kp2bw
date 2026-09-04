@@ -555,7 +555,12 @@ def _run_migrate_uris(
             f"[green]Migrated URL fields to URIs on {result.migrated} of "
             f"{result.scanned} item(s).[/green]"
         )
-    else:
+    if result.protected:
+        console.print(
+            f"[yellow]Preserved {result.protected} item(s) modified in Bitwarden; "
+            "their legacy URL fields were not changed.[/yellow]"
+        )
+    if not result.migrated and not result.protected:
         console.print(
             f"No items carried legacy URL fields in {escape(scope)} "
             f"({result.scanned} scanned); nothing to do."

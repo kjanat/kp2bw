@@ -193,7 +193,8 @@ plain string.
 Already imported before this existed? Two ways to upgrade: re-run a normal migration (the change is detected and the
 items are updated in place), or — if you don't want to re-import — run `kp2bw --migrate-uris`, a Bitwarden-only one-shot
 pass that re-folds the legacy fields into URIs on every existing item. Both honour
-`--uri-match`/`--interpret-uri-syntax` and `-o`/`-c`.
+`--uri-match`/`--interpret-uri-syntax` and `-o`/`-c`. The one-shot pass preserves stamped items edited in Bitwarden and
+establishes or refreshes `KP2BW_SYNC` on each migrated item.
 
 Too many subdomains autofilling together? Under base-domain matching, every login under `*.example.com` surfaces on any
 `example.com` subdomain. `kp2bw --report-uris keepass` (or `bitwarden`) prints a read-only collision report —

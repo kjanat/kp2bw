@@ -28,9 +28,15 @@ from rich.progress import (
 
 from . import VERBOSE
 from ._console import console
-from .bw_serve import (
+from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
+    content_signature,
+    fields_signature,
+    login_signature,
+    stamp_content,
+)
+from .bw_serve import (
     BitwardenServeClient,
     item_kp2bw_sync,
 )
@@ -1294,16 +1300,8 @@ class Converter:
             return name, att.data
         return name, att[1].encode("UTF-8")
 
-    # Custom fields kp2bw manages itself, never user content: excluded from the
-    # content signature so they can never make a re-run look "changed".
-    _MANAGED_FIELD_NAMES: frozenset[str] = frozenset({
-        KP2BW_ID_FIELD_NAME,
-        KP2BW_SYNC_FIELD_NAME,
-    })
-
-    @classmethod
+    @staticmethod
     def _fields_signature(
-        cls,
         fields: list[BwField] | None,
     ) -> list[tuple[str, str, int]]:
         """Order-independent (name, value, type) signature of custom fields.
@@ -1313,28 +1311,14 @@ class Converter:
         must never make a re-run look "changed" (and on a legacy item they are
         absent, while the desired item always carries ``KP2BW_ID``).
         """
-        return sorted(
-            (
-                (f.get("name") or "", f.get("value") or "", f.get("type") or 0)
-                for f in (fields or [])
-                if (f.get("name") or "") not in cls._MANAGED_FIELD_NAMES
-            ),
-            key=lambda t: (t[0], t[2], t[1]),
-        )
+        return fields_signature(fields)
 
     @staticmethod
     def _login_signature(
         login: BwItemLogin | None,
     ) -> tuple[str, str, str, list[str]]:
         """Signature of the login fields kp2bw owns (creds, totp, URIs)."""
-        if login is None:
-            return ("", "", "", [])
-        return (
-            login.get("username") or "",
-            login.get("password") or "",
-            login.get("totp") or "",
-            [u.get("uri", "") for u in (login.get("uris") or [])],
-        )
+        return login_signature(login)
 
     @staticmethod
     def _strict_login_signature(
@@ -1368,8 +1352,8 @@ class Converter:
         """Compare the login fields kp2bw owns (creds, totp, URIs)."""
         return cls._login_signature(existing) != cls._login_signature(desired)
 
-    @classmethod
-    def _content_signature(cls, item: BwItemResponse | BwItemCreate) -> str:
+    @staticmethod
+    def _content_signature(item: BwItemResponse | BwItemCreate) -> str:
         """Hex digest over exactly the content kp2bw manages on an item.
 
         Covers name, notes, the custom-field signature (managed stamps excluded)
@@ -1380,26 +1364,12 @@ class Converter:
         restamps it.  The digest leaks nothing: every input is already present in
         cleartext on the same item to anyone who can read it.
         """
-        blob = repr((
-            item.get("name") or "",
-            item.get("notes") or "",
-            cls._fields_signature(item.get("fields")),
-            cls._login_signature(item.get("login")),
-        ))
-        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+        return content_signature(item)
 
-    @classmethod
-    def _stamp_content(cls, item: BwItemCreate | BwItemResponse) -> None:
+    @staticmethod
+    def _stamp_content(item: BwItemCreate | BwItemResponse) -> None:
         """Set the managed sync field to the signature of *item*'s current content."""
-        signature = cls._content_signature(item)
-        for field in reversed(item["fields"]):
-            if field["name"] == KP2BW_SYNC_FIELD_NAME:
-                field["value"] = signature
-                field["type"] = 0
-                return
-        item["fields"].append(
-            BwField(name=KP2BW_SYNC_FIELD_NAME, value=signature, type=0)
-        )
+        stamp_content(item)
 
     @classmethod
     def _content_differs(cls, existing: BwItemResponse, desired: BwItemCreate) -> bool:

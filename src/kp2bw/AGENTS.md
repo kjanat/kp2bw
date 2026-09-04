@@ -101,6 +101,9 @@ src/kp2bw/
   re-runs (they fall back to `(folder, name)` matching), so an interactive run confirms first (skippable with
   `-y`/`KP2BW_YES`); a declined prompt exits `0` (clean abort), Ctrl+C exits `130`. Re-runnable: a second pass finds
   nothing.
+- `--migrate-uris` is a Bitwarden-only legacy upgrade. Before folding URL/app fields, it verifies any existing
+  `KP2BW_SYNC` against the shared content-signature helper and skips mismatches; unstamped legacy items remain eligible.
+  Every transformed item is restamped before its single `PUT`, and a repeated pass writes nothing.
 - `--metadata` (default on) folds the KeePass metadata Bitwarden has no native slot for — **tags and expiry** — into a
   single readable **YAML** `KP2BW_META` text field (`_build_metadata_field`, via PyYAML
   `safe_dump(allow_unicode=
