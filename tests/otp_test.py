@@ -22,6 +22,7 @@ from kp2bw.otp import (
     PPS_TOTP_PERIOD_KEY,
     PPS_TOTP_SECRET_KEY,
     resolve_otp,
+    totp_values_equivalent,
 )
 
 # A fixed 10-byte secret with an externally verified Base32 form (Google
@@ -659,6 +660,49 @@ def assert_mixed_database_hides_every_secret() -> None:
         )
 
 
+def assert_totp_equivalence_uses_code_parameters_only() -> None:
+    left = f"otpauth://totp/First?secret={_B32}&algorithm=SHA256&digits=8&period=45"
+    right = (
+        f"otpauth://totp/Second?period=45&issuer=Other&digits=8&"
+        f"algorithm=sha256&secret={_B32.lower()}"
+    )
+    if not totp_values_equivalent(left, right):
+        raise AssertionError(
+            "Equivalent TOTP code parameters were treated as a conflict"
+        )
+
+
+def assert_totp_equivalence_rejects_noncanonical_algorithm() -> None:
+    canonical = f"otpauth://totp/A?secret={_B32}&algorithm=SHA256"
+    fallback = f"otpauth://totp/B?secret={_B32}&algorithm=SHA-256"
+    if totp_values_equivalent(canonical, fallback):
+        raise AssertionError("Unsupported algorithm alias was treated as SHA256")
+
+
+def assert_totp_equivalence_rejects_duplicate_parameters() -> None:
+    ambiguous = f"otpauth://totp/A?secret={_B32}&secret=GEZDGNBVGY3TQOJQ"
+    if totp_values_equivalent(_B32, ambiguous):
+        raise AssertionError(
+            "Ambiguous duplicate TOTP secret was treated as equivalent"
+        )
+
+
+def assert_totp_equivalence_rejects_non_ascii_decimal_syntax() -> None:
+    canonical = f"otpauth://totp/A?secret={_B32}&period=60&algorithm=SHA1"
+    malformed = (
+        f"otpauth://totp/B?secret={_B32}&period=6_0&algorithm=SHA1",
+        f"otpauth://totp/B?secret={_B32}&period=%2060&algorithm=SHA1",
+        f"otpauth://totp/B?secret={_B32}&period=%2B60&algorithm=SHA1",
+        f"otpauth://totp/B?secret={_B32}&period=\uff16\uff10&algorithm=SHA1",
+        f"otpauth://totp/B?secret={_B32}&period=60&algorithm=\u017fHA1",
+    )
+    for candidate in malformed:
+        if totp_values_equivalent(canonical, candidate):
+            raise AssertionError(
+                "Malformed TOTP parameter syntax was treated as canonical"
+            )
+
+
 def main() -> None:
     assert_b32_anchor()
     assert_fallback_base32_default()
@@ -697,6 +741,10 @@ def main() -> None:
     assert_default_ignores_pps_fields()
     assert_pps_ignores_keepass_fields()
     assert_mixed_database_hides_every_secret()
+    assert_totp_equivalence_uses_code_parameters_only()
+    assert_totp_equivalence_rejects_noncanonical_algorithm()
+    assert_totp_equivalence_rejects_duplicate_parameters()
+    assert_totp_equivalence_rejects_non_ascii_decimal_syntax()
     print("otp resolution test passed")
 
 

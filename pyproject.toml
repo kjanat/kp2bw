@@ -1,6 +1,6 @@
 [project]
 name            = "kp2bw"
-version         = "3.8.0"
+version         = "3.8.1"
 description     = "Imports and existing KeePass db with REF fields into Bitwarden"
 readme          = "README.md"
 requires-python = ">=3.14"
@@ -19,7 +19,7 @@ classifiers     = [
 ]
 dependencies    = [
   "httpx>=0.28.0",
-  "pykeepass>=4.1.1.post1",
+  "pykeepass>=4.1.1.post1,<4.3",
   "python-dotenv>=1.0.1",
   "pyyaml>=6.0.3",
   "rich>=13.0.0",

@@ -1,25 +1,67 @@
 # KP2BW - KeePass to Bitwarden Converter
 
 <a href="https://pypi.org/project/kp2bw/">
-  <img src="https://img.shields.io/pypi/v/kp2bw?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMS42OTYgMzAuMDI0Ij48ZyBzdHJva2U9IiNjY2MiIHN0cm9rZS1saW5lam9pbj0iYmV2ZWwiIHN0cm9rZS13aWR0aD0iLjM1NSI%2BPHBhdGggZmlsbD0iI2Y3ZjdmNCIgZD0ibS4xNzggNS45MTIgMTUuNTU1IDUuNjYyTDMxLjUxOSA1LjgzIDE1Ljk2My4xNjd6Ii8%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTE1LjczMyAxMS41NzR2MTguMjgzbDE1Ljc4Ni01Ljc0NlY1LjgzeiIvPjxwYXRoIGZpbGw9IiNlZmVlZWEiIGQ9Im0uMTc4IDUuOTEyIDE1LjU1NSA1LjY2MnYxOC4yODNMLjE3OCAyNC4xOTV6Ii8%2BPC9nPjwvc3ZnPg%3D%3D&color=3775A9" alt="PyPI">
+	<img
+		src="https://img.shields.io/pypi/v/kp2bw?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMS42OTYgMzAuMDI0Ij48ZyBzdHJva2U9IiNjY2MiIHN0cm9rZS1saW5lam9pbj0iYmV2ZWwiIHN0cm9rZS13aWR0aD0iLjM1NSI%2BPHBhdGggZmlsbD0iI2Y3ZjdmNCIgZD0ibS4xNzggNS45MTIgMTUuNTU1IDUuNjYyTDMxLjUxOSA1LjgzIDE1Ljk2My4xNjd6Ii8%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTE1LjczMyAxMS41NzR2MTguMjgzbDE1Ljc4Ni01Ljc0NlY1LjgzeiIvPjxwYXRoIGZpbGw9IiNlZmVlZWEiIGQ9Im0uMTc4IDUuOTEyIDE1LjU1NSA1LjY2MnYxOC4yODNMLjE3OCAyNC4xOTV6Ii8%2BPC9nPjwvc3ZnPg%3D%3D&color=3775A9"
+		alt="PyPI"
+	>
 </a>
 
 Migrates KeePass databases to Bitwarden via the `bw` CLI,\
 with advantages over the built-in Bitwarden importer:
 
-- <details><summary><b>Encrypted in-memory transfer</b></summary> Data never hits disk unencrypted (except attachments, which are cleaned up after upload).</details>
-- <details><summary><b>KeePass REF resolution</b></summary> Username/password references are resolved.<br> Matching credentials merge URLs into one entry; differing ones create new entries.</details>
-- <details open><summary><b>Passkey migration</b></summary> KeePassXC FIDO2/passkey credentials (<code>KPEX_PASSKEY_*</code>) are converted to Bitwarden <code>fido2Credentials</code>.</details>
-- <details><summary><b>Custom properties &amp; attachments</b></summary> Imported as Bitwarden custom fields or attachments (values &gt;10k chars auto-upload as files).</details>
-- <details><summary><b>Long notes handling</b></summary> Notes exceeding 10k chars are uploaded as <code>notes.txt</code> attachments.</details>
-- <details><summary><b>Idempotent re-runs that sync changes</b></summary> Safe to run repeatedly; existing entries are updated in place when their KeePass content changed (notes, credentials, URIs, fields) and never duplicated. Each item is stamped with its KeePass UUID in a <code>KP2BW_ID</code> field, so distinct entries that share a title stay separate and a re-run is matched by identity rather than title. Edits you make in Bitwarden are <b>protected</b>: a re-run preserves them instead of reverting to KeePass (a <code>KP2BW_SYNC</code> content stamp tells your edit apart from kp2bw's own writes); <code>--force-update</code> overrides.<br> Disable updates with <code>--no-update</code>.</details>
-- <details><summary><b>Nested folders</b></summary> KeePass folder hierarchy is recreated in Bitwarden.</details>
-- <details><summary><b>Recycle Bin filtering</b></summary> Deleted entries are automatically excluded.</details>
-- <details><summary><b>Expiry awareness</b></summary> Expired entries are marked <code>[EXPIRED]</code> in notes; optionally skip them entirely with <code>--skip-expired</code>.</details>
-- <details><summary><b>Metadata preservation</b></summary> KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (YAML), omitted when an entry has neither. Created/modified timestamps are not migrated — Bitwarden manages its own creation/revision dates.</details>
-- <details><summary><b>Tag filtering</b></summary> Import only entries matching specific tags.</details>
-- <details><summary><b>Organization &amp; collection support</b></summary> Upload into a Bitwarden organization with automatic or manual collection assignment.</details>
-- <details><summary><b>Full UTF-8 &amp; cross-platform</b></summary> Works on Windows, macOS, and Linux.</details>
+- <details>
+  	<summary><b>Encrypted in-memory transfer</b></summary>
+  	Data never hits disk unencrypted (except attachments, which are cleaned up after upload).
+  </details>
+- <details>
+  	<summary><b>KeePass REF resolution</b></summary>
+  	Username/password references are resolved.<br> Matching credentials merge URLs and a compatible TOTP into one entry. Conflicting TOTP or other content that cannot be merged stays in a separate entry to prevent data loss.
+  </details>
+- <details open>
+  	<summary><b>Passkey migration</b></summary>
+  	KeePassXC FIDO2/passkey credentials (<code>KPEX_PASSKEY_*</code>) are converted to Bitwarden <code>fido2Credentials</code>.
+  </details>
+- <details>
+  	<summary><b>Custom properties &amp; attachments</b></summary>
+  	Imported as Bitwarden custom fields or attachments (values &gt;10k chars auto-upload as files).
+  </details>
+- <details>
+  	<summary><b>Long notes handling</b></summary>
+  	Notes exceeding 10k chars are uploaded as <code>notes.txt</code> attachments.
+  </details>
+- <details>
+  	<summary><b>Idempotent re-runs that sync changes</b></summary>
+  	Safe to run repeatedly; existing entries are updated in place when their KeePass content changed (notes, credentials, URIs, fields) and never duplicated. Each item is stamped with its KeePass UUID in a <code>KP2BW_ID</code> field, so distinct entries that share a title stay separate and a re-run is matched by identity rather than title. Edits you make in Bitwarden are <b>protected</b>: a re-run preserves them instead of reverting to KeePass (a <code>KP2BW_SYNC</code> content stamp tells your edit apart from kp2bw's own writes); <code>--force-update</code> overrides.<br> Disable updates with <code>--no-update</code>.
+  </details>
+- <details>
+  	<summary><b>Nested folders</b></summary>
+  	KeePass folder hierarchy is recreated in Bitwarden.
+  </details>
+- <details>
+  	<summary><b>Recycle Bin filtering</b></summary>
+  	Deleted entries are automatically excluded.
+  </details>
+- <details>
+  	<summary><b>Expiry awareness</b></summary>
+  	Expired entries are marked <code>[EXPIRED]</code> in notes; optionally skip them entirely with <code>--skip-expired</code>.
+  </details>
+- <details>
+  	<summary><b>Metadata preservation</b></summary>
+  	KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (YAML), omitted when an entry has neither. Created/modified timestamps are not migrated — Bitwarden manages its own creation/revision dates.
+  </details>
+- <details>
+  	<summary><b>Tag filtering</b></summary>
+  	Import only entries matching specific tags.
+  </details>
+- <details>
+  	<summary><b>Organization &amp; collection support</b></summary>
+  	Upload into a Bitwarden organization with automatic or manual collection assignment.
+  </details>
+- <details>
+  	<summary><b>Full UTF-8 &amp; cross-platform</b></summary>
+  	Works on Windows, macOS, and Linux.
+  </details>
 
 > Fork of [jampe/kp2bw].
 
