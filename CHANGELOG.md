@@ -8,13 +8,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.8.1] - 2026-09-04
+
+### Changed
+
+- Constrain PyKeePass to `>=4.1.1.post1,<4.3` so installations use versions compatible with REF migration and the
+  bundled type stubs.
+
 ### Fixed
 
-- Preserve TOTP from credential-matching KeePass REF aliases. Equivalent settings merge regardless of URI label; a
-  conflicting TOTP or other unmergeable alias content remains a separate item instead of being discarded.
+- Preserve TOTP from credential-matching KeePass REF aliases. Resolve sibling aliases deterministically; equivalent
+  settings merge regardless of URI label, while conflicting TOTP or other unmergeable content remains a separate item.
 - Refresh `KP2BW_SYNC` after REF URI/TOTP merges and repair stale pre-fix stamps when vault content still matches the
   source. If source content represented in the old URI-only item changed before that repair pass, edit protection
   remains fail-closed; use `--force-update` once to accept the KeePass version.
+- Preserve Bitwarden password revision dates during legacy REF repair, and treat reordered keys in otherwise identical
+  FIDO2 credentials as equivalent instead of falsely triggering manual-edit protection.
 
 ### Security
 
@@ -618,7 +627,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.7.1...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.8.1...HEAD
+[3.8.1]: https://github.com/kjanat/kp2bw/compare/v3.8.0...v3.8.1
+[3.8.0]: https://github.com/kjanat/kp2bw/compare/v3.7.1...v3.8.0
 [3.7.1]: https://github.com/kjanat/kp2bw/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/kjanat/kp2bw/compare/v3.6.0...v3.7.0
 [3.6.0]: https://github.com/kjanat/kp2bw/compare/v3.5.0...v3.6.0
