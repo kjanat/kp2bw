@@ -37,7 +37,7 @@ import base64
 import binascii
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 # ---------------------------------------------------------------------------
 # KeePass OTP custom-field keys — https://keepass.info/help/base/placeholders.html#otp
@@ -82,6 +82,18 @@ _ALGORITHM_MAP: dict[str, str] = {
     "HMAC-SHA-256": "SHA256",
     "HMAC-SHA-512": "SHA512",
 }
+
+_OTPAUTH_ALGORITHM_MAP: dict[str, str] = {
+    "SHA1": "SHA1",
+    "SHA256": "SHA256",
+    "SHA512": "SHA512",
+}
+_OTPAUTH_CODE_PARAMETER_KEYS: frozenset[str] = frozenset({
+    "secret",
+    "algorithm",
+    "digits",
+    "period",
+})
 
 
 def _decode_utf8(value: str) -> bytes:
@@ -197,6 +209,90 @@ class _TotpConfig:
             and self.period == DEFAULT_PERIOD
             and self.algorithm == DEFAULT_ALGORITHM
         )
+
+
+def _otpauth_int_parameter(
+    parameters: Mapping[str, str], key: str, default: int
+) -> int | None:
+    """Return one positive ASCII-decimal parameter, or ``None`` if malformed."""
+    value = parameters.get(key)
+    if value is None:
+        return default
+    if not value.isascii() or not value.isdecimal():
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _otpauth_code_parameters(query: str) -> dict[str, str] | None:
+    """Return unambiguous lowercase parameters that affect generated codes."""
+    parameters: dict[str, str] = {}
+    for key, values in parse_qs(query, keep_blank_values=True).items():
+        normalized_key = key.lower()
+        if normalized_key not in _OTPAUTH_CODE_PARAMETER_KEYS:
+            continue
+        if key != normalized_key or normalized_key in parameters or len(values) != 1:
+            return None
+        parameters[normalized_key] = values[0]
+    return parameters
+
+
+def _totp_identity(value: str) -> tuple[bytes, _TotpConfig] | None:
+    """Parse the code-generating parts of a Bitwarden TOTP value."""
+    stripped = value.strip()
+    if stripped.lower().startswith("otpauth://"):
+        try:
+            parsed = urlsplit(stripped)
+        except ValueError:
+            return None
+        if parsed.scheme.lower() != "otpauth" or parsed.netloc.lower() != "totp":
+            return None
+
+        parameters = _otpauth_code_parameters(parsed.query)
+        if parameters is None:
+            return None
+        raw_secret = parameters.get("secret")
+        if raw_secret is None:
+            return None
+        raw_algorithm = parameters.get("algorithm", DEFAULT_ALGORITHM)
+        algorithm = (
+            _OTPAUTH_ALGORITHM_MAP.get(raw_algorithm.upper())
+            if raw_algorithm.isascii()
+            else None
+        )
+        digits = _otpauth_int_parameter(parameters, "digits", DEFAULT_DIGITS)
+        period = _otpauth_int_parameter(parameters, "period", DEFAULT_PERIOD)
+        if algorithm is None or digits is None or period is None:
+            return None
+    else:
+        raw_secret = stripped
+        algorithm = DEFAULT_ALGORITHM
+        digits = DEFAULT_DIGITS
+        period = DEFAULT_PERIOD
+
+    try:
+        secret = _decode_base32(raw_secret)
+    except ValueError, binascii.Error:
+        return None
+    if not secret:
+        return None
+    return secret, _TotpConfig(digits=digits, period=period, algorithm=algorithm)
+
+
+def totp_values_equivalent(left: str, right: str) -> bool:
+    """Whether two Bitwarden TOTP values generate the same codes.
+
+    Labels, issuers, query ordering and Base32 presentation do not affect code
+    generation. Malformed or unsupported values remain equivalent only by exact
+    string equality.
+    """
+    if left == right:
+        return True
+    left_identity = _totp_identity(left)
+    return left_identity is not None and left_identity == _totp_identity(right)
 
 
 @dataclass(frozen=True)
@@ -360,8 +456,8 @@ def resolve_otp(
     """Resolve an entry's OTP fields into a Bitwarden ``login.totp`` value.
 
     *otp_uri* is ``entry.otp`` (the KeePassXC ``otp`` field, already an
-    ``otpauth://`` URI when set).  *custom_properties* is ``entry.custom_properties``
-    (raw ``TimeOtp-*`` / ``HmacOtp-*`` strings).  *entry_label* labels any
+    ``otpauth://`` URI when set). *custom_properties* contains the entry's raw
+    ``TimeOtp-*`` / ``HmacOtp-*`` strings. *entry_label* labels any
     generated ``otpauth://`` URI.
 
     *totp_pps* reads TOTP from Pleasant Password Server's ``TOTPSecret`` /

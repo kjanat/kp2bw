@@ -120,11 +120,20 @@ src/kp2bw/
   `TimeOtp-Secret-Base32`/`-Hex`/`-Base64`/`TimeOtp-Secret` plus `TimeOtp-Length`/`-Period`/`-Algorithm`; the Pleasant
   Password Server scheme (`--totp-pps` / `KP2BW_TOTP_PPS` / `Converter(totp_pps=...)`, issue #45) reads `TOTPSecret`
   (always Base32) plus `TOTPDigits`/`TOTPPeriod` and has no algorithm key, so `DEFAULT_ALGORITHM` (SHA-1) applies. The
-  schemes **replace** each other for reading: only the active one is decoded and consumed. Hiding is not scheme-scoped
-  -- `_ALL_SECRET_KEYS` spans **both** schemes plus HOTP, so a `TimeOtp-Secret-*` field under `--totp-pps` (or a
+  schemes **replace** each other for reading: only the active one is decoded and consumed. Hiding is not scheme-scoped -- `_ALL_SECRET_KEYS` spans **both** schemes plus HOTP, so a `TimeOtp-Secret-*` field under `--totp-pps` (or a
   `TOTPSecret` field without it) is carried over as a **hidden** field instead of a visible one, upholding the module
   invariant that no OTP secret is ever written in the clear. Config keys (`*-Length`/`Digits`, `*-Period`,
   `TimeOtp-Algorithm`) hold no secret, so the inactive scheme's stay ordinary custom fields. Tests: `tests/otp_test.py`.
+- Custom properties are read by `convert._read_entry_custom_properties()` directly from each entry's `<String>`
+  children. Do not replace this with `Entry.custom_properties` or dynamic XPath: supported PyKeePass versions
+  interpolate custom keys into XPath. The single traversal returns both values and `Protected=True` keys so normal and
+  REF-created items share hidden/oversize-secret behavior.
+- A credential-matching REF alias merges only losslessly representable content: deduplicated URIs and a missing or
+  semantically equivalent `login.totp` resolved through `resolve_otp()`. Conflicting TOTP, distinct referents, or other
+  migratable alias content creates a separate item. Sibling aliases resolve in UUID order so conflicting TOTP handling
+  is independent of XML order. Every successful merge refreshes `KP2BW_SYNC` after its final URI/TOTP mutation. A
+  matching-content re-run repairs stale sync stamps written before REF restamping existed; the legacy shadow separately
+  replays the historical DFS/XML order so deterministic fresh ordering does not reject untouched old output.
 - Dedup is org-scoped when `--bitwarden-org` is set and collection-scoped when a fixed `--bitwarden-collection` is
   given: `_build_dedup_index()` / `list_items()` pass `organization_id` / `collection_id`. Personal vault (both `None`)
   indexes all visible items.

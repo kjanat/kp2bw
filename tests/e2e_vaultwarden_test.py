@@ -397,6 +397,53 @@ def _update_keepass_snapshot(path: Path, password: str) -> None:
     kp.save()
 
 
+def _create_ref_snapshot(path: Path, password: str) -> None:
+    """Build a focused REF fixture for live TOTP/protection/idempotency checks."""
+    create_database(str(path), password=password)
+    kp = PyKeePass(str(path), password=password)
+
+    target = kp.add_entry(
+        kp.root_group,
+        "REF Target",
+        "ref-user",
+        "ref-password",
+        url="https://ref-target.example",
+    )
+    password_ref = f"{{REF:P@I:{target.uuid.hex.upper()}}}"
+
+    alias = kp.add_entry(
+        kp.root_group,
+        "REF TOTP Alias",
+        "ref-user",
+        password_ref,
+        url="https://ref-alias.example/v1",
+    )
+    alias.set_custom_property(
+        "TimeOtp-Secret-Hex", "3132333435363738393031323334353637383930"
+    )
+    alias.set_custom_property("TimeOtp-Algorithm", "HMAC-SHA-256")
+    alias.set_custom_property("TimeOtp-Length", "8")
+
+    distinct = kp.add_entry(
+        kp.root_group,
+        "REF Distinct",
+        "different-ref-user",
+        password_ref,
+    )
+    distinct.set_custom_property("private-code", "protected-value", protect=True)
+    kp.save()
+
+
+def _update_ref_alias_url(path: Path, password: str) -> None:
+    """Change only the merged REF alias URL to exercise sync-stamp updates."""
+    kp = PyKeePass(str(path), password=password)
+    alias = kp.find_entries(title="REF TOTP Alias", first=True)
+    if alias is None:
+        raise AssertionError("REF fixture contract broken: alias not found")
+    alias.url = "https://ref-alias.example/v2"
+    kp.save()
+
+
 # A second long note (still over the 10k attachment threshold) used to verify
 # that an *edited* attachment keeping the same filename is refreshed in place on
 # a re-run instead of going stale or duplicating (issue #11).
@@ -516,7 +563,7 @@ def _server_version(server_url: str, cert_path: Path) -> str:
             f"{server_url}/api/config", context=context, timeout=10
         ) as response:
             config = cast(dict[str, object], json.loads(response.read()))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return "unknown"
     server = config.get("server")
     name = (
@@ -637,6 +684,70 @@ def _field(item: NormItem, name: str) -> NormField:
             f"item {item['name']!r}: expected one field {name!r}, found {len(matches)}"
         )
     return matches[0]
+
+
+def _assert_live_ref_items(
+    env: dict[str, str], session: str, *, alias_url: str
+) -> dict[str, tuple[str, str]]:
+    """Assert the focused REF fixture directly against live Bitwarden items."""
+    items = _bw_json(env, "list", "items", "--session", session)
+
+    def full_item(name: str) -> dict[str, JsonValue]:
+        matches = [item for item in items if item.get("name") == name]
+        if len(matches) != 1:
+            raise AssertionError(
+                f"expected one live item named {name!r}, found {len(matches)}"
+            )
+        item_id = matches[0].get("id")
+        if not isinstance(item_id, str):
+            raise TypeError(f"live item {name!r} has no string id")
+        return parse_object(
+            _run(["bw", "get", "item", item_id, "--session", session], env=env)
+        )
+
+    if any(item.get("name") == "REF TOTP Alias" for item in items):
+        raise AssertionError("credential-matching REF alias was imported separately")
+
+    target = full_item("REF Target")
+    target_login = as_object(target.get("login"))
+    raw_uris = target_login.get("uris")
+    if not isinstance(raw_uris, list):
+        raise TypeError("REF Target has no URI list")
+    uri_values = {
+        uri
+        for raw_uri in raw_uris
+        if isinstance(uri := as_object(raw_uri).get("uri"), str)
+    }
+    expected_uris = {"https://ref-target.example", alias_url}
+    if uri_values != expected_uris:
+        raise AssertionError("REF Target does not carry the expected merged URIs")
+
+    totp = target_login.get("totp")
+    if not isinstance(totp, str) or not totp.startswith("otpauth://totp/"):
+        raise AssertionError("REF Target did not receive the alias TOTP")
+    if "algorithm=SHA256" not in totp or "digits=8" not in totp:
+        raise AssertionError("REF Target TOTP lost its non-default configuration")
+
+    distinct = full_item("REF Distinct")
+    raw_fields = distinct.get("fields")
+    if not isinstance(raw_fields, list):
+        raise TypeError("REF Distinct has no custom fields")
+    private_types = [
+        field.get("type")
+        for raw_field in raw_fields
+        if (field := as_object(raw_field)).get("name") == "private-code"
+    ]
+    if private_types != [1]:
+        raise AssertionError("REF Distinct protected field is not hidden")
+
+    versions: dict[str, tuple[str, str]] = {}
+    for name, item in (("REF Target", target), ("REF Distinct", distinct)):
+        item_id = item.get("id")
+        revision = item.get("revisionDate")
+        if not isinstance(item_id, str) or not isinstance(revision, str):
+            raise TypeError(f"live item {name!r} has no string id/revision")
+        versions[name] = (item_id, revision)
+    return versions
 
 
 def _assert_comprehensive_seed(vault: NormVault) -> None:
@@ -959,6 +1070,48 @@ def main() -> None:
         _assert_snapshots_equal(
             s_refresh, s_final, label="idempotency (refreshed state)"
         )
+
+        # Focused REF pass runs after golden assertions, so it can verify the
+        # live transport without changing the comprehensive snapshot contract.
+        ref_snapshot_path = tmp / "refs.kdbx"
+        _create_ref_snapshot(ref_snapshot_path, kp_password)
+        logger.info("Running focused REF migration")
+        _ = _run_migration(ref_snapshot_path, kp_password, bw_password, env)
+        session = _get_session(env, bw_password)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+        ref_v1 = _assert_live_ref_items(
+            env, session, alias_url="https://ref-alias.example/v1"
+        )
+
+        # Unchanged REF re-run must issue no item PUT and create no duplicate.
+        _ = _run_migration(ref_snapshot_path, kp_password, bw_password, env)
+        session = _get_session(env, bw_password)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+        ref_v1_rerun = _assert_live_ref_items(
+            env, session, alias_url="https://ref-alias.example/v1"
+        )
+        if ref_v1_rerun != ref_v1:
+            raise AssertionError("Unchanged REF re-run changed item revisions")
+
+        # A later alias URL edit must update normally. A stale KP2BW_SYNC stamp
+        # would misclassify the canonical item as manually edited and block this.
+        _update_ref_alias_url(ref_snapshot_path, kp_password)
+        _ = _run_migration(ref_snapshot_path, kp_password, bw_password, env)
+        session = _get_session(env, bw_password)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+        ref_v2 = _assert_live_ref_items(
+            env, session, alias_url="https://ref-alias.example/v2"
+        )
+
+        # The updated REF state must also settle into a no-PUT idempotent re-run.
+        _ = _run_migration(ref_snapshot_path, kp_password, bw_password, env)
+        session = _get_session(env, bw_password)
+        _ = _run(["bw", "sync", "--session", session], env=env)
+        ref_v2_rerun = _assert_live_ref_items(
+            env, session, alias_url="https://ref-alias.example/v2"
+        )
+        if ref_v2_rerun != ref_v2:
+            raise AssertionError("Updated REF re-run changed item revisions")
 
     print("vaultwarden end-to-end integration test passed")
 

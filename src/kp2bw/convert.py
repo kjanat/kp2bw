@@ -4,6 +4,8 @@ import copy
 import hashlib
 import logging
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from itertools import islice
 from typing import Literal
 
@@ -41,7 +43,7 @@ from .bw_types import (
     BwUri,
 )
 from .exceptions import BitwardenClientError, ConversionError
-from .otp import resolve_otp
+from .otp import OtpMigration, resolve_otp, totp_values_equivalent
 from .uri_mapping import (
     UriMatchValue,
     build_login_uris,
@@ -70,6 +72,22 @@ COLLECTION_FOLDER_MODES: frozenset[str] = frozenset({
 # and is omitted entirely when an entry has no such metadata.
 KP2BW_META_FIELD_NAME: str = "KP2BW_META"
 
+# Mirrors pykeepass.entry.reserved_keys. Custom-property access in supported
+# PyKeePass versions interpolates keys into XPath, so enumerate the XML once
+# instead of calling Entry.custom_properties for untrusted field names.
+_KEEPASS_RESERVED_STRING_KEYS: frozenset[str] = frozenset({
+    "Title",
+    "UserName",
+    "Password",
+    "URL",
+    "Tags",
+    "IconID",
+    "Times",
+    "History",
+    "Notes",
+    "otp",
+})
+
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
 type AttachmentItem = Attachment | tuple[str, str]
 
@@ -79,6 +97,46 @@ type EntryValue = tuple[str | None, str | None, BwItemCreate, list[AttachmentIte
 # Custom field spec: (value, type_int)  e.g. ("secret", 1)
 # Field types: 0=text, 1=hidden, 2=boolean, 3=linked
 type FieldSpec = tuple[str | None, Literal[0, 1, 2, 3]]
+
+
+@dataclass(frozen=True)
+class _EntryCustomProperties:
+    """Custom values and memory-protection flags read in one XML traversal."""
+
+    values: dict[str, str | None]
+    protected_keys: frozenset[str]
+
+
+@dataclass
+class _LegacyRefState:
+    """Exact item shape and stale stamp emitted by the pre-fix REF flow."""
+
+    initial_sync_stamp: str
+    item: BwItemCreate
+    base_uris: list[BwUri]
+    uri_merges: dict[int, list[BwUri]]
+
+
+def _read_entry_custom_properties(entry: Entry) -> _EntryCustomProperties:
+    """Read custom fields without placing attacker-controlled keys in XPath."""
+    values: dict[str, str | None] = {}
+    protected_keys: set[str] = set()
+
+    for string_element in entry._element.findall("String"):
+        key_element = string_element.find("Key")
+        key = key_element.text if key_element is not None else None
+        if key is None or key in _KEEPASS_RESERVED_STRING_KEYS or key in values:
+            continue
+
+        value_element = string_element.find("Value")
+        values[key] = value_element.text if value_element is not None else None
+        if (
+            value_element is not None
+            and value_element.attrib.get("Protected", "False") == "True"
+        ):
+            protected_keys.add(key)
+
+    return _EntryCustomProperties(values, frozenset(protected_keys))
 
 
 def _print_summary(
@@ -146,7 +204,9 @@ def _print_summary(
         )
 
 
-def _entry_url_inputs(entry: Entry) -> tuple[str, list[str], list[str]]:
+def _entry_url_inputs(
+    entry: Entry, custom_properties: Mapping[str, str | None]
+) -> tuple[str, list[str], list[str]]:
     """``(primary url, additional URLs, android packages)`` for a KeePass entry.
 
     Mirrors the extraction in :meth:`Converter._add_bw_entry_to_entries_dict`
@@ -156,7 +216,7 @@ def _entry_url_inputs(entry: Entry) -> tuple[str, list[str], list[str]]:
     """
     url_attrs: list[tuple[int, str]] = []
     app_attrs: list[tuple[int, str]] = []
-    for key, value in entry.custom_properties.items():
+    for key, value in custom_properties.items():
         if value and is_url_attribute_key(key):
             bucket = app_attrs if is_android_app_key(key) else url_attrs
             bucket.append((url_attribute_index(key), value))
@@ -212,7 +272,8 @@ def collect_keepass_uris(
     )
     uris: list[str] = []
     for entry in kp.entries:
-        primary, additional, android = _entry_url_inputs(entry)
+        custom_properties = _read_entry_custom_properties(entry).values
+        primary, additional, android = _entry_url_inputs(entry, custom_properties)
         uris.extend(
             bw_uri["uri"]
             for bw_uri in build_login_uris(
@@ -251,6 +312,9 @@ class Converter:
     _ref_entries_by_uuid: dict[str, Entry]
     _resolved_ref_items: dict[str, EntryValue | None]
     _refs_in_progress: set[str]
+    _legacy_ref_states: dict[str, _LegacyRefState]
+    _legacy_ref_order: dict[str, int]
+    _legacy_ref_results: dict[str, EntryValue | None]
 
     def __init__(
         self,
@@ -300,6 +364,9 @@ class Converter:
         self._ref_entries_by_uuid = {}
         self._resolved_ref_items = {}
         self._refs_in_progress = set()
+        self._legacy_ref_states = {}
+        self._legacy_ref_order = {}
+        self._legacy_ref_results = {}
 
         self._member_reference_resolving_dict = {"username": "U", "password": "P"}
 
@@ -312,12 +379,14 @@ class Converter:
         raw_bytes = base64.b64decode(b64_data)
         return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode()
 
-    def _build_fido2_credentials(self, entry: Entry) -> list[BwFido2Credential] | None:
+    def _build_fido2_credentials(
+        self,
+        entry: Entry,
+        custom_properties: Mapping[str, str | None],
+    ) -> list[BwFido2Credential] | None:
         """Extract KeePassXC passkey attributes and convert to Bitwarden fido2Credentials format."""
-        props: dict[str, str | None] = entry.custom_properties
-
-        credential_id: str | None = props.get("KPEX_PASSKEY_CREDENTIAL_ID")
-        private_key_pem: str | None = props.get("KPEX_PASSKEY_PRIVATE_KEY_PEM")
+        credential_id = custom_properties.get("KPEX_PASSKEY_CREDENTIAL_ID")
+        private_key_pem = custom_properties.get("KPEX_PASSKEY_PRIVATE_KEY_PEM")
 
         if not credential_id or not private_key_pem:
             return None
@@ -338,11 +407,13 @@ class Converter:
             "keyAlgorithm": "ECDSA",
             "keyCurve": "P-256",
             "keyValue": key_value,
-            "rpId": props.get("KPEX_PASSKEY_RELYING_PARTY") or "",
-            "rpName": props.get("KPEX_PASSKEY_RELYING_PARTY") or "",
-            "userHandle": props.get("KPEX_PASSKEY_USER_HANDLE") or "",
-            "userName": props.get("KPEX_PASSKEY_USERNAME") or entry.username or "",
-            "userDisplayName": props.get("KPEX_PASSKEY_USERNAME")
+            "rpId": custom_properties.get("KPEX_PASSKEY_RELYING_PARTY") or "",
+            "rpName": custom_properties.get("KPEX_PASSKEY_RELYING_PARTY") or "",
+            "userHandle": custom_properties.get("KPEX_PASSKEY_USER_HANDLE") or "",
+            "userName": custom_properties.get("KPEX_PASSKEY_USERNAME")
+            or entry.username
+            or "",
+            "userDisplayName": custom_properties.get("KPEX_PASSKEY_USERNAME")
             or entry.username
             or "",
             "counter": "0",
@@ -473,19 +544,16 @@ class Converter:
         ).rstrip("\n")
         return (text, 0)
 
-    def _add_bw_entry_to_entries_dict(
-        self, entry: Entry, custom_protected: list[str] | None
-    ) -> None:
+    def _add_bw_entry_to_entries_dict(self, entry: Entry) -> None:
         """Convert a KeePass entry into a Bitwarden item and store it in ``_entries``."""
         folder = self._generate_folder_name(entry)
         prefix = ""
         if folder and self._path2name:
             prefix = self._generate_prefix(entry, self._path2nameskip)
 
-        if custom_protected is None:
-            custom_protected = []
-
-        custom_props = entry.custom_properties
+        custom_property_data = _read_entry_custom_properties(entry)
+        custom_props = custom_property_data.values
+        custom_protected = custom_property_data.protected_keys
 
         # Resolve TOTP/HOTP from entry.otp or the KeePass TimeOtp-*/HmacOtp-*
         # custom fields.  This decides which fields are folded into login.totp
@@ -543,7 +611,7 @@ class Converter:
         custom_properties[KP2BW_ID_FIELD_NAME] = (entry_uuid, 0)
 
         # Build FIDO2/passkey credentials from KeePassXC attributes
-        fido2_credentials = self._build_fido2_credentials(entry)
+        fido2_credentials = self._build_fido2_credentials(entry, custom_props)
         if fido2_credentials:
             logger.log(VERBOSE, f"  Migrating passkey for entry: {entry.title}")
 
@@ -577,13 +645,7 @@ class Converter:
         # KP2BW_ID it is metadata, not a secret, and a hidden field is only
         # UI-masked, not protected. Excluded from the content signature itself, so
         # it never makes a re-run look "changed".
-        bw_item_object["fields"].append(
-            BwField(
-                name=KP2BW_SYNC_FIELD_NAME,
-                value=self._content_signature(bw_item_object),
-                type=0,
-            )
-        )
+        self._stamp_content(bw_item_object)
 
         # get attachments to store later on. A value over the inline size limit
         # is offloaded to a <key>.txt attachment, with three exceptions:
@@ -719,6 +781,9 @@ class Converter:
         # reset data structures
         self._kp_ref_entries = []
         self._entries = {}
+        self._legacy_ref_states = {}
+        self._legacy_ref_order = {}
+        self._legacy_ref_results = {}
 
         # Identify recycle bin group for filtering
         recyclebin_group: Group | None = kp.recyclebin_group
@@ -752,27 +817,14 @@ class Converter:
                 self._kp_ref_entries.append(entry)
                 continue
 
-            # Build per-entry list of protected custom properties
-            custom_protected: list[str] = [
-                field
-                for field in entry.custom_properties
-                if (
-                    elem := entry._xpath(
-                        f'String[Key[text()="{field}"]]/Value', first=True
-                    )
-                )
-                is not None
-                and elem.attrib.get("Protected", "False") == "True"
-            ]
-
             # Normal entry
             if self._import_tags:
                 for tag in self._import_tags:
                     if tag in entry.tags:
-                        self._add_bw_entry_to_entries_dict(entry, custom_protected)
+                        self._add_bw_entry_to_entries_dict(entry)
                         break
             else:
-                self._add_bw_entry_to_entries_dict(entry, custom_protected)
+                self._add_bw_entry_to_entries_dict(entry)
 
         if skipped_recyclebin:
             logger.info(f"Skipped {skipped_recyclebin} entries in the Recycle Bin")
@@ -796,16 +848,164 @@ class Converter:
             str(entry.uuid).replace("-", "").upper(): entry
             for entry in self._kp_ref_entries
         }
+        self._legacy_ref_order = self._build_legacy_ref_order()
         # Memoise each REF entry's resolved item so it is processed exactly once
         # even when reached early through a chain, and track the in-progress set
         # to break reference cycles.
         self._resolved_ref_items = {}
         self._refs_in_progress = set()
+        self._legacy_ref_results = {}
 
-        for kp_entry in self._kp_ref_entries:
+        # Independent sibling aliases can compete to populate one empty TOTP.
+        # Resolve them by stable identity so XML ordering cannot pick the winner.
+        for kp_entry in sorted(self._kp_ref_entries, key=lambda entry: entry.uuid.hex):
             self._resolve_single_ref_entry(kp_entry)
 
         logger.log(VERBOSE, f"Resolved {ref_entries_length} REF entries")
+
+    def _build_legacy_ref_order(self) -> dict[str, int]:
+        """Return successful REF completion order under the historical traversal."""
+        status: dict[str, Literal["visiting", "resolved", "failed"]] = {}
+        ordered: list[str] = []
+
+        def visit(entry: Entry) -> bool:
+            entry_key = str(entry.uuid).replace("-", "").upper()
+            current = status.get(entry_key)
+            if current == "resolved":
+                return True
+            if current in {"visiting", "failed"}:
+                return False
+
+            status[entry_key] = "visiting"
+            for member in self._member_reference_resolving_dict:
+                value = getattr(entry, member)
+                if not value or KP_REF_IDENTIFIER not in value:
+                    continue
+                try:
+                    field_referenced, lookup_mode, ref_compare_string = (
+                        self._parse_kp_ref_string(value)
+                    )
+                except ConversionError:
+                    status[entry_key] = "failed"
+                    return False
+
+                target_key = ref_compare_string.upper()
+                target = self._ref_entries_by_uuid.get(target_key)
+                if lookup_mode != "I" or (
+                    target is None and target_key not in self._entries
+                ):
+                    status[entry_key] = "failed"
+                    return False
+                if target is not None and not visit(target):
+                    status[entry_key] = "failed"
+                    return False
+                if (
+                    field_referenced
+                    not in self._member_reference_resolving_dict.values()
+                ):
+                    status[entry_key] = "failed"
+                    return False
+
+            status[entry_key] = "resolved"
+            ordered.append(entry_key)
+            return True
+
+        for entry in self._kp_ref_entries:
+            visit(entry)
+        return {entry_key: index for index, entry_key in enumerate(ordered)}
+
+    def _ref_separate_item_reason(
+        self,
+        entry: Entry,
+        custom_properties: Mapping[str, str | None],
+        otp_result: OtpMigration,
+    ) -> str | None:
+        """Explain why a credential-matching REF alias cannot merge losslessly."""
+        unmerged_custom_properties = {
+            key
+            for key, value in custom_properties.items()
+            if value is not None
+            and key not in otp_result.consumed_keys
+            and not is_url_attribute_key(key)
+        }
+        if unmerged_custom_properties:
+            return "custom fields that cannot be merged"
+        if entry.notes or entry.attachments or entry.expired:
+            return "notes, attachments, or expiry state that cannot be merged"
+        if self._migrate_metadata and (
+            entry.tags or (entry.expires and entry.expiry_time is not None)
+        ):
+            return "metadata that cannot be merged"
+        return None
+
+    @staticmethod
+    def _item_field_value(item: BwItemCreate | BwItemResponse, name: str) -> str | None:
+        """Return the last named field value, preferring kp2bw's appended fields."""
+        for field in reversed(item["fields"]):
+            if field["name"] == name:
+                return field["value"]
+        return None
+
+    def _merge_ref_uris(
+        self,
+        item: BwItemCreate,
+        entry: Entry,
+        custom_properties: Mapping[str, str | None],
+    ) -> None:
+        """Merge one REF alias's deduplicated URI inputs into *item*."""
+        existing_uris = item["login"]["uris"]
+        existing_values = {uri["uri"] for uri in existing_uris}
+        primary, additional, android = _entry_url_inputs(entry, custom_properties)
+        for bw_uri in build_login_uris(
+            primary_url=primary,
+            additional_urls=additional,
+            android_packages=android,
+            plain_match=self._uri_match,
+            interpret_syntax=self._interpret_uri_syntax,
+        ):
+            if bw_uri["uri"] not in existing_values:
+                existing_uris.append(bw_uri)
+                existing_values.add(bw_uri["uri"])
+
+    def _record_legacy_ref_merge(
+        self,
+        item: BwItemCreate,
+        entry: Entry,
+        custom_properties: Mapping[str, str | None],
+    ) -> None:
+        """Replay old URI-only merging so safe upgrades are recognizable."""
+        kp_uuid = self._item_field_value(item, KP2BW_ID_FIELD_NAME)
+        sync_stamp = self._item_field_value(item, KP2BW_SYNC_FIELD_NAME)
+        entry_key = str(entry.uuid).replace("-", "").upper()
+        merge_order = self._legacy_ref_order.get(entry_key)
+        if kp_uuid is None or sync_stamp is None or merge_order is None:
+            return
+
+        state = self._legacy_ref_states.get(kp_uuid)
+        if state is None:
+            legacy_item = copy.deepcopy(item)
+            base_uris = copy.deepcopy(legacy_item["login"]["uris"])
+            state = _LegacyRefState(sync_stamp, legacy_item, base_uris, {})
+            self._legacy_ref_states[kp_uuid] = state
+
+        primary, additional, android = _entry_url_inputs(entry, custom_properties)
+        state.uri_merges[merge_order] = build_login_uris(
+            primary_url=primary,
+            additional_urls=additional,
+            android_packages=android,
+            plain_match=self._uri_match,
+            interpret_syntax=self._interpret_uri_syntax,
+        )
+
+        legacy_uris = copy.deepcopy(state.base_uris)
+        for order in sorted(state.uri_merges):
+            existing_values = {uri["uri"] for uri in legacy_uris}
+            legacy_uris.extend(
+                copy.deepcopy(uri)
+                for uri in state.uri_merges[order]
+                if uri["uri"] not in existing_values
+            )
+        state.item["login"]["uris"] = legacy_uris
 
     def _resolve_single_ref_entry(self, kp_entry: Entry) -> EntryValue | None:
         """Resolve one REF entry, returning the item references to it should target.
@@ -829,8 +1029,11 @@ class Converter:
         self._refs_in_progress.add(entry_key)
         try:
             # replace values
-            replaced_entries: list[BwItemCreate] = []
-            ref_result: EntryValue | None = None
+            referenced_results: list[EntryValue] = []
+            legacy_referenced_results: list[EntryValue] = []
+            legacy_username = kp_entry.username
+            legacy_password = kp_entry.password
+            legacy_resolution_failed = False
             for member in self._member_reference_resolving_dict:
                 val = getattr(kp_entry, member)
                 if val and KP_REF_IDENTIFIER in val:
@@ -845,44 +1048,136 @@ class Converter:
                     value = self._find_referenced_value(ref_entry, field_referenced)
                     setattr(kp_entry, member, value)
 
-                    replaced_entries.append(ref_entry)
+                    referenced_results.append(ref_result)
+                    target_key = ref_compare_string.upper()
+                    legacy_result = (
+                        self._legacy_ref_results.get(target_key)
+                        if target_key in self._ref_entries_by_uuid
+                        else ref_result
+                    )
+                    if legacy_result is None:
+                        legacy_resolution_failed = True
+                    else:
+                        _, _, legacy_ref_item, _ = self._unpack_entry(legacy_result)
+                        legacy_value = self._find_referenced_value(
+                            legacy_ref_item, field_referenced
+                        )
+                        if member == "username":
+                            legacy_username = legacy_value
+                        else:
+                            legacy_password = legacy_value
+                        legacy_referenced_results.append(legacy_result)
 
-            # handle storing bitwarden style
-            username_and_password_match = True
+            # A merged alias must have one unambiguous canonical referent. If
+            # username and password point at different entries, importing the
+            # alias separately avoids attaching its URLs/TOTP to whichever REF
+            # happened to be processed last.
+            canonical_result: EntryValue | None = None
+            if referenced_results:
+                candidate = referenced_results[0]
+                _, _, candidate_item, _ = self._unpack_entry(candidate)
+                if all(
+                    self._unpack_entry(result)[2] is candidate_item
+                    for result in referenced_results[1:]
+                ):
+                    canonical_result = candidate
+                else:
+                    logger.warning(
+                        f"{kp_entry.title or '_untitled'}: REF fields resolve to "
+                        "different entries; importing as a separate item."
+                    )
+
             kp_username = kp_entry.username or ""
             kp_password = kp_entry.password or ""
-            for ref_item in replaced_entries:
-                if (
-                    ref_item["login"]["username"] != kp_username
-                    or ref_item["login"]["password"] != kp_password
-                ):
-                    username_and_password_match = False
-                    break
+            credentials_match = False
+            ref_item: BwItemCreate | None = None
+            if canonical_result is not None:
+                _, _, ref_item, _ = self._unpack_entry(canonical_result)
+                credentials_match = (
+                    ref_item["login"]["username"] == kp_username
+                    and ref_item["login"]["password"] == kp_password
+                )
 
-            if username_and_password_match and ref_result is not None:
-                # => merge this entry's URLs into the referent (same creds). Fold
-                # the full set (primary + KP2A_URL*/URL_*/AndroidApp*) the same way
-                # migration would, and append only URIs not already present.
-                _, _, ref_item, _ = self._unpack_entry(ref_result)
-                existing_uris = ref_item["login"]["uris"]
-                existing_values = {u.get("uri") for u in existing_uris}
-                primary, additional, android = _entry_url_inputs(kp_entry)
-                for bw_uri in build_login_uris(
-                    primary_url=primary,
-                    additional_urls=additional,
-                    android_packages=android,
-                    plain_match=self._uri_match,
-                    interpret_syntax=self._interpret_uri_syntax,
+            # The historical path merged into its final referent whenever every
+            # resolved item shared the alias credentials. Keep that canonical
+            # result separate from current content-aware splitting so a parent
+            # REF still replays the destination used by old chain resolution.
+            legacy_canonical_result: EntryValue | None = None
+            if not legacy_resolution_failed and legacy_referenced_results:
+                old_username = legacy_username or ""
+                old_password = legacy_password or ""
+                old_merge_matches = all(
+                    self._unpack_entry(result)[2]["login"]["username"] == old_username
+                    and self._unpack_entry(result)[2]["login"]["password"]
+                    == old_password
+                    for result in legacy_referenced_results
+                )
+                if old_merge_matches:
+                    legacy_canonical_result = legacy_referenced_results[-1]
+                    _, _, old_merge_item, _ = self._unpack_entry(
+                        legacy_canonical_result
+                    )
+                    old_custom_properties = _read_entry_custom_properties(kp_entry)
+                    self._record_legacy_ref_merge(
+                        old_merge_item, kp_entry, old_custom_properties.values
+                    )
+
+            if (
+                credentials_match
+                and canonical_result is not None
+                and ref_item is not None
+            ):
+                custom_property_data = _read_entry_custom_properties(kp_entry)
+                otp_result = resolve_otp(
+                    kp_entry.otp,
+                    custom_property_data.values,
+                    entry_label=kp_entry.title or "_untitled",
+                    totp_pps=self._totp_pps,
+                )
+                separate_reason = self._ref_separate_item_reason(
+                    kp_entry, custom_property_data.values, otp_result
+                )
+                existing_totp = ref_item["login"]["totp"]
+                if (
+                    separate_reason is None
+                    and otp_result.totp is not None
+                    and existing_totp
+                    and not totp_values_equivalent(existing_totp, otp_result.totp)
                 ):
-                    if bw_uri["uri"] not in existing_values:
-                        existing_uris.append(bw_uri)
-                canonical = ref_result
+                    separate_reason = "a TOTP that conflicts with its referent"
+
+                if separate_reason is not None:
+                    logger.warning(
+                        f"{kp_entry.title or '_untitled'}: REF entry carries "
+                        f"{separate_reason}; importing as a separate item."
+                    )
+                    self._add_bw_entry_to_entries_dict(kp_entry)
+                    canonical = self._entries.get(entry_key)
+                else:
+                    for warning in otp_result.warnings:
+                        logger.warning(f"{kp_entry.title or '_untitled'}: {warning}")
+                    if otp_result.totp is not None and not existing_totp:
+                        ref_item["login"]["totp"] = otp_result.totp
+
+                    self._merge_ref_uris(
+                        ref_item, kp_entry, custom_property_data.values
+                    )
+
+                    # REF merging mutates content after initial item creation;
+                    # keep manual-edit protection aligned with the final payload.
+                    self._stamp_content(ref_item)
+                    canonical = canonical_result
             else:
                 # => create new bitwarden item
-                self._add_bw_entry_to_entries_dict(kp_entry, None)
+                self._add_bw_entry_to_entries_dict(kp_entry)
                 canonical = self._entries.get(entry_key)
 
             self._resolved_ref_items[entry_key] = canonical
+            self._legacy_ref_results[entry_key] = (
+                None
+                if legacy_resolution_failed
+                else legacy_canonical_result or canonical
+            )
             return canonical
 
         except ConversionError, KeyError, AttributeError:
@@ -892,6 +1187,7 @@ class Converter:
                 f"!! Could not resolve entry for {group_path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
             )
             self._resolved_ref_items[entry_key] = None
+            self._legacy_ref_results[entry_key] = None
             return None
         finally:
             self._refs_in_progress.discard(entry_key)
@@ -1040,6 +1336,30 @@ class Converter:
             [u.get("uri", "") for u in (login.get("uris") or [])],
         )
 
+    @staticmethod
+    def _strict_login_signature(
+        login: BwItemLogin | None,
+    ) -> tuple[
+        str,
+        str,
+        str,
+        list[tuple[str, Literal[0, 1, 2, 3, 4, 5] | None]],
+        str,
+    ]:
+        """Login signature used only to recognize exact historical REF output."""
+        if login is None:
+            return ("", "", "", [], "")
+        return (
+            login.get("username") or "",
+            login.get("password") or "",
+            login.get("totp") or "",
+            [
+                (uri.get("uri", ""), uri.get("match"))
+                for uri in (login.get("uris") or [])
+            ],
+            repr(login.get("fido2Credentials") or []),
+        )
+
     @classmethod
     def _login_differs(cls, existing: BwItemLogin | None, desired: BwItemLogin) -> bool:
         """Compare the login fields kp2bw owns (creds, totp, URIs)."""
@@ -1066,6 +1386,19 @@ class Converter:
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     @classmethod
+    def _stamp_content(cls, item: BwItemCreate | BwItemResponse) -> None:
+        """Set the managed sync field to the signature of *item*'s current content."""
+        signature = cls._content_signature(item)
+        for field in reversed(item["fields"]):
+            if field["name"] == KP2BW_SYNC_FIELD_NAME:
+                field["value"] = signature
+                field["type"] = 0
+                return
+        item["fields"].append(
+            BwField(name=KP2BW_SYNC_FIELD_NAME, value=signature, type=0)
+        )
+
+    @classmethod
     def _content_differs(cls, existing: BwItemResponse, desired: BwItemCreate) -> bool:
         """True if the KeePass-derived content diverges from the vault item.
 
@@ -1090,6 +1423,30 @@ class Converter:
         if stamp is None:
             return False
         return stamp != cls._content_signature(existing)
+
+    def _legacy_ref_status(
+        self, existing: BwItemResponse, kp_uuid: str
+    ) -> Literal["unrelated", "exact", "diverged"]:
+        """Classify an item carrying a known pre-fix REF sync stamp."""
+        state = self._legacy_ref_states.get(kp_uuid)
+        if state is None or item_kp2bw_sync(existing) != state.initial_sync_stamp:
+            return "unrelated"
+        if self._strict_ref_signature(existing) == self._strict_ref_signature(
+            state.item
+        ):
+            return "exact"
+        return "diverged"
+
+    @classmethod
+    def _strict_ref_signature(cls, item: BwItemResponse | BwItemCreate) -> str:
+        """Digest all content a legacy-upgrade PUT could overwrite."""
+        blob = repr((
+            item.get("name") or "",
+            item.get("notes") or "",
+            cls._fields_signature(item.get("fields")),
+            cls._strict_login_signature(item.get("login")),
+        ))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _build_update_payload(
@@ -1243,7 +1600,15 @@ class Converter:
             # Content sync: PUT only when the KeePass-derived content changed
             # (keeps re-runs idempotent).
             content_differs = self._content_differs(existing, bw_item)
-            if self._update_existing and (force_update or content_differs):
+            sync_stamp_stale = self._is_user_modified(existing)
+            legacy_ref_status = self._legacy_ref_status(existing, kp_uuid)
+            legacy_ref_output = legacy_ref_status == "exact"
+            repair_sync_stamp = (
+                not content_differs and sync_stamp_stale and legacy_ref_output
+            )
+            if self._update_existing and (
+                force_update or content_differs or repair_sync_stamp
+            ):
                 # Protect a manual Bitwarden edit: when the content genuinely
                 # diverged (not a forced legacy-adoption PUT) and the item was
                 # touched in Bitwarden since kp2bw last wrote it, preserve the
@@ -1254,7 +1619,8 @@ class Converter:
                     content_differs
                     and not force_update
                     and not self._force_update_all
-                    and self._is_user_modified(existing)
+                    and (sync_stamp_stale or legacy_ref_status == "diverged")
+                    and not legacy_ref_output
                 ):
                     logger.warning(
                         f"-- Entry {name!r}: modified in Bitwarden since the last "
@@ -1262,10 +1628,31 @@ class Converter:
                         f"overwrite with KeePass)"
                     )
                     return "protected", [], {}
-                payload = self._build_update_payload(existing, bw_item)
+                if repair_sync_stamp:
+                    payload = copy.copy(existing)
+                    payload["fields"] = [
+                        copy.copy(field) for field in existing["fields"]
+                    ]
+                    self._stamp_content(payload)
+                else:
+                    payload = self._build_update_payload(existing, bw_item)
+                    if legacy_ref_output:
+                        existing_login = existing.get("login")
+                        payload_login = payload.get("login")
+                        if existing_login is not None and payload_login is not None:
+                            payload_login["passwordRevisionDate"] = existing_login.get(
+                                "passwordRevisionDate"
+                            )
                 bw.update_item(item_id, payload)
                 bw.update_dedup_entry(kp_uuid, payload)
-                logger.log(VERBOSE, f"-- Entry {name!r}: content updated from KeePass")
+                if legacy_ref_output:
+                    logger.log(VERBOSE, f"-- Entry {name!r}: legacy REF state upgraded")
+                elif repair_sync_stamp:
+                    logger.log(VERBOSE, f"-- Entry {name!r}: sync stamp repaired")
+                else:
+                    logger.log(
+                        VERBOSE, f"-- Entry {name!r}: content updated from KeePass"
+                    )
                 outcome = "updated"
             elif not fixed_coll_id:
                 # Collection-membership-only update (auto/org mode). bw serve

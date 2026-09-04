@@ -27,6 +27,8 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - No pytest collection model; scripts use `main()` and `AssertionError` checks.
 - E2E command wrapper redacts sensitive args/output before logging.
 - Integration expectations include idempotency (second run must not duplicate items).
+- The Vaultwarden E2E runs focused REF/TOTP/protected-field checks after golden snapshots, so those checks can mutate
+  the vault without changing the comprehensive golden fixtures.
 - Fixtures are contract data; path and naming changes require docker + test updates together.
 
 ## GOLDEN SNAPSHOTS

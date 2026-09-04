@@ -8,6 +8,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve TOTP from credential-matching KeePass REF aliases. Equivalent settings merge regardless of URI label; a
+  conflicting TOTP or other unmergeable alias content remains a separate item instead of being discarded.
+- Refresh `KP2BW_SYNC` after REF URI/TOTP merges and repair stale pre-fix stamps when vault content still matches the
+  source. If source content represented in the old URI-only item changed before that repair pass, edit protection
+  remains fail-closed; use `--force-update` once to accept the KeePass version.
+
+### Security
+
+- Read KeePass custom properties structurally instead of interpolating attacker-controlled field names into XPath, and
+  preserve protected-field handling for REF-created items, including the opt-in gate for oversized secrets.
+
 ## [3.8.0] - 2026-08-20
 
 ### Added
