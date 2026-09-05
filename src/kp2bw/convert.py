@@ -33,8 +33,11 @@ from ._item_sync import (
     KP2BW_SYNC_FIELD_NAME,
     content_signature,
     fields_signature,
+    has_legacy_sync_stamp,
+    legacy_extensions_differ,
     login_signature,
     stamp_content,
+    sync_stamp_matches,
 )
 from .bw_serve import (
     BitwardenServeClient,
@@ -1303,7 +1306,7 @@ class Converter:
     @staticmethod
     def _fields_signature(
         fields: list[BwField] | None,
-    ) -> list[tuple[str, str, int]]:
+    ) -> list[tuple[str, str, int, int | None]]:
         """Order-independent (name, value, type) signature of custom fields.
 
         The kp2bw-managed stamps (``KP2BW_ID`` identity, ``KP2BW_SYNC`` sync
@@ -1316,7 +1319,7 @@ class Converter:
     @staticmethod
     def _login_signature(
         login: BwItemLogin | None,
-    ) -> tuple[str, str, str, list[str]]:
+    ) -> tuple[str, str, str, list[tuple[str, int | None]]]:
         """Signature of the login fields kp2bw owns (creds, totp, URIs)."""
         return login_signature(login)
 
@@ -1388,14 +1391,16 @@ class Converter:
         Compares the item's current content signature against the ``KP2BW_SYNC``
         stamp kp2bw wrote last time.  A mismatch means the managed content
         changed outside kp2bw (kp2bw restamps on every write, so its own updates
-        never trip this).  An unstamped item -- legacy, or not yet written since
-        the feature shipped -- returns ``False`` so the next run establishes the
-        stamp rather than freezing it behind ``--force-update``.
+        never trip this). Pre-3.8.1 stamps remain valid over their original
+        coverage and are upgraded on the next safe write. An unstamped item --
+        legacy, or not yet written since the feature shipped -- returns ``False``
+        so the next run establishes the stamp rather than freezing it behind
+        ``--force-update``.
         """
         stamp = item_kp2bw_sync(existing)
         if stamp is None:
             return False
-        return stamp != cls._content_signature(existing)
+        return not sync_stamp_matches(existing, stamp)
 
     def _legacy_ref_status(
         self, existing: BwItemResponse, kp_uuid: str
@@ -1574,10 +1579,19 @@ class Converter:
             # (keeps re-runs idempotent).
             content_differs = self._content_differs(existing, bw_item)
             sync_stamp_stale = self._is_user_modified(existing)
+            sync_stamp = item_kp2bw_sync(existing)
+            legacy_sync_stamp = sync_stamp is not None and has_legacy_sync_stamp(
+                existing, sync_stamp
+            )
+            ambiguous_legacy_edit = (
+                legacy_sync_stamp
+                and content_differs
+                and legacy_extensions_differ(existing, bw_item)
+            )
             legacy_ref_status = self._legacy_ref_status(existing, kp_uuid)
             legacy_ref_output = legacy_ref_status == "exact"
-            repair_sync_stamp = (
-                not content_differs and sync_stamp_stale and legacy_ref_output
+            repair_sync_stamp = not content_differs and (
+                legacy_sync_stamp or (sync_stamp_stale and legacy_ref_output)
             )
             if self._update_existing and (
                 force_update or content_differs or repair_sync_stamp
@@ -1592,7 +1606,11 @@ class Converter:
                     content_differs
                     and not force_update
                     and not self._force_update_all
-                    and (sync_stamp_stale or legacy_ref_status == "diverged")
+                    and (
+                        sync_stamp_stale
+                        or ambiguous_legacy_edit
+                        or legacy_ref_status == "diverged"
+                    )
                     and not legacy_ref_output
                 ):
                     logger.warning(

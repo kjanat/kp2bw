@@ -24,12 +24,16 @@ from ._console import console
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
-    content_signature,
     stamp_content,
+    sync_stamp_matches,
 )
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import BitwardenClientError
-from .uri_mapping import UriMatchValue, remap_item_fields_to_uris
+from .uri_mapping import (
+    UriMatchValue,
+    is_url_attribute_key,
+    remap_item_fields_to_uris,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1018,13 +1022,18 @@ class BitwardenServeClient:
         copy, so a caller can still hand the original (id-bearing) object to
         :meth:`update_dedup_entry`.
         """
-        body: dict[str, Any] = {
+        body = self._item_update_body(item)
+        self._request("PUT", f"/object/item/{item_id}", json_body=body)
+        logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+
+    @staticmethod
+    def _item_update_body(item: BwItemResponse) -> dict[str, Any]:
+        """Return the full request body used to replace *item*."""
+        return {
             k: v
             for k, v in cast(dict[str, Any], item).items()
             if k not in _RESPONSE_ONLY_ITEM_KEYS
         }
-        self._request("PUT", f"/object/item/{item_id}", json_body=body)
-        logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
 
     def strip_field_from_items(self, *field_names: str) -> StripResult:
         """Remove the named custom field(s) from every in-scope item carrying any.
@@ -1086,32 +1095,51 @@ class BitwardenServeClient:
         )
         migrated = 0
         protected = 0
-        for item in items:
-            if item.get("type") != _BW_ITEM_TYPE_LOGIN:
+        for listed_item in items:
+            if listed_item.get("type") != _BW_ITEM_TYPE_LOGIN:
                 continue
+            if not any(
+                is_url_attribute_key(field.get("name") or "")
+                for field in (listed_item.get("fields") or [])
+            ):
+                continue
+            # List results may predate an external edit. Validate and transform a
+            # fresh full item so an old snapshot is never sent back wholesale.
+            fresh_item = self.get_item(listed_item["id"])
+            item = copy.deepcopy(fresh_item)
             login = item.get("login")
             if login is None:
                 continue
             new_fields, new_uris, changed = remap_item_fields_to_uris(
-                item.get("fields") or [],
+                fresh_item.get("fields") or [],
                 login.get("uris") or [],
                 plain_match=plain_match,
                 interpret_syntax=interpret_syntax,
             )
             if not changed:
                 continue
-            sync_stamp = item_kp2bw_sync(item)
-            if sync_stamp is not None and sync_stamp != content_signature(item):
+            sync_stamp = item_kp2bw_sync(fresh_item)
+            if sync_stamp is not None and not sync_stamp_matches(
+                fresh_item, sync_stamp
+            ):
                 logger.warning(
-                    f"Skipping {item.get('name', '?')!r}: modified in Bitwarden "
+                    f"Skipping {fresh_item.get('name', '?')!r}: modified in Bitwarden "
                     "since the last kp2bw sync"
                 )
                 protected += 1
                 continue
             item["fields"] = new_fields
             login["uris"] = new_uris
-            item["login"] = login
             stamp_content(item)
+            latest_item = self.get_item(item["id"])
+            if self._item_update_body(latest_item) != self._item_update_body(
+                fresh_item
+            ):
+                logger.warning(
+                    f"Skipping {item.get('name', '?')!r}: changed during URI migration"
+                )
+                protected += 1
+                continue
             self.update_item(item["id"], item)
             migrated += 1
         logger.info(

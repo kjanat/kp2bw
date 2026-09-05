@@ -34,6 +34,20 @@ from .uri_mapping import (
 
 logger = logging.getLogger(__name__)
 
+CLI_DOCS_URL: str = "https://kjanat.github.io/kp2bw/docs/"
+
+
+def _cli_docs_link(*, terminal: bool) -> str:
+    """Return clickable docs text for terminals and a plain URL for pipes."""
+    if not terminal:
+        return CLI_DOCS_URL
+    return f"\x1b]8;;{CLI_DOCS_URL}\x1b\\CLI reference\x1b]8;;\x1b\\"
+
+
+def _supports_osc8() -> bool:
+    """Return whether stdout is a terminal expected to render hyperlinks."""
+    return sys.stdout.isatty() and os.environ.get("TERM", "") != "dumb"
+
 
 class MyArgParser(ArgumentParser):
     """Argument parser that prints help on error instead of just usage."""
@@ -125,7 +139,12 @@ def _argparser() -> MyArgParser:
     # the launch (via _prog_name), which for a console-script invocation becomes
     # "python.exe <argv0>" and leaked the launcher path into --version, usage,
     # and error messages.
-    parser = MyArgParser(prog=__title__, description="KeePass to Bitwarden converter")
+    parser = MyArgParser(
+        prog=__title__,
+        usage="%(prog)s [OPTIONS] [FILE]",
+        description="Import KeePass into Bitwarden.",
+        epilog=f"Documentation: {_cli_docs_link(terminal=_supports_osc8())}",
+    )
 
     parser.add_argument(
         "-V",
@@ -138,21 +157,14 @@ def _argparser() -> MyArgParser:
         "--doctor",
         dest="doctor",
         action="store_true",
-        help=(
-            "print environment diagnostics (kp2bw/bw/server versions, install "
-            "method, .env detection) and exit; exits non-zero when the bw CLI "
-            "is unusable"
-        ),
+        help="Check kp2bw, bw CLI, and server setup.",
     )
 
     parser.add_argument(
         "--redact",
         dest="redact",
         action="store_true",
-        help=(
-            "with --doctor: mask the server URL and home-anchored paths so the "
-            "report is safe to paste in a public issue"
-        ),
+        help="Redact paths and server URL from --doctor.",
     )
 
     parser.add_argument(
@@ -160,14 +172,14 @@ def _argparser() -> MyArgParser:
         metavar="FILE",
         nargs="?",
         default=None,
-        help="Path to your KeePass 2.x db (env: KP2BW_KEEPASS_FILE)",
+        help="KeePass database.",
     )
     parser.add_argument(
         "-k",
         "--keepass-password",
         dest="kp_pw",
         metavar="PASSWORD",
-        help="KeePass db password (env: KP2BW_KEEPASS_PASSWORD)",
+        help="KeePass password.",
         default=None,
     )
     parser.add_argument(
@@ -175,7 +187,7 @@ def _argparser() -> MyArgParser:
         "--keepass-keyfile",
         dest="kp_keyfile",
         metavar="FILE",
-        help="KeePass db key file (env: KP2BW_KEEPASS_KEYFILE)",
+        help="KeePass key file.",
         default=None,
     )
     parser.add_argument(
@@ -183,7 +195,7 @@ def _argparser() -> MyArgParser:
         "--bitwarden-password",
         dest="bw_pw",
         metavar="PASSWORD",
-        help="Bitwarden password (env: KP2BW_BITWARDEN_PASSWORD)",
+        help="Bitwarden password.",
         default=None,
     )
     parser.add_argument(
@@ -191,7 +203,7 @@ def _argparser() -> MyArgParser:
         "--bitwarden-org",
         dest="bw_org",
         metavar="ID",
-        help="Bitwarden Organization Id (env: KP2BW_BITWARDEN_ORG)",
+        help="Target Bitwarden organization.",
         default=None,
     )
     parser.add_argument(
@@ -199,7 +211,7 @@ def _argparser() -> MyArgParser:
         "--import-tags",
         dest="import_tags",
         metavar="TAG",
-        help="Only import tagged items (env: KP2BW_IMPORT_TAGS as comma-separated values)",
+        help="Import only entries with these tags.",
         nargs="+",
         default=None,
     )
@@ -208,27 +220,20 @@ def _argparser() -> MyArgParser:
         "--bitwarden-collection",
         dest="bw_coll",
         metavar="ID",
-        help=(
-            "Id of Org-Collection, 'auto' for top-level folder names, or "
-            "'nested' for full folder paths (env: KP2BW_BITWARDEN_COLLECTION)"
-        ),
+        help="Target collection ID, 'auto', or 'nested'.",
         default=None,
     )
     parser.add_argument(
         "--folder",
         dest="create_folders",
-        help=(
-            "Create personal Bitwarden folders from KeePass groups (default: on, "
-            "but off when --bitwarden-org is set); --no-folder keeps items at the "
-            "vault root unless collections apply (env: KP2BW_CREATE_FOLDERS)"
-        ),
+        help="Create personal folders from KeePass groups.",
         action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
         "--path-to-name",
         dest="path_to_name",
-        help="Prepend folder path to each entry name (env: KP2BW_PATH_TO_NAME)",
+        help="Prepend the group path to entry names.",
         action=BooleanOptionalAction,
         default=None,
     )
@@ -236,65 +241,49 @@ def _argparser() -> MyArgParser:
         "--path-to-name-skip",
         dest="path_to_name_skip",
         metavar="N",
-        help="Skip first N folders for path prefix (default: 1, env: KP2BW_PATH_TO_NAME_SKIP)",
+        help="Skip N groups in name prefixes (default: 1).",
         default=None,
         type=int,
     )
     parser.add_argument(
         "--skip-expired",
         dest="skip_expired",
-        help="Skip expired KeePass entries (env: KP2BW_SKIP_EXPIRED)",
+        help="Skip expired entries.",
         action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
         "--include-recycle-bin",
         dest="include_recyclebin",
-        help="Include KeePass Recycle Bin entries (env: KP2BW_INCLUDE_RECYCLE_BIN)",
+        help="Include Recycle Bin entries.",
         action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
         "--metadata",
         dest="migrate_metadata",
-        help="Migrate KeePass metadata as custom fields (env: KP2BW_MIGRATE_METADATA)",
+        help="Migrate tags and expiry metadata.",
         action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
         "--update",
         dest="update_existing",
-        help=(
-            "Sync changed KeePass content (and missing attachments) onto "
-            "existing Bitwarden entries; --no-update leaves their content "
-            "untouched (default: on, env: KP2BW_UPDATE)"
-        ),
+        help="Update matching Bitwarden items (default: on).",
         action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
         "--force-update",
         dest="force_update",
-        help=(
-            "Overwrite existing Bitwarden entries with KeePass content even when "
-            "they were edited in Bitwarden since the last run. By default such "
-            "manually-edited items are protected (skipped) so your edits survive; "
-            "this makes KeePass win regardless (env: KP2BW_FORCE_UPDATE)"
-        ),
+        help="Overwrite items changed in Bitwarden.",
         action="store_true",
         default=None,
     )
     parser.add_argument(
         "--include-oversize-secrets",
         dest="include_oversize_secrets",
-        help=(
-            "Offload secret custom fields (hidden OTP secrets, passkey "
-            "attributes, KeePass-protected fields) that exceed the inline size "
-            "limit to a plaintext .txt attachment instead of dropping them; off "
-            "by default so a "
-            "secret is never written to a readable attachment without consent "
-            "(env: KP2BW_INCLUDE_OVERSIZE_SECRETS)"
-        ),
+        help="Store oversized secrets as plaintext attachments.",
         action="store_true",
         default=None,
     )
@@ -303,64 +292,34 @@ def _argparser() -> MyArgParser:
         dest="uri_match",
         metavar="MODE",
         choices=match_value_names(),
-        help=(
-            "Match mode for plain URLs migrated into login URIs: "
-            "domain|host|startswith|exact|regex|never|default. 'default' (the "
-            "default) leaves match unset so Bitwarden uses your account default "
-            "-- what Bitwarden itself writes; 'domain' forces base-domain to "
-            "replicate KeePassXC's host-based matching regardless. Quoted-exact "
-            "and wildcard URLs keep their own modes (env: KP2BW_URI_MATCH)"
-        ),
+        help="Match mode for plain login URIs.",
         default=None,
     )
     parser.add_argument(
         "--totp-pps",
         dest="totp_pps",
-        help=(
-            "Read TOTP from Pleasant Password Server's TOTPSecret/TOTPDigits/"
-            "TOTPPeriod custom fields instead of the KeePass TimeOtp-* ones. "
-            "PPS secrets are always Base32 and SHA-1. The two namings do not "
-            "coexist: with this flag TimeOtp-* fields stay ordinary custom "
-            "fields (env: KP2BW_TOTP_PPS)"
-        ),
+        help="Read Pleasant Password Server TOTP fields.",
         action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
         "--interpret-uri-syntax",
         dest="interpret_uri_syntax",
-        help=(
-            "Interpret KeePassXC URL syntax on additional URLs — double-quoted as "
-            "exact, '*' as wildcard (default: on). --no-interpret-uri-syntax "
-            "imports every URL as a plain string (env: KP2BW_INTERPRET_URI_SYNTAX)"
-        ),
+        help="Interpret KeePassXC quoted and wildcard URLs.",
         action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
         "--strip-ids",
         dest="strip_ids",
-        help=(
-            "Finalize adoption: remove the KP2BW_ID dedup stamp kp2bw adds to "
-            "every migrated item, then exit (no migration, no KeePass database "
-            "needed). Run once you're ready to fully adopt Bitwarden. IRREVERSIBLE "
-            "and makes future migration re-runs unreliable, so it confirms first "
-            "(skip with -y). Honors -o/--bitwarden-org and -c/--bitwarden-collection "
-            "for scope (env: KP2BW_STRIP_IDS)"
-        ),
+        help="Remove kp2bw tracking fields, then exit. Irreversible.",
         action="store_true",
         default=None,
     )
     parser.add_argument(
         "--migrate-uris",
         dest="migrate_uris",
-        help=(
-            "Upgrade existing Bitwarden items in place: re-fold legacy "
-            "KP2A_URL*/AndroidApp custom fields into login URIs, then exit (no "
-            "migration, no KeePass database needed). For users who imported "
-            "before URL folding and don't want to re-import. Honors --uri-match / "
-            "--interpret-uri-syntax and -o/-c for scope (env: KP2BW_MIGRATE_URIS)"
-        ),
+        help="Fold legacy URL fields into login URIs, then exit.",
         action="store_true",
         default=None,
     )
@@ -369,21 +328,14 @@ def _argparser() -> MyArgParser:
         dest="report_uris",
         metavar="SOURCE",
         choices=("keepass", "bitwarden"),
-        help=(
-            "Print a read-only URI collision report and exit (changes nothing): "
-            "groups login URLs by registrable domain and lists the ones with "
-            "multiple hosts -- the entries that all surface together under "
-            "Bitwarden base-domain match. SOURCE is 'keepass' (reads the KeePass "
-            "db) or 'bitwarden' (reads the live vault). Honors -o/-c for the "
-            "bitwarden source (env: KP2BW_REPORT_URIS)"
-        ),
+        help="Report URI host collisions, then exit.",
         default=None,
     )
     parser.add_argument(
         "-y",
         "--yes",
         dest="skip_confirm",
-        help="Skip the bw CLI setup confirmation prompt (env: KP2BW_YES)",
+        help="Skip confirmation prompts.",
         action="store_true",
         default=None,
     )
@@ -391,7 +343,7 @@ def _argparser() -> MyArgParser:
         "-v",
         "--verbose",
         dest="verbose",
-        help="Verbose output (env: KP2BW_VERBOSE)",
+        help="Show migration details.",
         action="store_true",
         default=None,
     )
@@ -399,7 +351,7 @@ def _argparser() -> MyArgParser:
         "-d",
         "--debug",
         dest="debug",
-        help="Debug output — includes third-party library logs (env: KP2BW_DEBUG)",
+        help="Show debug and dependency logs.",
         action="store_true",
         default=None,
     )

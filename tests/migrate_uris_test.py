@@ -6,11 +6,16 @@ items and items without such fields, and only PUTs the ones that change. Driven
 with a client double, so no live `bw serve` process is spawned.
 """
 
+import copy
 from typing import Self, cast
 from unittest import mock
 
 from kp2bw import cli
-from kp2bw._item_sync import content_signature, stamp_content
+from kp2bw._item_sync import (
+    content_signature,
+    legacy_content_signature,
+    stamp_content,
+)
 from kp2bw.bw_serve import (
     KP2BW_SYNC_FIELD_NAME,
     BitwardenServeClient,
@@ -41,11 +46,21 @@ def _login(item_id: str, field_names: list[str], uri: str) -> BwItemResponse:
 class _MigrateClient(BitwardenServeClient):
     """Client double serving a fixed item list and recording every PUT."""
 
-    def __init__(self, items: list[BwItemResponse]) -> None:
+    def __init__(
+        self,
+        items: list[BwItemResponse],
+        *,
+        current_items: list[BwItemResponse] | None = None,
+        item_versions: dict[str, list[BwItemResponse]] | None = None,
+    ) -> None:
         self._org_id = None
         self._collection_id = None
         self._items = items
+        current = items if current_items is None else current_items
+        self._current_by_id = {item["id"]: item for item in current}
+        self._item_versions = item_versions or {}
         self.updated_ids: list[str] = []
+        self.updated_items: dict[str, BwItemResponse] = {}
 
     def list_items(
         self,
@@ -56,8 +71,19 @@ class _MigrateClient(BitwardenServeClient):
     ) -> list[BwItemResponse]:
         return self._items
 
+    def get_item(self, item_id: str) -> BwItemResponse:
+        versions = self._item_versions.get(item_id)
+        if versions:
+            return versions.pop(0) if len(versions) > 1 else versions[0]
+        return self._current_by_id[item_id]
+
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
         self.updated_ids.append(item_id)
+        self.updated_items[item_id] = item
+        self._current_by_id[item_id] = item
+        self._items = [
+            item if listed["id"] == item_id else listed for listed in self._items
+        ]
         fields = [f.get("name") or "" for f in item.get("fields") or []]
         if any(is_url_attribute_key(name) for name in fields):
             raise AssertionError(f"{item_id} still carries a legacy URL/app field")
@@ -82,7 +108,8 @@ def assert_only_login_items_with_legacy_fields_migrate() -> None:
         raise AssertionError(f"expected 0 protected, got {result.protected}")
     if client.updated_ids != ["legacy"]:
         raise AssertionError(f"only the legacy item should PUT: {client.updated_ids}")
-    if item_kp2bw_sync(legacy) != content_signature(legacy):
+    updated = client.updated_items["legacy"]
+    if item_kp2bw_sync(updated) != content_signature(updated):
         raise AssertionError("unstamped legacy item did not receive a valid sync stamp")
 
     second = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
@@ -102,11 +129,33 @@ def assert_valid_stamp_is_refreshed() -> None:
 
     result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
 
-    new_stamp = item_kp2bw_sync(legacy)
+    updated = client.updated_items["stamped"]
+    new_stamp = item_kp2bw_sync(updated)
     if result.migrated != 1 or client.updated_ids != ["stamped"]:
         raise AssertionError("untouched stamped item should migrate")
-    if new_stamp == old_stamp or new_stamp != content_signature(legacy):
+    if new_stamp == old_stamp or new_stamp != content_signature(updated):
         raise AssertionError("migrated item did not receive its new content signature")
+
+
+def assert_legacy_stamp_is_accepted_and_upgraded() -> None:
+    legacy = _login("old-stamp", ["KP2A_URL"], "https://legacy.example")
+    legacy["fields"].append(
+        cast(
+            BwField,
+            {
+                "name": KP2BW_SYNC_FIELD_NAME,
+                "value": legacy_content_signature(legacy),
+                "type": 0,
+            },
+        )
+    )
+    client = _MigrateClient([legacy])
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    updated = client.updated_items["old-stamp"]
+    if result.migrated != 1 or item_kp2bw_sync(updated) != content_signature(updated):
+        raise AssertionError("legacy sync stamp was not accepted and upgraded")
 
 
 def assert_modified_stamped_item_is_preserved() -> None:
@@ -125,6 +174,34 @@ def assert_modified_stamped_item_is_preserved() -> None:
         raise AssertionError("modified item's legacy field should remain untouched")
     if item_kp2bw_sync(legacy) != old_stamp:
         raise AssertionError(f"{KP2BW_SYNC_FIELD_NAME} changed on skipped item")
+
+
+def assert_fresh_item_is_used_instead_of_list_snapshot() -> None:
+    listed = _login("stale-list", ["KP2A_URL"], "https://legacy.example")
+    stamp_content(listed)
+    current = copy.deepcopy(listed)
+    current["notes"] = "concurrent Bitwarden edit"
+    client = _MigrateClient([listed], current_items=[current])
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    if result.migrated != 0 or result.protected != 1 or client.updated_ids:
+        raise AssertionError("stale list snapshot overwrote the freshly fetched item")
+    if not any(field["name"] == "KP2A_URL" for field in current["fields"]):
+        raise AssertionError("freshly fetched item was mutated despite its stale stamp")
+
+
+def assert_change_during_migration_is_preserved() -> None:
+    listed = _login("racing", ["KP2A_URL"], "https://legacy.example")
+    stamp_content(listed)
+    concurrent = copy.deepcopy(listed)
+    concurrent["notes"] = "edit after validation"
+    client = _MigrateClient([listed], item_versions={"racing": [listed, concurrent]})
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    if result.migrated != 0 or result.protected != 1 or client.updated_ids:
+        raise AssertionError("an item changed during migration should not be PUT")
 
 
 def assert_cli_reports_protected_items() -> None:
@@ -177,7 +254,10 @@ def assert_cli_reports_protected_items() -> None:
 def main() -> None:
     assert_only_login_items_with_legacy_fields_migrate()
     assert_valid_stamp_is_refreshed()
+    assert_legacy_stamp_is_accepted_and_upgraded()
     assert_modified_stamped_item_is_preserved()
+    assert_fresh_item_is_used_instead_of_list_snapshot()
+    assert_change_during_migration_is_preserved()
     assert_cli_reports_protected_items()
     print("migrate uris test passed")
 
