@@ -70,6 +70,7 @@ class BwField(TypedDict):
     name: str
     value: str
     type: Literal[0, 1, 2, 3]  # text, hidden, boolean, linked
+    linkedId: NotRequired[int | None]
 
 
 class BwAttachment(TypedDict):

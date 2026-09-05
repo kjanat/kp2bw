@@ -8,6 +8,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Make `--migrate-uris` preserve manually edited items and refresh `KP2BW_SYNC` after safely folding legacy URL fields,
+  preventing later migration runs from mistaking kp2bw's own upgrade for a user edit. Preserve ambiguous pre-3.8.1
+  stamps, and bind each full-item update to the final observed Bitwarden revision to enable Bitwarden's stale-write
+  protection.
+- Detect edits to linked-field targets and URI match modes while accepting older `KP2BW_SYNC` stamps until their next
+  safe write.
+
 ## [3.8.1] - 2026-09-04
 
 ### Changed

@@ -21,9 +21,21 @@ from rich.markup import escape
 
 from . import VERBOSE
 from ._console import console
+from ._item_sync import (
+    KP2BW_ID_FIELD_NAME,
+    KP2BW_SYNC_FIELD_NAME,
+    has_legacy_sync_stamp,
+    legacy_extensions_are_ambiguous,
+    stamp_content,
+    sync_stamp_matches,
+)
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
-from .exceptions import BitwardenClientError
-from .uri_mapping import UriMatchValue, remap_item_fields_to_uris
+from .exceptions import BitwardenClientError, BitwardenHttpError
+from .uri_mapping import (
+    UriMatchValue,
+    is_url_attribute_key,
+    remap_item_fields_to_uris,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +79,10 @@ _IDEMPOTENT_METHODS: frozenset[str] = frozenset({
     "OPTIONS",
 })
 
-# Response-only keys returned by ``GET``/``list`` that must never be sent back in
-# a ``PUT`` body: the API expects a create-shaped object (``BwItemCreate``), and
-# echoing server-managed fields (notably ``attachments``) risks rejection or
-# clobbering state.  The item id travels in the URL, not the body.
+# Response-only keys returned by ``GET``/``list`` that are normally stripped from
+# a ``PUT`` body. ``revisionDate`` is added back only when a caller explicitly
+# binds a write to an observed revision; other server-managed fields must never be
+# echoed because they risk rejection or clobbering state.
 _RESPONSE_ONLY_ITEM_KEYS: frozenset[str] = frozenset({
     "object",
     "id",
@@ -84,20 +96,6 @@ _RESPONSE_ONLY_ITEM_KEYS: frozenset[str] = frozenset({
 # 4=identity).  kp2bw only ever creates/adopts login items, so non-login items
 # sharing a name are a user's own data and must never be adopted.
 _BW_ITEM_TYPE_LOGIN: int = 1
-
-# Hidden custom-field name kp2bw stamps on every item it creates, carrying the
-# source KeePass entry UUID.  This is the *stable identity key*: dedup matches on
-# it so two distinct entries that merely share a ``(folder, title)`` never
-# collapse onto one item, and re-runs stay idempotent across title/folder edits.
-KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
-
-# Hidden custom-field name carrying a content signature of what kp2bw last wrote
-# to the item -- the basis for protecting Bitwarden-side manual edits on re-run.
-# A re-run that finds the item's current managed content no longer matching this
-# stamp knows a *user* edited it (kp2bw's own writes restamp it), and preserves
-# the edit instead of clobbering it.  Excluded from the content diff, like
-# KP2BW_ID, so it never makes a re-run look "changed".
-KP2BW_SYNC_FIELD_NAME: str = "KP2BW_SYNC"
 
 
 def item_kp2bw_id(item: BwItemResponse) -> str | None:
@@ -126,6 +124,12 @@ def item_kp2bw_sync(item: BwItemResponse) -> str | None:
     return None
 
 
+def _item_revision(item: Mapping[str, object]) -> str | None:
+    """Return a usable conditional-write revision from an API item."""
+    revision = item.get("revisionDate")
+    return revision if isinstance(revision, str) and revision else None
+
+
 class StripResult(NamedTuple):
     """Outcome of a :meth:`BitwardenServeClient.strip_field_from_items` pass.
 
@@ -141,11 +145,13 @@ class MigrateResult(NamedTuple):
     """Outcome of a :meth:`BitwardenServeClient.migrate_url_fields_to_uris` pass.
 
     *scanned* is every in-scope item inspected; *migrated* is the subset that
-    carried ``KP2A_URL*`` / ``AndroidApp`` fields and was rewritten to URIs.
+    carried ``KP2A_URL*`` / ``AndroidApp`` fields and was rewritten to URIs;
+    *protected* carried those fields but could not be updated safely.
     """
 
     scanned: int
     migrated: int
+    protected: int
 
 
 # Actionable message shown when the Bitwarden CLI cannot be located.
@@ -226,7 +232,7 @@ def bw_cli_version(bw_cmd: list[str], bw_cwd: str | None) -> str | None:
             stdin=subprocess.DEVNULL,
             cwd=bw_cwd,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return None
     match = re.search(r"\d{4}\.\d+\.\d+(?:[-+.][0-9A-Za-z.-]+)?", result.stdout)
     return match.group(0) if match else None
@@ -343,7 +349,7 @@ def _listening_pids(port: int) -> set[int]:
             stdin=subprocess.DEVNULL,
             timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return set()
     return parse_listening_pids(result.stdout, port)
 
@@ -899,9 +905,10 @@ class BitwardenServeClient:
             idempotent=idempotent,
         )
         if resp.status_code >= 400:
-            raise BitwardenClientError(
+            raise BitwardenHttpError(
                 f"bw serve returned HTTP {resp.status_code} for {method} {path}: "
-                f"{format_http_error(resp)}"
+                f"{format_http_error(resp)}",
+                status_code=resp.status_code,
             )
 
         try:
@@ -1024,13 +1031,31 @@ class BitwardenServeClient:
         copy, so a caller can still hand the original (id-bearing) object to
         :meth:`update_dedup_entry`.
         """
-        body: dict[str, Any] = {
+        body = self._item_update_body(item)
+        self._request("PUT", f"/object/item/{item_id}", json_body=body)
+        logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+
+    def update_item_if_revision(
+        self, item_id: str, item: BwItemResponse, *, expected_revision: str
+    ) -> None:
+        """Replace an item only if the server still knows the observed revision."""
+        body = self._item_update_body(item, expected_revision=expected_revision)
+        self._request("PUT", f"/object/item/{item_id}", json_body=body)
+        logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+
+    @staticmethod
+    def _item_update_body(
+        item: BwItemResponse, *, expected_revision: str | None = None
+    ) -> dict[str, Any]:
+        """Return the full request body used to replace *item*."""
+        body = {
             k: v
             for k, v in cast(dict[str, Any], item).items()
             if k not in _RESPONSE_ONLY_ITEM_KEYS
         }
-        self._request("PUT", f"/object/item/{item_id}", json_body=body)
-        logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+        if expected_revision is not None:
+            body["revisionDate"] = expected_revision
+        return body
 
     def strip_field_from_items(self, *field_names: str) -> StripResult:
         """Remove the named custom field(s) from every in-scope item carrying any.
@@ -1091,11 +1116,46 @@ class BitwardenServeClient:
             collection_id=self._collection_id,
         )
         migrated = 0
-        for item in items:
-            if item.get("type") != _BW_ITEM_TYPE_LOGIN:
+        protected = 0
+        for listed_item in items:
+            if listed_item.get("type") != _BW_ITEM_TYPE_LOGIN:
                 continue
+            if not any(
+                is_url_attribute_key(field.get("name") or "")
+                for field in (listed_item.get("fields") or [])
+            ):
+                continue
+            # List results may predate an external edit. Validate and transform a
+            # fresh full item so an old snapshot is never sent back wholesale.
+            fresh_item = self.get_item(listed_item["id"])
+            item = copy.deepcopy(fresh_item)
             login = item.get("login")
             if login is None:
+                logger.warning(
+                    f"Skipping {fresh_item.get('name', '?')!r}: login data unavailable"
+                )
+                protected += 1
+                continue
+            sync_stamp = item_kp2bw_sync(fresh_item)
+            if sync_stamp is not None and not sync_stamp_matches(
+                fresh_item, sync_stamp
+            ):
+                logger.warning(
+                    f"Skipping {fresh_item.get('name', '?')!r}: modified in Bitwarden "
+                    "since the last kp2bw sync"
+                )
+                protected += 1
+                continue
+            if (
+                sync_stamp is not None
+                and has_legacy_sync_stamp(fresh_item, sync_stamp)
+                and legacy_extensions_are_ambiguous(fresh_item)
+            ):
+                logger.warning(
+                    f"Skipping {fresh_item.get('name', '?')!r}: legacy sync stamp "
+                    "cannot verify URI match or linked-field edits"
+                )
+                protected += 1
                 continue
             new_fields, new_uris, changed = remap_item_fields_to_uris(
                 item.get("fields") or [],
@@ -1107,13 +1167,51 @@ class BitwardenServeClient:
                 continue
             item["fields"] = new_fields
             login["uris"] = new_uris
-            item["login"] = login
-            self.update_item(item["id"], item)
+            stamp_content(item)
+            latest_item = self.get_item(item["id"])
+            if self._item_update_body(latest_item) != self._item_update_body(
+                fresh_item
+            ):
+                logger.warning(
+                    f"Skipping {item.get('name', '?')!r}: changed during URI migration"
+                )
+                protected += 1
+                continue
+            latest_revision = _item_revision(latest_item)
+            if latest_revision is None:
+                logger.warning(
+                    f"Skipping {item.get('name', '?')!r}: Bitwarden returned no "
+                    "revision for a conditional update"
+                )
+                protected += 1
+                continue
+            try:
+                self.update_item_if_revision(
+                    item["id"], item, expected_revision=latest_revision
+                )
+            except BitwardenHttpError as exc:
+                if exc.status_code not in {400, 409}:
+                    raise
+                self.sync()
+                resolved_item = self.get_item(item["id"])
+                if self._item_update_body(resolved_item) == self._item_update_body(
+                    item
+                ):
+                    migrated += 1
+                    continue
+                resolved_revision = _item_revision(resolved_item)
+                if resolved_revision is None or resolved_revision == latest_revision:
+                    raise
+                logger.warning(
+                    f"Skipping {item.get('name', '?')!r}: changed during URI migration"
+                )
+                protected += 1
+                continue
             migrated += 1
         logger.info(
             f"Migrated URL fields to URIs on {migrated} of {len(items)} scanned items"
         )
-        return MigrateResult(scanned=len(items), migrated=migrated)
+        return MigrateResult(scanned=len(items), migrated=migrated, protected=protected)
 
     def create_items_batch(
         self,

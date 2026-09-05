@@ -11,12 +11,13 @@ diff. Driven with a client double, so no live `bw serve` process is spawned.
 
 from typing import cast
 
+from kp2bw._item_sync import legacy_content_signature
 from kp2bw.bw_serve import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
     BitwardenServeClient,
 )
-from kp2bw.bw_types import BwField, BwItemCreate, BwItemResponse
+from kp2bw.bw_types import BwField, BwItemCreate, BwItemResponse, BwUri
 from kp2bw.convert import Converter
 
 _BW_LOGIN = 1
@@ -175,6 +176,131 @@ def assert_user_edit_detected() -> None:
         raise AssertionError("a manual Bitwarden edit must be detected")
 
 
+def assert_uri_match_edit_detected() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="p")
+    login = existing.get("login")
+    assert login is not None
+    login["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 0})]
+    Converter._stamp_content(existing)
+    login["uris"][0]["match"] = 1
+    if not Converter._is_user_modified(existing):
+        raise AssertionError("a manual URI match-mode edit must be detected")
+
+
+def assert_linked_field_edit_detected() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="p")
+    existing["fields"].append(
+        cast(
+            BwField,
+            {"name": "linked", "value": "", "type": 3, "linkedId": 100},
+        )
+    )
+    Converter._stamp_content(existing)
+    existing["fields"][-1]["linkedId"] = 101
+    if not Converter._is_user_modified(existing):
+        raise AssertionError("a manual linked-field target edit must be detected")
+
+
+def assert_legacy_stamp_remains_compatible() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="p")
+    sync = existing["fields"][-1]
+    sync["value"] = legacy_content_signature(existing)
+    if Converter._is_user_modified(existing):
+        raise AssertionError("an untouched legacy sync stamp must remain valid")
+
+
+def assert_legacy_stamp_fails_closed_on_newly_covered_edit() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="p")
+    desired = _desired(name="X", password="p")
+    existing_login = existing.get("login")
+    assert existing_login is not None
+    existing_login["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 1})]
+    desired["login"]["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 0})]
+    existing["fields"][-1]["value"] = legacy_content_signature(existing)
+
+    outcome, bw = _reconcile(_make_converter(), existing, desired)
+
+    if outcome != "protected" or bw.updated:
+        raise AssertionError("legacy-stamped URI match edit must fail closed")
+
+
+def assert_legacy_stamp_mixed_uri_edit_fails_closed() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="old")
+    desired = _desired(name="X", password="new")
+    existing_login = existing.get("login")
+    assert existing_login is not None
+    existing_login["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 1})]
+    desired["login"]["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 0})]
+    existing["fields"][-1]["value"] = legacy_content_signature(existing)
+
+    outcome, bw = _reconcile(_make_converter(), existing, desired)
+
+    if outcome != "protected" or bw.updated:
+        raise AssertionError("mixed source and URI match changes must fail closed")
+
+
+def assert_legacy_stamp_changed_uri_fails_closed() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="old")
+    desired = _desired(name="X", password="new")
+    existing_login = existing.get("login")
+    assert existing_login is not None
+    existing_login["uris"] = [cast(BwUri, {"uri": "https://old.example", "match": 1})]
+    desired["login"]["uris"] = [cast(BwUri, {"uri": "https://new.example", "match": 0})]
+    existing["fields"][-1]["value"] = legacy_content_signature(existing)
+
+    outcome, bw = _reconcile(_make_converter(), existing, desired)
+
+    if outcome != "protected" or bw.updated:
+        raise AssertionError("unalignable legacy URI match state must fail closed")
+
+
+def assert_legacy_stamp_mixed_linked_field_edit_fails_closed() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="old")
+    desired = _desired(name="X", password="new")
+    existing["fields"].insert(
+        0,
+        cast(
+            BwField,
+            {"name": "linked", "value": "", "type": 3, "linkedId": 101},
+        ),
+    )
+    desired["fields"].insert(
+        0,
+        cast(
+            BwField,
+            {"name": "linked", "value": "", "type": 3, "linkedId": 100},
+        ),
+    )
+    existing["fields"][-1]["value"] = legacy_content_signature(existing)
+
+    outcome, bw = _reconcile(_make_converter(), existing, desired)
+
+    if outcome != "protected" or bw.updated:
+        raise AssertionError("mixed source and linked-target changes must fail closed")
+
+
+def assert_null_linked_id_on_text_field_is_compatible() -> None:
+    existing = _existing_as_kp2bw_wrote_it(name="X", password="old")
+    desired = _desired(name="X", password="new")
+    existing["fields"].insert(
+        0,
+        cast(
+            BwField,
+            {"name": "text", "value": "same", "type": 0, "linkedId": None},
+        ),
+    )
+    desired["fields"].insert(
+        0,
+        cast(BwField, {"name": "text", "value": "same", "type": 0}),
+    )
+    existing["fields"][-1]["value"] = legacy_content_signature(existing)
+
+    outcome, bw = _reconcile(_make_converter(), existing, desired)
+
+    if outcome != "updated" or not bw.updated:
+        raise AssertionError("linkedId=null on a text field must remain compatible")
+
+
 def assert_protected_when_user_edited() -> None:
     """User edit + KeePass change + no force -> protected, no PUT issued."""
     existing = _existing_as_kp2bw_wrote_it(name="X", password="orig")
@@ -243,6 +369,14 @@ def main() -> None:
     assert_legacy_item_not_user_modified()
     assert_own_write_not_user_modified()
     assert_user_edit_detected()
+    assert_uri_match_edit_detected()
+    assert_linked_field_edit_detected()
+    assert_legacy_stamp_remains_compatible()
+    assert_legacy_stamp_fails_closed_on_newly_covered_edit()
+    assert_legacy_stamp_mixed_uri_edit_fails_closed()
+    assert_legacy_stamp_changed_uri_fails_closed()
+    assert_legacy_stamp_mixed_linked_field_edit_fails_closed()
+    assert_null_linked_id_on_text_field_is_compatible()
     assert_protected_when_user_edited()
     assert_force_update_overwrites_user_edit()
     assert_keepass_change_updates_unedited_item()

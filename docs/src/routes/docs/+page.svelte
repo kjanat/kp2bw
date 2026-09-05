@@ -1,163 +1,392 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+
+	type Option = {
+		flag: string;
+		env?: string;
+		default: string;
+		detail: string;
+	};
+
+	const sourceOptions: Option[] = [
+		{
+			flag: 'FILE',
+			env: 'KP2BW_KEEPASS_FILE',
+			default: 'Required for migration and KeePass URI reports',
+			detail:
+				'Path to a KeePass 2.x database. May be omitted only in modes that do not read KeePass.',
+		},
+		{
+			flag: '-k, --keepass-password PASSWORD',
+			env: 'KP2BW_KEEPASS_PASSWORD',
+			default: 'Prompt securely',
+			detail:
+				'KeePass database password. Prefer the prompt or environment over a command-line value.',
+		},
+		{
+			flag: '-K, --keepass-keyfile FILE',
+			env: 'KP2BW_KEEPASS_KEYFILE',
+			default: 'None',
+			detail:
+				'Key file required to open the KeePass database, when applicable.',
+		},
+		{
+			flag: '-t, --import-tags TAG [TAG ...]',
+			env: 'KP2BW_IMPORT_TAGS',
+			default: 'All non-excluded entries',
+			detail:
+				'Import only entries carrying a listed tag. The environment value is a comma-separated list.',
+		},
+		{
+			flag: '--skip-expired, --no-skip-expired',
+			env: 'KP2BW_SKIP_EXPIRED',
+			default: 'Off',
+			detail: 'Exclude or include expired KeePass entries.',
+		},
+		{
+			flag: '--include-recycle-bin, --no-include-recycle-bin',
+			env: 'KP2BW_INCLUDE_RECYCLE_BIN',
+			default: 'Off',
+			detail: 'Include or exclude entries under the KeePass Recycle Bin.',
+		},
+		{
+			flag: '--totp-pps, --no-totp-pps',
+			env: 'KP2BW_TOTP_PPS',
+			default: 'Off',
+			detail:
+				'Read Pleasant Password Server TOTPSecret/TOTPDigits/TOTPPeriod fields instead of KeePass TimeOtp-* fields. PPS secrets use Base32 and SHA-1.',
+		},
+	];
+
+	const destinationOptions: Option[] = [
+		{
+			flag: '-b, --bitwarden-password PASSWORD',
+			env: 'KP2BW_BITWARDEN_PASSWORD',
+			default: 'Prompt securely',
+			detail:
+				'Password used to unlock Bitwarden. Not needed for a KeePass-only URI report.',
+		},
+		{
+			flag: '-o, --bitwarden-org ID',
+			env: 'KP2BW_BITWARDEN_ORG',
+			default: 'Personal vault',
+			detail: 'Create and scope items in this organization.',
+		},
+		{
+			flag: '-c, --bitwarden-collection ID|auto|nested',
+			env: 'KP2BW_BITWARDEN_COLLECTION',
+			default: 'No collection mapping',
+			detail:
+				"Use one existing collection ID, 'auto' for top-level KeePass group names, or 'nested' for full group paths. Requires an organization.",
+		},
+		{
+			flag: '--folder, --no-folder',
+			env: 'KP2BW_CREATE_FOLDERS',
+			default: 'On for personal vault; off with an organization',
+			detail:
+				'Create personal Bitwarden folders from KeePass groups. --no-folder leaves personal items at the root unless collections apply.',
+		},
+		{
+			flag: '--path-to-name, --no-path-to-name',
+			env: 'KP2BW_PATH_TO_NAME',
+			default: 'Off',
+			detail: 'Prefix each item name with its KeePass group path.',
+		},
+		{
+			flag: '--path-to-name-skip N',
+			env: 'KP2BW_PATH_TO_NAME_SKIP',
+			default: '1',
+			detail:
+				'Skip the first N groups when building the item-name prefix. N must be an integer.',
+		},
+		{
+			flag: '--metadata, --no-metadata',
+			env: 'KP2BW_MIGRATE_METADATA',
+			default: 'On',
+			detail:
+				'Store tags and expiry in a readable YAML KP2BW_META custom field when present.',
+		},
+		{
+			flag: '--include-oversize-secrets',
+			env: 'KP2BW_INCLUDE_OVERSIZE_SECRETS',
+			default: 'Off',
+			detail:
+				'Allow oversized hidden OTP, passkey, and KeePass-protected fields to become plaintext .txt attachments. Without consent they are warned about and dropped, not exposed.',
+		},
+	];
+
+	const rerunOptions: Option[] = [
+		{
+			flag: '--update, --no-update',
+			env: 'KP2BW_UPDATE',
+			default: 'On',
+			detail:
+				'Sync changed KeePass content and missing or changed attachments onto matched items. --no-update leaves existing content untouched; collection membership may still sync.',
+		},
+		{
+			flag: '--force-update',
+			env: 'KP2BW_FORCE_UPDATE',
+			default: 'Off',
+			detail:
+				'Overwrite matched items even when their KP2BW_SYNC stamp shows a later Bitwarden edit. Use only when KeePass must win.',
+		},
+	];
+
+	const uriOptions: Option[] = [
+		{
+			flag: '--uri-match MODE',
+			env: 'KP2BW_URI_MATCH',
+			default: 'default',
+			detail:
+				'Plain-URL match mode: domain, host, startswith, exact, regex, never, default, or null. default and null leave matching unset so the Bitwarden account setting applies.',
+		},
+		{
+			flag: '--interpret-uri-syntax, --no-interpret-uri-syntax',
+			env: 'KP2BW_INTERPRET_URI_SYNTAX',
+			default: 'On',
+			detail:
+				'Interpret KeePassXC additional URLs: double quotes mean exact and * means wildcard. Disable only that syntax handling; invalid, non-web, or unresolved values remain dropped, and Android packages remain transformed.',
+		},
+		{
+			flag: '--report-uris keepass|bitwarden',
+			env: 'KP2BW_REPORT_URIS',
+			default: 'Off',
+			detail:
+				'Read-only report of registrable domains containing multiple URI hosts. KeePass source needs FILE; Bitwarden source honors organization and collection scope.',
+		},
+		{
+			flag: '--migrate-uris',
+			env: 'KP2BW_MIGRATE_URIS',
+			default: 'Off',
+			detail:
+				'Bitwarden-only, idempotent upgrade: fold legacy KP2A_URL*/AndroidApp custom fields into login URIs, then exit. Honors URI settings and scope; confirms first.',
+		},
+	];
+
+	const utilityOptions: Option[] = [
+		{
+			flag: '--strip-ids',
+			env: 'KP2BW_STRIP_IDS',
+			default: 'Off',
+			detail:
+				'Bitwarden-only finalization: remove KP2BW_ID and KP2BW_SYNC from in-scope migrated items, then exit. Irreversible and makes future reruns unreliable; confirms first.',
+		},
+		{
+			flag: '-y, --yes',
+			env: 'KP2BW_YES',
+			default: 'Off',
+			detail:
+				'Skip the bw setup prompt and confirmations for mutating Bitwarden-only modes.',
+		},
+		{
+			flag: '-v, --verbose',
+			env: 'KP2BW_VERBOSE',
+			default: 'Off',
+			detail: 'Show per-entry kp2bw detail on the console.',
+		},
+		{
+			flag: '-d, --debug',
+			env: 'KP2BW_DEBUG',
+			default: 'Off',
+			detail: 'Show debug and third-party HTTP request logs on the console.',
+		},
+		{
+			flag: '--doctor',
+			default: 'Off',
+			detail:
+				'Print kp2bw, bw, server, installation, and .env diagnostics, then exit. Returns non-zero if bw is unusable.',
+		},
+		{
+			flag: '--redact',
+			default: 'Off',
+			detail:
+				'With --doctor, mask the server URL and home-relative paths before sharing the report.',
+		},
+		{
+			flag: '-V, --version',
+			default: '—',
+			detail: 'Print the installed kp2bw version and exit.',
+		},
+		{
+			flag: '-h, --help',
+			default: '—',
+			detail: 'Print the concise command help and exit.',
+		},
+	];
 </script>
 
 <svelte:head>
-	<title>kp2bw migration notes</title>
+	<title>kp2bw CLI reference</title>
 	<meta
 		name="description"
-		content="How kp2bw maps KeePass entries, folders, metadata, URLs, and reruns into Bitwarden."
+		content="Complete kp2bw CLI option, environment variable, mode, default, and safety reference."
 	>
 </svelte:head>
 
 <main class="docs-page">
 	<header class="docs-hero">
 		<a href={resolve('/')}>Back to planner</a>
-		<p>migration notes</p>
-		<h1>How kp2bw moves a vault</h1>
+		<p>command reference</p>
+		<h1>kp2bw CLI reference</h1>
 		<span>
-			The planner gives you a command. This page explains the Bitwarden model
-			behind it, especially the folder and collection choices that matter for
-			organization migrations.
+			Every invocation mode, option, environment mapping, and default. Use
+			<code>kp2bw --help</code> for a quick reminder; use this page for
+			semantics.
 		</span>
 	</header>
 
 	<div class="docs-layout">
 		<nav aria-label="Documentation sections">
-			<a href={resolve('/docs#moves')}>What moves</a>
-			<a href={resolve('/docs#options')}>Planner options</a>
+			<a href={resolve('/docs#usage')}>Usage and modes</a>
+			<a href={resolve('/docs#precedence')}>Environment</a>
+			<a href={resolve('/docs#source')}>KeePass input</a>
+			<a href={resolve('/docs#destination')}>Bitwarden output</a>
+			<a href={resolve('/docs#reruns')}>Reruns and updates</a>
+			<a href={resolve('/docs#uris')}>URI options</a>
+			<a href={resolve('/docs#utilities')}>Utility options</a>
 			<a href={resolve('/docs#mapping')}>Folders vs collections</a>
-			<a href={resolve('/docs#recommended')}>Default org command</a>
-			<a href={resolve('/docs#reruns')}>Running again</a>
-			<a href={resolve('/docs#urls')}>URL handling</a>
-			<a href={resolve('/docs#after')}>After migration</a>
-			<a href={resolve('/docs#credentials')}>Credentials</a>
+			<a href={resolve('/docs#safety')}>Safety and logs</a>
+			<a href={resolve('/docs#examples')}>Examples</a>
 		</nav>
 
 		<div class="content">
-			<section id="moves">
-				<p class="eyebrow">what moves</p>
-				<h2>kp2bw is not just a CSV-style import</h2>
+			<section id="usage">
+				<p class="eyebrow">usage and modes</p>
+				<h2>One executable, several short-circuit modes</h2>
+				<pre><code>kp2bw [OPTIONS] FILE
+python -m kp2bw [OPTIONS] FILE</code></pre>
 				<p>
-					It reads a KeePass 2.x database and creates Bitwarden items through
-					<code>bw serve</code>. Entries, group paths, attachments,
-					passkey-related fields, OTP-related fields, tags, expiry data, and
-					login URIs are mapped into Bitwarden shapes instead of being dumped as
-					plain notes.
+					The default mode reads <code>FILE</code>, unlocks Bitwarden through
+					<code>bw serve</code>, then migrates entries, attachments, OTP and
+					passkey fields, tags, expiry, and login URIs. The two invocation forms
+					are equivalent.
 				</p>
 				<div class="fact-grid">
 					<article>
-						<h3>Entries</h3>
+						<h3>Migration</h3>
 						<p>
-							Titles, usernames, passwords, notes, custom fields, and identities
-							are migrated as Bitwarden item data.
+							<code>kp2bw [options] FILE</code>. Reads KeePass and writes
+							Bitwarden.
 						</p>
 					</article>
 					<article>
-						<h3>Attachments</h3>
+						<h3>KeePass-only report</h3>
 						<p>
-							Files attached to KeePass entries are uploaded after their
-							Bitwarden item exists.
+							<code>--report-uris keepass FILE</code>. Reads KeePass and changes
+							nothing; no bw CLI or Bitwarden password needed.
 						</p>
 					</article>
 					<article>
-						<h3>Metadata</h3>
+						<h3>Bitwarden-only</h3>
 						<p>
-							Tags and expiry are kept in a readable <code>KP2BW_META</code>
-							field when Bitwarden has no native slot.
+							<code>--report-uris bitwarden</code>, <code>--migrate-uris</code>,
+							and
+							<code>--strip-ids</code> need no <code>FILE</code> or KeePass
+							password.
 						</p>
 					</article>
 					<article>
-						<h3>Identity stamps</h3>
+						<h3>Diagnostics</h3>
 						<p>
-							<code>KP2BW_ID</code> lets reruns match the same KeePass entry
-							instead of guessing by title.
+							<code>--doctor [--redact]</code>, <code>--version</code>, and
+							<code>--help</code> print information and exit.
 						</p>
 					</article>
 				</div>
+				<p>
+					Choose one special mode per invocation. Among URI report, strip, and
+					URI migration, report dispatch precedes strip, which precedes
+					migration; relying on that precedence is discouraged.
+				</p>
 			</section>
 
-			<section id="options">
-				<p class="eyebrow">planner options</p>
-				<h2>Each option changes placement, filtering, or rerun behavior</h2>
-				<div class="fact-grid">
-					<article id="target-vault">
-						<h3>Target vault</h3>
-						<p>
-							Organization means shared Bitwarden collections. Personal means
-							your own vault and optional personal folders.
-						</p>
-					</article>
-					<article id="organization-id">
-						<h3>Organization ID</h3>
-						<p>
-							The value passed with <code>-o</code>. Use the Bitwarden
-							organization ID for the destination org.
-						</p>
-					</article>
-					<article id="collection-id">
-						<h3>Collection ID</h3>
-						<p>
-							The value passed with <code>-c</code> when every imported item
-							should land in one existing collection.
-						</p>
-					</article>
-					<article id="keepass-file">
-						<h3>KeePass file</h3>
-						<p>
-							The final command argument. Point it at the <code>.kdbx</code>
-							database to migrate.
-						</p>
-					</article>
-					<article id="key-file">
-						<h3>Key file</h3>
-						<p>
-							Adds <code>-K</code> when the KeePass database also needs a key
-							file.
-						</p>
-					</article>
-					<article id="tag-filter">
-						<h3>Tag filter</h3>
-						<p>
-							Adds <code>-t</code> values. Empty means every non-excluded entry
-							is included.
-						</p>
-					</article>
-					<article id="filters">
-						<h3>Filters</h3>
-						<p>
-							Filters decide which KeePass entries are part of the plan before
-							collections or folders are calculated.
-						</p>
-					</article>
-					<article id="skip-expired">
-						<h3>Skip expired</h3>
-						<p>
-							Adds <code>--skip-expired</code>. Expired KeePass entries are
-							included unless this is enabled.
-						</p>
-					</article>
-					<article id="recycle-bin">
-						<h3>Recycle Bin</h3>
-						<p>
-							Adds <code>--include-recycle-bin</code>. Recycle Bin entries are
-							excluded by default.
-						</p>
-					</article>
-					<article id="totp-pps">
-						<h3>Pleasant Password Server TOTP</h3>
-						<p>
-							Adds <code>--totp-pps</code>. A KDBX exported from Pleasant
-							Password Server stores TOTP in <code>TOTPSecret</code>,
-							<code>TOTPDigits</code> and <code>TOTPPeriod</code> rather than
-							the KeePass <code>TimeOtp-*</code> fields, and its secret is
-							always Base32 with SHA-1. Only the selected naming is read, so a
-							database holding both migrates one of the two; the unread scheme's
-							secret field is still stored hidden rather than left visible,
-							while its digit and period fields stay ordinary custom fields.
-						</p>
-					</article>
+			<section id="precedence">
+				<p class="eyebrow">environment</p>
+				<h2>CLI value → environment → documented default</h2>
+				<p>
+					kp2bw searches upward from the current working directory for
+					<code>.env</code>. A non-empty process environment value wins; an
+					unset or empty one may be filled from the file. Explicit command
+					options then win over environment values.
+				</p>
+				<p>
+					Boolean environment values accept <code>1/0</code>,
+					<code>true/false</code>, <code>yes/no</code>, <code>y/n</code>, or
+					<code>on/off</code>, case-insensitively. Invalid values exit with
+					status 2.
+				</p>
+				<pre><code>KP2BW_KEEPASS_PASSWORD=&lt;keepass password&gt;
+KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
+				<p>
+					Protect <code>.env</code> with filesystem permissions and never commit
+					it. Prompting is safer on shared systems because command-line
+					passwords can appear in shell history and process listings.
+				</p>
+			</section>
+
+			{#snippet optionList(options: Option[])}
+				<div class="option-list">
+					{#each options as option (option.flag)}
+						<article>
+							<h3><code>{option.flag}</code></h3>
+							<dl>
+								{#if option.env}
+									<div>
+										<dt>Environment</dt>
+										<dd><code>{option.env}</code></dd>
+									</div>
+								{/if}
+								<div>
+									<dt>Default</dt>
+									<dd>{option.default}</dd>
+								</div>
+							</dl>
+							<p>{option.detail}</p>
+						</article>
+					{/each}
 				</div>
+			{/snippet}
+
+			<section id="source">
+				<p class="eyebrow">KeePass input and filters</p>
+				<h2>Choose the source and included entries</h2>
+				{@render optionList(sourceOptions)}
+			</section>
+
+			<section id="destination">
+				<p class="eyebrow">Bitwarden destination and shape</p>
+				<h2>Choose vault scope, hierarchy, and metadata</h2>
+				{@render optionList(destinationOptions)}
+			</section>
+
+			<section id="reruns">
+				<p class="eyebrow">reruns and updates</p>
+				<h2>Safe updates are the default</h2>
+				<p>
+					Migrated items carry a KeePass UUID in <code>KP2BW_ID</code> and a
+					content signature in <code>KP2BW_SYNC</code>. Unchanged reruns are
+					idempotent. By default, kp2bw updates changed source content but
+					protects an item edited in Bitwarden after the prior run.
+				</p>
+				{@render optionList(rerunOptions)}
+			</section>
+
+			<section id="uris">
+				<p class="eyebrow">URI matching and maintenance</p>
+				<h2>Control autofill matching and inspect collisions</h2>
+				<p>
+					Additional KeePass URLs such as <code>KP2A_URL</code>,
+					<code>URL_1</code>, and <code>AndroidApp</code> become Bitwarden login
+					URIs. Quoted-exact and wildcard URLs keep their interpreted modes;
+					<code>--uri-match</code> controls plain URLs.
+				</p>
+				{@render optionList(uriOptions)}
+			</section>
+
+			<section id="utilities">
+				<p class="eyebrow">finalization, diagnostics, and output</p>
+				<h2>Utility options</h2>
+				{@render optionList(utilityOptions)}
 			</section>
 
 			<section id="mapping">
@@ -251,120 +480,74 @@
 				</div>
 			</section>
 
-			<section id="recommended">
-				<p class="eyebrow">recommended org migration</p>
-				<h2>Start with full-path organization collections</h2>
-				<p>
-					Use an organization ID, map full KeePass group paths to collections,
-					and omit personal folders:
-				</p>
-				<pre><code># .env
-KP2BW_KEEPASS_PASSWORD=&lt;keepass password&gt;
-KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;
-
-kp2bw -o 00000000-0000-0000-0000-000000000000 -c nested vault.kdbx</code></pre>
-				<p>
-					Choose top-level collections if you need fewer collections. Choose one
-					existing collection only when you intentionally want to flatten the
-					KeePass group tree into a single shared place.
-				</p>
-			</section>
-
-			<section id="reruns">
-				<p class="eyebrow">running again</p>
-				<h2>Choose the situation, not the flag name</h2>
-				<p>
-					Every migrated item carries <code>KP2BW_ID</code>, the KeePass UUID
-					used to match the same item next time. kp2bw also writes a
-					<code>KP2BW_SYNC</code> content stamp. Those markers let kp2bw decide
-					whether an existing Bitwarden item is still safe to update.
-				</p>
+			<section id="safety">
+				<p class="eyebrow">safety and operational notes</p>
+				<h2>Know what writes, what prompts, and where logs go</h2>
 				<ul>
 					<li>
-						KeePass is still my main vault: use <code>--force-update</code>.
+						Install and configure <code>bw</code>; for self-hosting run <code>bw
+							config server URL</code>, then log in once with <code>bw
+							login</code>. kp2bw uses unlock.
 					</li>
 					<li>
-						Mostly Bitwarden, sync forgotten KeePass edits: default mode.
+						<code>--report-uris</code> is read-only. <code>--migrate-uris</code>
+						mutates matching fields. <code>--strip-ids</code> is irreversible.
 					</li>
 					<li>
-						Testing migrations against an existing Vaultwarden DB: use
-						<code>--no-update</code>.
+						<code>-c</code> always requires <code>-o</code>. Organization scope
+						defaults personal folders off; explicit <code>--folder</code> opts
+						into double filing.
+					</li>
+					<li>
+						A declined confirmation exits cleanly. An interrupted migration
+						exits 130; partial item or attachment failures produce a non-zero
+						exit.
+					</li>
+					<li>
+						A full DEBUG log is always written. Override its location with <code
+						>KP2BW_LOG_FILE</code> or directory with <code>KP2BW_LOG_DIR</code>.
+					</li>
+					<li>
+						<code>KP2BW_HTTP_TIMEOUT</code> sets the per-request HTTP timeout in
+						seconds. It defaults to 180; values above 3600 are clamped to 3600.
 					</li>
 				</ul>
-				<div class="fact-grid">
-					<article id="force-update">
-						<h3>KeePass is still my main vault</h3>
-						<p>
-							<code>--force-update</code>: KeePass content wins over later
-							Bitwarden edits. Use this when KeePass is still the source of
-							truth.
-						</p>
-					</article>
-					<article id="safe-rerun">
-						<h3>Mostly Bitwarden, sync forgotten KeePass edits</h3>
-						<p>
-							Default mode. kp2bw updates migrated items when Bitwarden has not
-							been edited since the last kp2bw run.
-						</p>
-					</article>
-					<article id="no-update">
-						<h3>Testing migrations; keep the existing Vaultwarden DB</h3>
-						<p>
-							<code>--no-update</code>: create missing items only. Existing
-							migrated items stay untouched, so you do not need to wipe the DB
-							just to try another pass.
-						</p>
-					</article>
-				</div>
-			</section>
-
-			<section id="urls">
-				<p class="eyebrow">url handling</p>
-				<h2>Additional URLs become real login URIs</h2>
 				<p>
-					KeePass fields like <code>KP2A_URL</code>, <code>URL_1</code>, and
-					<code>AndroidApp</code> are folded into Bitwarden login URIs where
-					they can drive autofill. Free-text fields like <code>API Url</code>
-					stay as custom fields so API endpoints do not accidentally become
-					login matches.
-				</p>
-				<p>
-					Plain URLs use your Bitwarden account default. KeePassXC-style quoted
-					URLs become exact matches, and wildcards become starts-with or regex
-					matches. If too many subdomains surface together, use the URI
-					collision report to inspect the problem before changing match
-					behavior.
+					Default log directories: <code>%LOCALAPPDATA%/kp2bw/logs</code> on
+					Windows, <code>~/Library/Logs/kp2bw</code> on macOS, and
+					<code>$XDG_STATE_HOME/kp2bw/logs</code> or
+					<code>~/.local/state/kp2bw/logs</code> elsewhere. Logs contain debug
+					transport detail; review before sharing.
 				</p>
 			</section>
 
-			<section id="after">
-				<p class="eyebrow">after migration</p>
-				<h2>Only strip kp2bw stamps when you are truly done</h2>
-				<p>
-					<code>kp2bw --strip-ids</code> removes <code>KP2BW_ID</code> and
-					<code>KP2BW_SYNC</code> from migrated items. That is final adoption:
-					Bitwarden becomes the source of truth and future KeePass reruns become
-					unreliable because kp2bw can no longer match by KeePass UUID.
-				</p>
-				<p class="warning">
-					This is irreversible. Do not run it while you still expect to rerun a
-					KeePass migration.
-				</p>
-			</section>
+			<section id="examples">
+				<p class="eyebrow">examples</p>
+				<h2>Common complete commands</h2>
+				<pre><code># Personal vault; preserve KeePass groups as personal folders
+kp2bw vault.kdbx
 
-			<section id="credentials">
-				<p class="eyebrow">credentials</p>
-				<h2>Use a .env file for passwords</h2>
-				<p>
-					The command can prompt for passwords. For repeated runs, put secrets
-					in <code>.env</code> instead of in command arguments.
-				</p>
-				<pre><code>KP2BW_KEEPASS_PASSWORD=&lt;keepass password&gt;
-KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
-				<p>
-					kp2bw loads <code>.env</code> automatically. Real environment
-					variables still win when both are set.
-				</p>
+# Organization; preserve full group paths as nested collections
+kp2bw -o 00000000-0000-0000-0000-000000000000 -c nested vault.kdbx
+
+# Organization; map only top-level groups and also create personal folders
+kp2bw -o 00000000-0000-0000-0000-000000000000 -c auto --folder vault.kdbx
+
+# Import selected tags, excluding expired and Recycle Bin entries
+kp2bw -t work shared --skip-expired vault.kdbx
+
+# Read-only URI collision reports
+kp2bw --report-uris keepass vault.kdbx
+kp2bw --report-uris bitwarden -o 00000000-0000-0000-0000-000000000000
+
+# Upgrade legacy URL fields in one organization, without reading KeePass
+kp2bw --migrate-uris -o 00000000-0000-0000-0000-000000000000
+
+# Final adoption; remove migration stamps after interactive confirmation
+kp2bw --strip-ids -o 00000000-0000-0000-0000-000000000000
+
+# Shareable diagnostics
+kp2bw --doctor --redact</code></pre>
 			</section>
 		</div>
 	</div>
@@ -515,6 +698,50 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 		margin-bottom: 0;
 	}
 
+	.option-list {
+		display: grid;
+		gap: 18px;
+		margin-top: 18px;
+	}
+
+	.option-list article {
+		min-width: 0;
+		border-left: 2px solid var(--edge);
+		padding-left: 14px;
+	}
+
+	.option-list h3 {
+		text-transform: none;
+	}
+
+	.option-list dl {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 18px;
+		margin: 8px 0 0;
+	}
+
+	.option-list dl div {
+		display: flex;
+		min-width: 0;
+		gap: 6px;
+	}
+
+	.option-list dt {
+		color: var(--text-muted);
+		font-size: 0.72rem;
+		text-transform: uppercase;
+	}
+
+	.option-list dd {
+		margin: 0;
+		color: var(--text-dim);
+	}
+
+	.option-list p {
+		margin: 8px 0 0;
+	}
+
 	.mapping-grid {
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -538,13 +765,6 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 
 	.mapping-grid span {
 		display: none;
-	}
-
-	.warning {
-		border: 1px solid #7a5a40;
-		background: #201a13;
-		padding: 12px;
-		color: #f0c08a;
 	}
 
 	@media (max-width: 820px) {
@@ -596,6 +816,12 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 			color: var(--text-muted);
 			font-size: 0.68rem;
 			text-transform: uppercase;
+		}
+
+		.option-list dl,
+		.option-list dl div {
+			display: grid;
+			gap: 2px;
 		}
 	}
 </style>

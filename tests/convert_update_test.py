@@ -45,7 +45,7 @@ class UpdateTestConverter(Converter):
         """Public shim for building the update payload."""
         return self._build_update_payload(existing, desired)
 
-    def fields_sig(self, fields: list[Any]) -> list[tuple[str, str, int]]:
+    def fields_sig(self, fields: list[Any]) -> list[tuple[str, str, int, int | None]]:
         """Public shim for the field signature."""
         return self._fields_signature(fields)
 
@@ -242,6 +242,23 @@ def assert_uri_change_detected() -> None:
     desired["login"]["uris"] = new_uris
     if not conv.diff(_make_existing(), desired):
         raise AssertionError("changed URI was not detected")
+
+
+def assert_uri_order_change_detected() -> None:
+    conv = UpdateTestConverter()
+    existing = _make_existing()
+    desired = _make_desired()
+    uris = [
+        cast(BwUri, {"uri": "https://a", "match": 0}),
+        cast(BwUri, {"uri": "https://b", "match": 1}),
+    ]
+    existing_login = existing.get("login")
+    if existing_login is None:
+        raise AssertionError("fixture is missing its login object")
+    existing_login["uris"] = uris
+    desired["login"]["uris"] = list(reversed(uris))
+    if not conv.diff(existing, desired):
+        raise AssertionError("URI ordering change was not detected")
 
 
 def assert_fields_signature_order_independent() -> None:
@@ -610,6 +627,7 @@ def main() -> None:
     assert_password_change_detected()
     assert_field_change_detected()
     assert_uri_change_detected()
+    assert_uri_order_change_detected()
     assert_fields_signature_order_independent()
     assert_update_payload_preserves_and_overwrites()
     assert_update_payload_preserves_existing_passkey()

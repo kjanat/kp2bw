@@ -11,6 +11,7 @@ src/kp2bw/
 ├── cli.py              # CLI parsing, prompts, env handling, run mode selection
 ├── convert.py          # Conversion orchestrator and entry transformation pipeline
 ├── bw_serve.py         # bw serve process lifecycle + HTTP CRUD + attachment upload
+├── _item_sync.py        # Content signatures, compatibility, and sync stamps
 ├── otp.py              # KeePass/PPS OTP custom fields -> Bitwarden login.totp (pure, no I/O)
 ├── uri_mapping.py      # KeePass URL syntax -> Bitwarden login URIs + match modes
 ├── bw_types.py         # Hand-written TypedDict types (supplements generated types)
@@ -28,6 +29,7 @@ src/kp2bw/
 | Add/adjust CLI flags   | `src/kp2bw/cli.py`             | `main()` and argument parser are here               |
 | Change import behavior | `src/kp2bw/convert.py`         | Top-level `convert()` flow and migration phases     |
 | Tune dedup/idempotency | `src/kp2bw/bw_serve.py`        | Existing item index + batch create behavior         |
+| Change sync signatures | `src/kp2bw/_item_sync.py`      | Signature compatibility and managed stamp helpers   |
 | Attachment behavior    | `src/kp2bw/bw_serve.py`        | Async upload path and multipart logic               |
 | Map KeePass fields     | `src/kp2bw/convert.py`         | Entry/custom field/TOTP/passkey mapping             |
 | OTP field resolution   | `src/kp2bw/otp.py`             | Field-name schemes, decoding, `otpauth://` emission |
@@ -83,11 +85,10 @@ src/kp2bw/
   before stable identity.
 - Manual-edit protection (issue #30, `--force-update` / `KP2BW_FORCE_UPDATE`, `Converter(force_update=...)` →
   `self._force_update_all`): every written item carries a `KP2BW_SYNC` plain-text field holding
-  `_content_signature(item)` — a sha256 over exactly the surface `_content_differs` compares (name, notes,
-  `_fields_signature` with managed stamps excluded, `_login_signature`), stamped in `_add_bw_entry_to_entries_dict`,
-  read by `bw_serve.item_kp2bw_sync`, and itself excluded from the signature (in `_MANAGED_FIELD_NAMES`) so it never
-  causes a spurious diff. `_reconcile_existing_item` computes `_is_user_modified(existing)` =
-  `stamp != _content_signature(existing)`; when content differs **and** the item was user-edited **and** not
+  `_item_sync.content_signature(item)` — a sha256 over name, notes, custom fields (including `linkedId`), and login
+  credentials/URIs (including URI order and `match`); managed stamps are excluded. Pre-3.8.1 stamps remain valid over
+  their original field/URI coverage and are upgraded on a safe write; ambiguous edits to newly covered values fail
+  closed. When content differs **and** the item was user-edited **and** not
   `force_update`/`_force_update_all`, it returns `"protected"` (no PUT, attachments skipped) instead of clobbering.
   kp2bw's own writes restamp, so they never self-trip; an unstamped (legacy/first-run) item returns `False` and updates
   normally to establish the stamp. The signature mechanism is deliberate over comparing Bitwarden's `revisionDate` to a
@@ -101,6 +102,10 @@ src/kp2bw/
   re-runs (they fall back to `(folder, name)` matching), so an interactive run confirms first (skippable with
   `-y`/`KP2BW_YES`); a declined prompt exits `0` (clean abort), Ctrl+C exits `130`. Re-runnable: a second pass finds
   nothing.
+- `--migrate-uris` is a Bitwarden-only legacy upgrade. Before folding URL/app fields, it verifies any existing
+  `KP2BW_SYNC` against a freshly fetched full item and skips mismatches; unstamped legacy items remain eligible. It
+  rechecks the outgoing full-object body against another fetch immediately before the `PUT`. Every transformed item is
+  restamped, and a repeated pass writes nothing.
 - `--metadata` (default on) folds the KeePass metadata Bitwarden has no native slot for — **tags and expiry** — into a
   single readable **YAML** `KP2BW_META` text field (`_build_metadata_field`, via PyYAML
   `safe_dump(allow_unicode=
