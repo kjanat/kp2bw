@@ -32,6 +32,28 @@ def assert_terminal_help_links_with_osc8() -> None:
         raise AssertionError("terminal help link has no readable label")
 
 
+def assert_narrow_terminal_keeps_osc8_link_intact() -> None:
+    with (
+        mock.patch.object(cli.sys.stdout, "isatty", return_value=True),
+        mock.patch.dict(cli.os.environ, {"COLUMNS": "12", "TERM": "xterm-256color"}),
+    ):
+        output = cli._argparser().format_help()
+
+    if cli._cli_docs_link(terminal=True) not in output:
+        raise AssertionError("narrow help split the OSC 8 documentation link")
+
+
+def assert_narrow_redirect_keeps_plain_url_intact() -> None:
+    with (
+        mock.patch.object(cli.sys.stdout, "isatty", return_value=False),
+        mock.patch.dict(cli.os.environ, {"COLUMNS": "12"}),
+    ):
+        output = cli._argparser().format_help()
+
+    if cli.CLI_DOCS_URL not in output:
+        raise AssertionError("narrow redirected help split the documentation URL")
+
+
 def assert_unsupported_terminal_gets_plain_url() -> None:
     with (
         mock.patch.object(cli.sys.stdout, "isatty", return_value=True),
@@ -46,6 +68,8 @@ def assert_unsupported_terminal_gets_plain_url() -> None:
 def main() -> None:
     assert_plain_help_is_compact_and_copyable()
     assert_terminal_help_links_with_osc8()
+    assert_narrow_terminal_keeps_osc8_link_intact()
+    assert_narrow_redirect_keeps_plain_url_intact()
     assert_unsupported_terminal_gets_plain_url()
     print("cli help test passed")
 

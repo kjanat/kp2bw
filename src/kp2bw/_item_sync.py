@@ -111,6 +111,17 @@ def has_legacy_sync_stamp(item: BwItemResponse, stamp: str) -> bool:
     return stamp != content_signature(item) and stamp == legacy_content_signature(item)
 
 
+def legacy_extensions_are_ambiguous(item: BwItemResponse) -> bool:
+    """Return whether a legacy stamp omitted live values that cannot be verified."""
+    login = item.get("login")
+    if login is not None and login.get("uris"):
+        return True
+    return any(
+        field.get("type") == 3 or field.get("linkedId") is not None
+        for field in (item.get("fields") or [])
+    )
+
+
 def legacy_extensions_differ(existing: BwItemResponse, desired: BwItemCreate) -> bool:
     """Compare newly covered values that can be aligned under a legacy stamp."""
 

@@ -3,7 +3,8 @@ import logging
 import os
 import platform
 import sys
-from argparse import ArgumentParser, BooleanOptionalAction, Namespace
+import textwrap
+from argparse import ArgumentParser, BooleanOptionalAction, HelpFormatter, Namespace
 from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
@@ -57,6 +58,23 @@ class MyArgParser(ArgumentParser):
         _ = sys.stderr.write(f"{self.prog}: {message}\n\n")
         self.print_help()
         sys.exit(2)
+
+
+class _NoBreakHelpFormatter(HelpFormatter):
+    """Wrap help without splitting URLs or terminal escape sequences."""
+
+    def _fill_text(self, text: str, width: int, indent: str) -> str:
+        normalized = " ".join(text.split())
+        if "\x1b]8;" in normalized:
+            return f"{indent}{normalized}"
+        return textwrap.fill(
+            normalized,
+            width,
+            initial_indent=indent,
+            subsequent_indent=indent,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
 
 
 def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
@@ -144,6 +162,7 @@ def _argparser() -> MyArgParser:
         usage="%(prog)s [OPTIONS] [FILE]",
         description="Import KeePass into Bitwarden.",
         epilog=f"Documentation: {_cli_docs_link(terminal=_supports_osc8())}",
+        formatter_class=_NoBreakHelpFormatter,
     )
 
     parser.add_argument(
@@ -509,7 +528,8 @@ def _run_migrate_uris(
         )
     if result.protected:
         console.print(
-            f"[yellow]Preserved {result.protected} item(s) modified in Bitwarden; "
+            f"[yellow]Preserved {result.protected} item(s) that could not be "
+            "updated safely; "
             "their legacy URL fields were not changed.[/yellow]"
         )
     if not result.migrated and not result.protected:

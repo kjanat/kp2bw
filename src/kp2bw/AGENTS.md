@@ -11,6 +11,7 @@ src/kp2bw/
 ├── cli.py              # CLI parsing, prompts, env handling, run mode selection
 ├── convert.py          # Conversion orchestrator and entry transformation pipeline
 ├── bw_serve.py         # bw serve process lifecycle + HTTP CRUD + attachment upload
+├── _item_sync.py        # Content signatures, compatibility, and sync stamps
 ├── otp.py              # KeePass/PPS OTP custom fields -> Bitwarden login.totp (pure, no I/O)
 ├── uri_mapping.py      # KeePass URL syntax -> Bitwarden login URIs + match modes
 ├── bw_types.py         # Hand-written TypedDict types (supplements generated types)
@@ -28,6 +29,7 @@ src/kp2bw/
 | Add/adjust CLI flags   | `src/kp2bw/cli.py`             | `main()` and argument parser are here               |
 | Change import behavior | `src/kp2bw/convert.py`         | Top-level `convert()` flow and migration phases     |
 | Tune dedup/idempotency | `src/kp2bw/bw_serve.py`        | Existing item index + batch create behavior         |
+| Change sync signatures | `src/kp2bw/_item_sync.py`      | Signature compatibility and managed stamp helpers   |
 | Attachment behavior    | `src/kp2bw/bw_serve.py`        | Async upload path and multipart logic               |
 | Map KeePass fields     | `src/kp2bw/convert.py`         | Entry/custom field/TOTP/passkey mapping             |
 | OTP field resolution   | `src/kp2bw/otp.py`             | Field-name schemes, decoding, `otpauth://` emission |

@@ -7,6 +7,7 @@ with a client double, so no live `bw serve` process is spawned.
 """
 
 import copy
+from datetime import datetime
 from typing import Self, cast
 from unittest import mock
 
@@ -23,6 +24,7 @@ from kp2bw.bw_serve import (
     item_kp2bw_sync,
 )
 from kp2bw.bw_types import BwField, BwItemResponse, BwUri
+from kp2bw.exceptions import BitwardenHttpError
 from kp2bw.uri_mapping import UriMatchValue, is_url_attribute_key
 
 
@@ -35,6 +37,8 @@ def _login(item_id: str, field_names: list[str], uri: str) -> BwItemResponse:
         BwItemResponse,
         {
             "id": item_id,
+            "object": "item",
+            "revisionDate": "2026-09-05T00:00:00.000Z",
             "name": item_id,
             "type": 1,
             "fields": fields,
@@ -52,6 +56,9 @@ class _MigrateClient(BitwardenServeClient):
         *,
         current_items: list[BwItemResponse] | None = None,
         item_versions: dict[str, list[BwItemResponse]] | None = None,
+        item_at_update: dict[str, BwItemResponse] | None = None,
+        commit_then_conflict: set[str] | None = None,
+        update_errors: dict[str, BitwardenHttpError] | None = None,
     ) -> None:
         self._org_id = None
         self._collection_id = None
@@ -59,8 +66,12 @@ class _MigrateClient(BitwardenServeClient):
         current = items if current_items is None else current_items
         self._current_by_id = {item["id"]: item for item in current}
         self._item_versions = item_versions or {}
+        self._item_at_update = item_at_update or {}
+        self._commit_then_conflict = commit_then_conflict or set()
+        self._update_errors = update_errors or {}
         self.updated_ids: list[str] = []
         self.updated_items: dict[str, BwItemResponse] = {}
+        self.expected_revisions: list[str] = []
 
     def list_items(
         self,
@@ -74,10 +85,39 @@ class _MigrateClient(BitwardenServeClient):
     def get_item(self, item_id: str) -> BwItemResponse:
         versions = self._item_versions.get(item_id)
         if versions:
-            return versions.pop(0) if len(versions) > 1 else versions[0]
-        return self._current_by_id[item_id]
+            item = versions.pop(0) if len(versions) > 1 else versions[0]
+            return copy.deepcopy(item)
+        return copy.deepcopy(self._current_by_id[item_id])
 
-    def update_item(self, item_id: str, item: BwItemResponse) -> None:
+    def sync(self) -> None:
+        pass
+
+    def update_item_if_revision(
+        self, item_id: str, item: BwItemResponse, *, expected_revision: str
+    ) -> None:
+        self.expected_revisions.append(expected_revision)
+        if item_id in self._commit_then_conflict:
+            committed = copy.deepcopy(item)
+            committed["revisionDate"] = "2026-09-05T00:00:02.000Z"
+            self._current_by_id[item_id] = committed
+            self.updated_ids.append(item_id)
+            self.updated_items[item_id] = committed
+            raise BitwardenHttpError("conflict", status_code=400)
+        concurrent = self._item_at_update.get(item_id)
+        if concurrent is not None:
+            self._current_by_id[item_id] = concurrent
+        update_error = self._update_errors.get(item_id)
+        if update_error is not None:
+            raise update_error
+        current_revision = self._current_by_id[item_id]["revisionDate"]
+        revision_gap = abs(
+            (
+                datetime.fromisoformat(current_revision)
+                - datetime.fromisoformat(expected_revision)
+            ).total_seconds()
+        )
+        if revision_gap > 1:
+            raise BitwardenHttpError("conflict", status_code=400)
         self.updated_ids.append(item_id)
         self.updated_items[item_id] = item
         self._current_by_id[item_id] = item
@@ -137,8 +177,12 @@ def assert_valid_stamp_is_refreshed() -> None:
         raise AssertionError("migrated item did not receive its new content signature")
 
 
-def assert_legacy_stamp_is_accepted_and_upgraded() -> None:
-    legacy = _login("old-stamp", ["KP2A_URL"], "https://legacy.example")
+def assert_unambiguous_legacy_stamp_is_upgraded() -> None:
+    legacy = _login("safe-old-stamp", ["KP2A_URL"], "")
+    login = legacy.get("login")
+    if login is None:
+        raise AssertionError("legacy test item must be a login")
+    login["uris"] = []
     legacy["fields"].append(
         cast(
             BwField,
@@ -153,9 +197,42 @@ def assert_legacy_stamp_is_accepted_and_upgraded() -> None:
 
     result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
 
-    updated = client.updated_items["old-stamp"]
+    updated = client.updated_items["safe-old-stamp"]
     if result.migrated != 1 or item_kp2bw_sync(updated) != content_signature(updated):
-        raise AssertionError("legacy sync stamp was not accepted and upgraded")
+        raise AssertionError("unambiguous legacy sync stamp was not upgraded")
+
+
+def assert_legacy_stamp_is_preserved_as_ambiguous() -> None:
+    legacy = _login("old-stamp", ["KP2A_URL"], "https://legacy.example")
+    legacy["fields"].append(
+        cast(
+            BwField,
+            {"name": "linked", "value": "", "type": 3, "linkedId": 100},
+        )
+    )
+    legacy["fields"].append(
+        cast(
+            BwField,
+            {
+                "name": KP2BW_SYNC_FIELD_NAME,
+                "value": legacy_content_signature(legacy),
+                "type": 0,
+            },
+        )
+    )
+    login = legacy.get("login")
+    if login is None:
+        raise AssertionError("legacy test item must be a login")
+    login["uris"][0]["match"] = 1
+    legacy["fields"][-2]["linkedId"] = 101
+    client = _MigrateClient([legacy])
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    if result.migrated != 0 or result.protected != 1 or client.updated_ids:
+        raise AssertionError("legacy-only sync stamp must fail closed")
+    if not any(field["name"] == "KP2A_URL" for field in legacy["fields"]):
+        raise AssertionError("ambiguous legacy-stamped item was transformed")
 
 
 def assert_modified_stamped_item_is_preserved() -> None:
@@ -204,6 +281,78 @@ def assert_change_during_migration_is_preserved() -> None:
         raise AssertionError("an item changed during migration should not be PUT")
 
 
+def assert_loginless_candidate_is_reported_as_protected() -> None:
+    item = _login("loginless", ["KP2A_URL"], "https://legacy.example")
+    del item["login"]
+    client = _MigrateClient([item])
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    if result.migrated != 0 or result.protected != 1 or client.updated_ids:
+        raise AssertionError("login-less candidate should be reported as protected")
+
+
+def assert_change_after_final_read_is_preserved() -> None:
+    listed = _login("late-race", ["KP2A_URL"], "https://legacy.example")
+    stamp_content(listed)
+    concurrent = copy.deepcopy(listed)
+    concurrent["notes"] = "edit after final read"
+    concurrent["revisionDate"] = "2026-09-05T00:00:02.000Z"
+    client = _MigrateClient([listed], item_at_update={"late-race": concurrent})
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    if result.migrated != 0 or result.protected != 1 or client.updated_ids:
+        raise AssertionError("a post-read revision conflict should not be overwritten")
+    if client._current_by_id["late-race"].get("notes") != "edit after final read":
+        raise AssertionError("the post-read concurrent edit was not preserved")
+
+
+def assert_committed_retry_conflict_is_reported_as_migrated() -> None:
+    listed = _login("committed", ["KP2A_URL"], "https://legacy.example")
+    stamp_content(listed)
+    client = _MigrateClient([listed], commit_then_conflict={"committed"})
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    if result.migrated != 1 or result.protected != 0:
+        raise AssertionError("a committed retry conflict was misreported")
+    updated = client._current_by_id["committed"]
+    if any(
+        is_url_attribute_key(field.get("name") or "")
+        for field in (updated.get("fields") or [])
+    ):
+        raise AssertionError("the committed update did not migrate its URL fields")
+
+
+def assert_same_revision_http_error_is_not_a_conflict() -> None:
+    listed = _login("invalid", ["KP2A_URL"], "https://legacy.example")
+    stamp_content(listed)
+    error = BitwardenHttpError("validation failed", status_code=400)
+    client = _MigrateClient([listed], update_errors={"invalid": error})
+
+    try:
+        client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+    except BitwardenHttpError as exc:
+        if exc is not error:
+            raise AssertionError("migration raised the wrong HTTP failure") from None
+        return
+    raise AssertionError("same-revision HTTP failure was misclassified as a conflict")
+
+
+def assert_conditional_update_body_carries_revision() -> None:
+    item = _login("conditional", ["KP2A_URL"], "https://legacy.example")
+    plain = BitwardenServeClient._item_update_body(item)
+    conditional = BitwardenServeClient._item_update_body(
+        item, expected_revision=item["revisionDate"]
+    )
+
+    if "revisionDate" in plain:
+        raise AssertionError("ordinary update body unexpectedly carried a revision")
+    if conditional.get("revisionDate") != item["revisionDate"]:
+        raise AssertionError("conditional update body omitted the observed revision")
+
+
 def assert_cli_reports_protected_items() -> None:
     class _ResultClient:
         def __init__(self, result: MigrateResult) -> None:
@@ -239,7 +388,7 @@ def assert_cli_reports_protected_items() -> None:
         return capture.get()
 
     protected_only = _output(MigrateResult(scanned=3, migrated=0, protected=2))
-    if "Preserved 2 item(s) modified in Bitwarden" not in protected_only:
+    if "Preserved 2 item(s) that could not be updated safely" not in protected_only:
         raise AssertionError("protected-only result was not reported")
     if "No items carried legacy URL fields" in protected_only:
         raise AssertionError("protected-only result was falsely reported as no-op")
@@ -247,17 +396,23 @@ def assert_cli_reports_protected_items() -> None:
     mixed = _output(MigrateResult(scanned=3, migrated=1, protected=1))
     if "Migrated URL fields to URIs on 1 of 3 item(s)" not in mixed:
         raise AssertionError("mixed result omitted migrated count")
-    if "Preserved 1 item(s) modified in Bitwarden" not in mixed:
+    if "Preserved 1 item(s) that could not be updated safely" not in mixed:
         raise AssertionError("mixed result omitted protected count")
 
 
 def main() -> None:
     assert_only_login_items_with_legacy_fields_migrate()
     assert_valid_stamp_is_refreshed()
-    assert_legacy_stamp_is_accepted_and_upgraded()
+    assert_unambiguous_legacy_stamp_is_upgraded()
+    assert_legacy_stamp_is_preserved_as_ambiguous()
     assert_modified_stamped_item_is_preserved()
     assert_fresh_item_is_used_instead_of_list_snapshot()
     assert_change_during_migration_is_preserved()
+    assert_loginless_candidate_is_reported_as_protected()
+    assert_change_after_final_read_is_preserved()
+    assert_committed_retry_conflict_is_reported_as_migrated()
+    assert_same_revision_http_error_is_not_a_conflict()
+    assert_conditional_update_body_carries_revision()
     assert_cli_reports_protected_items()
     print("migrate uris test passed")
 
