@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.8.2] - 2026-09-07
+
 ### Fixed
 
 - Prefix KeePassXC passkey credential IDs with Bitwarden's `b64.` marker so migrated passkeys authenticate instead of
@@ -642,7 +644,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.8.1...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.8.2...HEAD
+[3.8.2]: https://github.com/kjanat/kp2bw/compare/v3.8.1...v3.8.2
 [3.8.1]: https://github.com/kjanat/kp2bw/compare/v3.8.0...v3.8.1
 [3.8.0]: https://github.com/kjanat/kp2bw/compare/v3.7.1...v3.8.0
 [3.7.1]: https://github.com/kjanat/kp2bw/compare/v3.7.0...v3.7.1
