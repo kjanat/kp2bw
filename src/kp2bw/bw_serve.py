@@ -24,10 +24,9 @@ from ._console import console
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
-    has_legacy_sync_stamp,
     legacy_extensions_are_ambiguous,
     stamp_content,
-    sync_stamp_matches,
+    sync_stamp_generation,
 )
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import BitwardenClientError, BitwardenHttpError
@@ -1137,23 +1136,24 @@ class BitwardenServeClient:
                 protected += 1
                 continue
             sync_stamp = item_kp2bw_sync(fresh_item)
-            if sync_stamp is not None and not sync_stamp_matches(
-                fresh_item, sync_stamp
-            ):
+            stamp_generation = (
+                None
+                if sync_stamp is None
+                else sync_stamp_generation(fresh_item, sync_stamp)
+            )
+            if sync_stamp is not None and stamp_generation is None:
                 logger.warning(
                     f"Skipping {fresh_item.get('name', '?')!r}: modified in Bitwarden "
                     "since the last kp2bw sync"
                 )
                 protected += 1
                 continue
-            if (
-                sync_stamp is not None
-                and has_legacy_sync_stamp(fresh_item, sync_stamp)
-                and legacy_extensions_are_ambiguous(fresh_item)
+            if stamp_generation is not None and legacy_extensions_are_ambiguous(
+                fresh_item, stamp_generation
             ):
                 logger.warning(
-                    f"Skipping {fresh_item.get('name', '?')!r}: legacy sync stamp "
-                    "cannot verify URI match or linked-field edits"
+                    f"Skipping {fresh_item.get('name', '?')!r}: older sync stamp "
+                    "cannot verify URI match, linked-field or passkey edits"
                 )
                 protected += 1
                 continue

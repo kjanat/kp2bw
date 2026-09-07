@@ -299,7 +299,12 @@ def assert_update_payload_preserves_and_overwrites() -> None:
 
 def assert_update_payload_preserves_existing_passkey() -> None:
     conv = UpdateTestConverter()
-    fido2 = [{"credentialId": "abc", "keyType": "public-key"}]
+    fido2 = [
+        {
+            "credentialId": "3c9f2a1e-5b7d-4c8a-9e2f-1a2b3c4d5e6f",
+            "keyType": "public-key",
+        }
+    ]
     existing = _make_existing()
     ex_login = existing.get("login")
     if ex_login is None:

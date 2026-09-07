@@ -15,6 +15,7 @@ from kp2bw import cli
 from kp2bw._item_sync import (
     content_signature,
     legacy_content_signature,
+    pre_fido2_content_signature,
     stamp_content,
 )
 from kp2bw.bw_serve import (
@@ -23,7 +24,7 @@ from kp2bw.bw_serve import (
     MigrateResult,
     item_kp2bw_sync,
 )
-from kp2bw.bw_types import BwField, BwItemResponse, BwUri
+from kp2bw.bw_types import BwFido2Credential, BwField, BwItemResponse, BwUri
 from kp2bw.exceptions import BitwardenHttpError
 from kp2bw.uri_mapping import UriMatchValue, is_url_attribute_key
 
@@ -235,6 +236,52 @@ def assert_legacy_stamp_is_preserved_as_ambiguous() -> None:
         raise AssertionError("ambiguous legacy-stamped item was transformed")
 
 
+def _passkey_item(item_id: str, uri: str) -> BwItemResponse:
+    item = _login(item_id, ["KP2A_URL"], uri)
+    login = item.get("login")
+    if login is None:
+        raise AssertionError("passkey test item must be a login")
+    login["fido2Credentials"] = [
+        cast(
+            BwFido2Credential,
+            {"credentialId": "b64.AAEC", "keyValue": "AAE", "rpId": "rp.example"},
+        )
+    ]
+    return item
+
+
+def assert_pre_fido2_stamp_with_passkey_is_preserved_as_ambiguous() -> None:
+    item = _passkey_item("old-passkey-stamp", "https://legacy.example")
+    item["fields"].append(
+        cast(
+            BwField,
+            {
+                "name": KP2BW_SYNC_FIELD_NAME,
+                "value": pre_fido2_content_signature(item),
+                "type": 0,
+            },
+        )
+    )
+    client = _MigrateClient([item])
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    if result.migrated != 0 or result.protected != 1 or client.updated_ids:
+        raise AssertionError("3.8.1 stamp over a passkey must fail closed")
+
+
+def assert_current_stamp_with_passkey_is_upgraded() -> None:
+    item = _passkey_item("passkey-stamp", "https://legacy.example")
+    stamp_content(item)
+    client = _MigrateClient([item])
+
+    result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
+
+    updated = client.updated_items["passkey-stamp"]
+    if result.migrated != 1 or item_kp2bw_sync(updated) != content_signature(updated):
+        raise AssertionError("passkey item under a current stamp was not migrated")
+
+
 def assert_modified_stamped_item_is_preserved() -> None:
     legacy = _login("modified", ["KP2A_URL"], "https://legacy.example")
     stamp_content(legacy)
@@ -405,6 +452,8 @@ def main() -> None:
     assert_valid_stamp_is_refreshed()
     assert_unambiguous_legacy_stamp_is_upgraded()
     assert_legacy_stamp_is_preserved_as_ambiguous()
+    assert_pre_fido2_stamp_with_passkey_is_preserved_as_ambiguous()
+    assert_current_stamp_with_passkey_is_upgraded()
     assert_modified_stamped_item_is_preserved()
     assert_fresh_item_is_used_instead_of_list_snapshot()
     assert_change_during_migration_is_preserved()
