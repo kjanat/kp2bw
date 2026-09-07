@@ -13,21 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions: { contents: read }
     outputs:
-      name: ${{ fromJson(steps.check.outputs.result).name }}
-      version: ${{ fromJson(steps.check.outputs.result).version }}
-      pypi_url: ${{ fromJson(steps.check.outputs.result).pypi_url }}
+      name: ${{ steps.check.outputs.name }}
+      version: ${{ steps.check.outputs.version }}
+      pypi_url: ${{ steps.check.outputs.pypi_url }}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.0.1
-      - run: uv sync
-
-      - uses: actions/github-script@v9
-        id: check
-        with:
-          result-encoding: json
-          script: |
-            const { default: checkStubsVersion } = await import('${{ github.workspace }}/scripts/stubs-version.mjs')
-            return await checkStubsVersion({ core, context, exec })
+      - id: check
+        uses: $/.github/actions/version-check
+        with: { package: pykeepass-stubs, tag-prefixes: "stubs-,v" }
 
   publish:
     needs: check

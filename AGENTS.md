@@ -33,7 +33,7 @@ kp2bw/
 | Conversion orchestration | `src/kp2bw/convert.py`                | 3-phase top-level flow; item+attachment migration logic            |
 | Bitwarden HTTP transport | `src/kp2bw/bw_serve.py`               | `bw serve` lifecycle, dedup index, batch create, attachment upload |
 | Workflow policy details  | `.github/workflows/AGENTS.md`         | Trigger matrix, cross-workflow dependencies, output contracts      |
-| Release version gating   | `scripts/version-check-shared.mjs`    | Normalizes release/tag prefixes; drives workflow gates             |
+| Release version gating   | `.github/actions/version-check/`      | Normalizes release/tag prefixes; drives workflow gates             |
 | Main package publishing  | `.github/workflows/publish.yml`       | Triggered by GitHub Release events, not tag push                   |
 | Stubs publishing         | `.github/workflows/publish-stubs.yml` | Triggered by `stubs-v*` tags                                       |
 | Codegen drift check      | `.github/workflows/codegen-check.yml` | Fails PRs when `_bw_api_types.py` drifts from spec                 |
@@ -52,7 +52,8 @@ kp2bw/
 - `tests/test_script_adapters.py` provides pytest wrappers so `pytest` collects tests; script files remain the
   source-of-truth.
 - Heavy adapters are opt-in: set `KP2BW_RUN_PACKAGING_TESTS=1` and/or `KP2BW_RUN_E2E_TESTS=1`.
-- Workflow check jobs call `scripts/*.mjs` via `actions/github-script`; script output keys are workflow contracts.
+- Workflow check jobs call `$/.github/actions/version-check`; its outputs (`name`, `version`, `pypi_url`) are workflow
+  contracts.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
@@ -61,7 +62,7 @@ kp2bw/
 - Never use bare `Exception`; use project exceptions (`BitwardenClientError`, `ConversionError`).
 - Do not rewrite valid Python 3.14 comma-form `except X, Y:` syntax to tuple form.
 - Do not assume publish-on-tag for main package; main publish is release-event driven.
-- Do not change `scripts/version-check-shared.mjs` output shape (`name`, `version`, `pypi_url`) without workflow
+- Do not change the `version-check` action's output shape (`name`, `version`, `pypi_url`) without workflow
   updates.
 
 ## UNIQUE STYLES
@@ -105,7 +106,7 @@ uv version --package pykeepass-stubs --bump stable [--dry-run]
 
 - Keep docs scoped: child `AGENTS.md` files own implementation detail for their directory.
 - Ignore transient dirs in analysis (`.venv/`, `.ruff_cache/`, `node_modules/`, `__pycache__/`).
-- If changing release/version behavior, update both workflows and `scripts/*.mjs` together.
+- If changing release/version behavior, update both workflows and `.github/actions/version-check/` together.
 - For full `uv version` bump matrix/examples, use global skill `uv-versioning`.
 - Keep domain detail in child AGENTS files (`src/kp2bw`, `tests`, `scripts`, `packages/pykeepass-stubs`,
   `.github/workflows`).
