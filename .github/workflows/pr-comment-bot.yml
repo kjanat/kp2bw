@@ -3,9 +3,7 @@
 name: PR Test Comment
 on: { pull_request_target: { types: [opened, synchronize, reopened, closed] } }
 permissions: { contents: read, issues: write, pull-requests: write }
-concurrency:
-  group: pr-test-comment-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+concurrency: { group: "pr-test-comment-${{ github.event.pull_request.number }}", cancel-in-progress: true }
 jobs:
   comment:
     runs-on: ubuntu-latest

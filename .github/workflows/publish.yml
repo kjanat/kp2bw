@@ -32,7 +32,7 @@ jobs:
   integration:
     needs: check
     permissions: { contents: read }
-    uses: ./.github/workflows/integration-docker.yml
+    uses: $/.github/workflows/integration-docker.yml
 
   publish:
     needs: [check, integration]

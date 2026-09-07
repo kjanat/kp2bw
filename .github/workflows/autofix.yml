@@ -16,7 +16,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.1
       - uses: kjanat/runner@master
       - uses: kjanat/install-dprint@v2
-      - run: runner install --frozen --keep-going fmt:ci ruff:check:fix
+      - run: runner install -fk fmt:ci ruff:check:fix
 
       - if: ${{ github.event_name != 'pull_request' }}
         run: run dprint:update

@@ -17,19 +17,30 @@
 		"typecheck:tsc": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@actions/github-script": "github:actions/github-script",
-		"@bitwarden/cli": "^2026.8.0",
-		"@types/bun": "^1.4.0",
-		"dprint": "^0.56.1",
+		"@actions/github-script": "catalog:actions",
+		"@bitwarden/cli": "catalog:ci",
+		"@types/bun": "catalog:",
+		"dprint": "catalog:",
 		"runner-run": "catalog:",
-		"tombi": "^1.4.1",
+		"tombi": "catalog:",
 		"tsc7": "catalog:",
 		"typescript": "catalog:"
 	},
-	"packageManager": "bun@1.4.0",
+	"packageManager": "bun@1.4.2",
 	"catalog": {
-		"runner-run": "^0.25.1",
+		"@types/bun": "^1.4",
+		"dprint": "^0.57",
+		"tombi": "^1.5",
+		"runner-run": "^0.26.1",
 		"typescript": "<7",
-		"tsc7": "npm:typescript@^7"
+		"tsc7": "npm:typescript@>=7"
+	},
+	"catalogs": {
+		"ci": {
+			"@bitwarden/cli": "^2026.8.0"
+		},
+		"actions": {
+			"@actions/github-script": "github:actions/github-script"
+		}
 	}
 }
