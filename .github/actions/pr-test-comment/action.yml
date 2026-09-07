@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-action.json
+---
+name: PR Test Comment
+description: Create, update, and archive the "Test this PR" uvx comment on a pull request.
+author: Kaj Kowalski
+branding: { icon: message-square, color: blue }
+
+inputs:
+  cli-name:
+    description: "Console script to run through `uvx`. Defaults to the repository name."
+    default: ""
+  python-version:
+    description: "Python version passed as `uvx -p`. Empty omits the flag."
+    default: ""
+  cli-examples:
+    description: "Example commands for the collapsed section; `{cmd}` expands to the `uvx` invocation."
+    default: ""
+  github-token:
+    description: "Token with `issues:write` and `pull-requests:write`."
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Create, update, or archive PR comment
+      uses: actions/github-script@v9
+      env:
+        CLI_NAME: ${{ inputs.cli-name }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        CLI_EXAMPLES: ${{ inputs.cli-examples }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const { default: comment } = await import(`${process.env.GITHUB_ACTION_PATH}/pr-comment.mjs`);
+          return await comment({ core, context, github });

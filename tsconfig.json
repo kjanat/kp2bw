@@ -29,5 +29,5 @@
 		// Types
 		"types": ["bun"]
 	},
-	"include": ["./scripts/*"]
+	"include": ["./scripts/*", "./.github/actions/*/*.mjs"]
 }

@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-action.json
+---
+name: Version Check
+description: Check out the repository, sync uv, and verify that the package version matches the release tag or requested version.
+author: Kaj Kowalski
+branding: { icon: tag, color: blue }
+
+inputs:
+  package:
+    description: "Workspace package to check. Empty checks the root package."
+    default: ""
+  tag-prefixes:
+    description: "Comma-separated prefixes stripped from the tag or requested version before comparing."
+    default: v
+
+outputs:
+  name:
+    description: "Package name reported by `uv version`."
+    value: ${{ fromJson(steps.check.outputs.result).name }}
+  version:
+    description: "Package version reported by `uv version`."
+    value: ${{ fromJson(steps.check.outputs.result).version }}
+  pypi_url:
+    description: "PyPI project URL for this version."
+    value: ${{ fromJson(steps.check.outputs.result).pypi_url }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7.0.1
+    - uses: astral-sh/setup-uv@v10.0.1
+    - run: uv sync
+      shell: bash
+    - id: check
+      uses: actions/github-script@v9
+      env:
+        PACKAGE: ${{ inputs.package }}
+        TAG_PREFIXES: ${{ inputs.tag-prefixes }}
+      with:
+        result-encoding: json
+        script: |
+          const { default: checkVersion } = await import(`${process.env.GITHUB_ACTION_PATH}/version-check.mjs`);
+          return await checkVersion({ core, context, exec });
