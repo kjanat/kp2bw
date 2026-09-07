@@ -1,4 +1,5 @@
 # yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+# adapted from https://github.com/kjanat/notso-glb/blob/e9dec45b481d09651034c54ddc5913589b7156b9/.github/workflows/pr-test-comment.yml
 ---
 name: PR Test Comment
 on: { pull_request_target: { types: [opened, synchronize, reopened, closed] } }
