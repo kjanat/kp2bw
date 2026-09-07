@@ -6,15 +6,15 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 
 ## WHERE TO LOOK
 
-| Task                            | Location                                   | Notes                                                  |
-| ------------------------------- | ------------------------------------------ | ------------------------------------------------------ |
-| Main package release flow       | `.github/workflows/publish.yml`            | Triggered by GitHub Release events, not tag push       |
-| Stubs release flow              | `.github/workflows/publish-stubs.yml`      | Triggered by `stubs-v*` tag pushes                     |
-| Docker integration gate         | `.github/workflows/integration-docker.yml` | Reusable workflow; required before main publish        |
-| Windows npm bw.cmd smoke        | `.github/workflows/windows-bw-cmd.yml`     | windows-latest; npm-installs bw and exercises the shim |
-| Codegen drift check             | `.github/workflows/codegen-check.yml`      | Fails when `_bw_api_types.py` drifts from spec         |
-| PR uvx helper comment lifecycle | `.github/workflows/pr-comment-bot.yml`     | Creates/updates archived test command comment          |
-| Version gate logic              | `scripts/version-check-shared.mjs`         | Produces `name`, `version`, `pypi_url` output contract |
+| Task                            | Location                                   | Notes                                                    |
+| ------------------------------- | ------------------------------------------ | -------------------------------------------------------- |
+| Main package release flow       | `.github/workflows/publish.yml`            | Triggered by GitHub Release events, not tag push         |
+| Stubs release flow              | `.github/workflows/publish-stubs.yml`      | Triggered by `stubs-v*` tag pushes                       |
+| Docker integration gate         | `.github/workflows/integration-docker.yml` | Reusable workflow; required before main publish          |
+| Windows npm bw.cmd smoke        | `.github/workflows/windows-bw-cmd.yml`     | windows-latest; npm-installs bw and exercises the shim   |
+| Codegen drift check             | `.github/workflows/codegen-check.yml`      | Fails when `_bw_api_types.py` drifts from spec           |
+| PR uvx helper comment lifecycle | `.github/actions/pr-test-comment/`         | Composite action; `pr-comment-bot.yml` calls it via `$/` |
+| Version gate logic              | `scripts/version-check-shared.mjs`         | Produces `name`, `version`, `pypi_url` output contract   |
 
 ## CONVENTIONS
 
