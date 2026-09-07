@@ -409,9 +409,17 @@ class Converter:
             return None
 
         creation_date: str | None = entry.ctime.isoformat() if entry.ctime else None
+        # Bitwarden stores generated credential IDs as UUIDs. Arbitrary WebAuthn
+        # credential IDs use a ``b64.`` marker so its client decodes the
+        # following value as base64url instead of attempting UUID parsing.
+        bitwarden_credential_id = (
+            credential_id
+            if credential_id.startswith("b64.")
+            else f"b64.{credential_id}"
+        )
 
         cred: BwFido2Credential = {
-            "credentialId": credential_id,
+            "credentialId": bitwarden_credential_id,
             "keyType": "public-key",
             "keyAlgorithm": "ECDSA",
             "keyCurve": "P-256",

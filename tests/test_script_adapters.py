@@ -99,6 +99,10 @@ def test_convert_keepass_open_script() -> None:
     _run_script_main("convert_keepass_open_test.py")
 
 
+def test_passkey_conversion_script() -> None:
+    _run_script_main("passkey_conversion_test.py")
+
+
 def test_doctor_script() -> None:
     _run_script_main("doctor_test.py")
 
