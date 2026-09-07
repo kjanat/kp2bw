@@ -1,16 +1,34 @@
 """Shared content signatures for kp2bw-managed Bitwarden items."""
 
 import hashlib
+from typing import Literal
 
-from .bw_types import BwField, BwItemCreate, BwItemLogin, BwItemResponse
+from .bw_types import (
+    BwFido2Credential,
+    BwField,
+    BwItemCreate,
+    BwItemLogin,
+    BwItemResponse,
+)
 
 KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
 KP2BW_SYNC_FIELD_NAME: str = "KP2BW_SYNC"
+BW_B64_CREDENTIAL_ID_PREFIX: str = "b64."
 
 _MANAGED_FIELD_NAMES: frozenset[str] = frozenset({
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
 })
+
+type SyncStampGeneration = Literal["current", "pre_fido2", "legacy"]
+type Fido2Signature = list[tuple[str, str, str, str, str, str, str]]
+
+
+def mark_credential_id(credential_id: str) -> str:
+    """Prefix a base64url credential ID with Bitwarden's ``b64.`` marker."""
+    if credential_id.startswith(BW_B64_CREDENTIAL_ID_PREFIX):
+        return credential_id
+    return f"{BW_B64_CREDENTIAL_ID_PREFIX}{credential_id}"
 
 
 def _legacy_fields_signature(
@@ -79,14 +97,58 @@ def login_signature(
     )
 
 
-def content_signature(item: BwItemResponse | BwItemCreate) -> str:
-    """Return a digest over exactly the item content kp2bw manages."""
-    blob = repr((
+def fido2_signature(
+    login: BwItemLogin | None, *, mark_ids: bool = False
+) -> Fido2Signature:
+    """Return an order-independent signature of the passkey content kp2bw owns."""
+    if login is None:
+        return []
+
+    def credential_id_of(credential: BwFido2Credential) -> str:
+        value = credential.get("credentialId") or ""
+        return mark_credential_id(value) if mark_ids else value
+
+    return sorted(
+        (
+            credential_id_of(credential),
+            credential.get("keyValue") or "",
+            credential.get("rpId") or "",
+            credential.get("rpName") or "",
+            credential.get("userHandle") or "",
+            credential.get("userName") or "",
+            credential.get("userDisplayName") or "",
+        )
+        for credential in (login.get("fido2Credentials") or [])
+    )
+
+
+def _content_parts(
+    item: BwItemResponse | BwItemCreate,
+) -> tuple[
+    str,
+    str,
+    list[tuple[str, str, int, int | None]],
+    tuple[str, str, str, list[tuple[str, int | None]]],
+]:
+    return (
         item.get("name") or "",
         item.get("notes") or "",
         fields_signature(item.get("fields")),
         login_signature(item.get("login")),
-    ))
+    )
+
+
+def content_signature(item: BwItemResponse | BwItemCreate) -> str:
+    """Return a digest over exactly the item content kp2bw manages."""
+    parts = _content_parts(item)
+    fido2 = fido2_signature(item.get("login"))
+    blob = repr((*parts, fido2) if fido2 else parts)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def pre_fido2_content_signature(item: BwItemResponse | BwItemCreate) -> str:
+    """Return the 3.8.1 signature, which did not cover passkeys."""
+    blob = repr(_content_parts(item))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -101,14 +163,27 @@ def legacy_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def sync_stamp_generation(
+    item: BwItemResponse, stamp: str
+) -> SyncStampGeneration | None:
+    """Return which signature algorithm produced *stamp* for *item*, if any."""
+    if stamp == content_signature(item):
+        return "current"
+    if stamp == pre_fido2_content_signature(item):
+        return "pre_fido2"
+    if stamp == legacy_content_signature(item):
+        return "legacy"
+    return None
+
+
 def sync_stamp_matches(item: BwItemResponse, stamp: str) -> bool:
-    """Accept current stamps and legacy stamps over their original coverage."""
-    return stamp in {content_signature(item), legacy_content_signature(item)}
+    """Accept current stamps and older stamps over their original coverage."""
+    return sync_stamp_generation(item, stamp) is not None
 
 
 def has_legacy_sync_stamp(item: BwItemResponse, stamp: str) -> bool:
-    """Return whether *stamp* is valid only under the legacy algorithm."""
-    return stamp != content_signature(item) and stamp == legacy_content_signature(item)
+    """Return whether *stamp* is valid only under the pre-3.8.1 algorithm."""
+    return sync_stamp_generation(item, stamp) == "legacy"
 
 
 def legacy_extensions_are_ambiguous(item: BwItemResponse) -> bool:
@@ -122,8 +197,23 @@ def legacy_extensions_are_ambiguous(item: BwItemResponse) -> bool:
     )
 
 
-def legacy_extensions_differ(existing: BwItemResponse, desired: BwItemCreate) -> bool:
-    """Compare newly covered values that can be aligned under a legacy stamp."""
+def _fido2_differs(existing: BwItemResponse, desired: BwItemCreate) -> bool:
+    existing_fido2 = fido2_signature(existing.get("login"), mark_ids=True)
+    if not existing_fido2:
+        return False
+    return existing_fido2 != fido2_signature(desired.get("login"))
+
+
+def legacy_extensions_differ(
+    existing: BwItemResponse,
+    desired: BwItemCreate,
+    generation: SyncStampGeneration,
+) -> bool:
+    """Compare values an older stamp omitted that can be aligned under it."""
+    if _fido2_differs(existing, desired):
+        return True
+    if generation != "legacy":
+        return False
 
     def _linked_ids(
         item: BwItemResponse | BwItemCreate,

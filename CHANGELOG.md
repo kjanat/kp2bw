@@ -8,6 +8,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Prefix KeePassXC passkey credential IDs with Bitwarden's `b64.` marker so migrated passkeys authenticate instead of
+  failing UUID parsing in the Bitwarden client (PR #63 by [haukemar](https://github.com/haukemar)).
+- Cover passkeys in the `KP2BW_SYNC` content signature so a re-run repairs credential IDs migrated by earlier versions.
+  3.8.1 stamps stay valid until their next safe write; a passkey that changed in Bitwarden under such a stamp is
+  preserved unless `--force-update` is given.
+
 ## [3.8.1] - 2026-09-05
 
 ### Changed

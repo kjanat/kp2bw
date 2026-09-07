@@ -86,9 +86,11 @@ src/kp2bw/
 - Manual-edit protection (issue #30, `--force-update` / `KP2BW_FORCE_UPDATE`, `Converter(force_update=...)` →
   `self._force_update_all`): every written item carries a `KP2BW_SYNC` plain-text field holding
   `_item_sync.content_signature(item)` — a sha256 over name, notes, custom fields (including `linkedId`), and login
-  credentials/URIs (including URI order and `match`); managed stamps are excluded. Pre-3.8.1 stamps remain valid over
-  their original field/URI coverage and are upgraded on a safe write; ambiguous edits to newly covered values fail
-  closed. When content differs **and** the item was user-edited **and** not
+  credentials/URIs (including URI order and `match`) plus, when present, passkeys (`credentialId` carrying the
+  `b64.` marker, `keyValue`, relying party, user handle and names); managed stamps are excluded. Pre-3.8.1 stamps
+  remain valid over their original field/URI coverage and 3.8.1 stamps over everything but passkeys
+  (`_item_sync.sync_stamp_generation`); both are upgraded on a safe write, and ambiguous edits to newly covered
+  values fail closed. When content differs **and** the item was user-edited **and** not
   `force_update`/`_force_update_all`, it returns `"protected"` (no PUT, attachments skipped) instead of clobbering.
   kp2bw's own writes restamp, so they never self-trip; an unstamped (legacy/first-run) item returns `False` and updates
   normally to establish the stamp. The signature mechanism is deliberate over comparing Bitwarden's `revisionDate` to a

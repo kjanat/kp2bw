@@ -33,10 +33,11 @@ from ._item_sync import (
     KP2BW_SYNC_FIELD_NAME,
     content_signature,
     fields_signature,
-    has_legacy_sync_stamp,
     legacy_extensions_differ,
     login_signature,
+    mark_credential_id,
     stamp_content,
+    sync_stamp_generation,
     sync_stamp_matches,
 )
 from .bw_serve import (
@@ -409,17 +410,9 @@ class Converter:
             return None
 
         creation_date: str | None = entry.ctime.isoformat() if entry.ctime else None
-        # Bitwarden stores generated credential IDs as UUIDs. Arbitrary WebAuthn
-        # credential IDs use a ``b64.`` marker so its client decodes the
-        # following value as base64url instead of attempting UUID parsing.
-        bitwarden_credential_id = (
-            credential_id
-            if credential_id.startswith("b64.")
-            else f"b64.{credential_id}"
-        )
 
         cred: BwFido2Credential = {
-            "credentialId": bitwarden_credential_id,
+            "credentialId": mark_credential_id(credential_id),
             "keyType": "public-key",
             "keyAlgorithm": "ECDSA",
             "keyCurve": "P-256",
@@ -1353,7 +1346,20 @@ class Converter:
                 for uri in (login.get("uris") or [])
             ],
             repr([
-                tuple(sorted(credential.items(), key=lambda item: item[0]))
+                tuple(
+                    sorted(
+                        (
+                            (
+                                key,
+                                mark_credential_id(value)
+                                if key == "credentialId" and isinstance(value, str)
+                                else value,
+                            )
+                            for key, value in credential.items()
+                        ),
+                        key=lambda item: item[0],
+                    )
+                )
                 for credential in (login.get("fido2Credentials") or [])
             ]),
         )
@@ -1588,13 +1594,17 @@ class Converter:
             content_differs = self._content_differs(existing, bw_item)
             sync_stamp_stale = self._is_user_modified(existing)
             sync_stamp = item_kp2bw_sync(existing)
-            legacy_sync_stamp = sync_stamp is not None and has_legacy_sync_stamp(
-                existing, sync_stamp
+            stamp_generation = (
+                None
+                if sync_stamp is None
+                else sync_stamp_generation(existing, sync_stamp)
             )
+            legacy_sync_stamp = stamp_generation in {"pre_fido2", "legacy"}
             ambiguous_legacy_edit = (
-                legacy_sync_stamp
+                stamp_generation is not None
+                and legacy_sync_stamp
                 and content_differs
-                and legacy_extensions_differ(existing, bw_item)
+                and legacy_extensions_differ(existing, bw_item, stamp_generation)
             )
             legacy_ref_status = self._legacy_ref_status(existing, kp_uuid)
             legacy_ref_output = legacy_ref_status == "exact"
