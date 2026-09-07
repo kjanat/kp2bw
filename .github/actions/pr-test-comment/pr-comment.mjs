@@ -10,12 +10,14 @@ import { env } from 'node:process';
 /** @typedef {{ cliName: string, pyFlag: string, cliExamples: string }} CommentConfig */
 /** @typedef {{ filename: string, previous_filename?: string, status: string }} ChangedFile */
 /** @typedef {{ gitUrl: string, ref: string, repo: RepoContext }} Source */
-/** @typedef {{ marker: string, config: CommentConfig, head: Source, branch: string }} ActiveBodyOptions */
-/** @typedef {{ marker: string, config: CommentConfig, source: Source, commitMessage: string, branch: string, merged: boolean }} ArchivedBodyOptions */
+/** @typedef {{ config: CommentConfig, head: Source, branch: string }} ActiveBodyOptions */
+/** @typedef {{ config: CommentConfig, source: Source, commitMessage: string, branch: string, merged: boolean }} ArchivedBodyOptions */
 
 const FENCE = '```';
 const DEFAULT_ACCEPTED_PERMISSIONS = 'issues=write; pull_requests=write';
-const COMMENTABLE_FILE_STATUSES = new Set(['added', 'modified', 'renamed', 'removed']);
+const CHANGED_FILE_STATUSES = new Set(['added', 'modified', 'renamed', 'removed']);
+const PACKAGE_FILES = new Set(['pyproject.toml', 'uv.lock']);
+const PACKAGE_DIRS = ['src/', 'packages/'];
 
 /** @param {AsyncFunctionArguments} args */
 export default async ({ core, context, github }) => {
@@ -35,12 +37,10 @@ export default async ({ core, context, github }) => {
 		{ owner, repo, issue_number: pullRequest.number },
 	);
 	const existingComment = comments.find(comment => comment.body?.includes(marker));
+	const packageChanged = await touchesPackage(github, { owner, repo }, pullRequest.number);
+	core.info(packageChanged ? 'Package files changed' : 'No package files changed, posting the compact form');
 
-	if (!existingComment && !(await touchesPython(github, { owner, repo }, pullRequest.number))) {
-		core.info('No Python files changed, skipping comment');
-		return;
-	}
-
+	let title;
 	let body;
 	if (pullRequest.state === 'closed') {
 		const mergeSha = pullRequest.merged ? pullRequest.merge_commit_sha : null;
@@ -52,8 +52,8 @@ export default async ({ core, context, github }) => {
 			...source.repo,
 			commit_sha: source.ref,
 		});
+		title = '📦 Test this PR (archived)';
 		body = archivedBody({
-			marker,
 			config,
 			source,
 			commitMessage: commit.message.split('\n')[0] ?? '',
@@ -61,8 +61,12 @@ export default async ({ core, context, github }) => {
 			merged: mergeSha !== null,
 		});
 	} else {
-		body = activeBody({ marker, config, head, branch: pullRequest.head.ref });
+		title = '🧪 Test this PR';
+		body = activeBody({ config, head, branch: pullRequest.head.ref });
 	}
+	body = packageChanged
+		? `${marker}\n\n## ${title}\n${body}`
+		: `${marker}\n\n<details>\n<summary>${title} (no package changes)</summary>\n${body}\n</details>\n`;
 
 	try {
 		if (existingComment) {
@@ -89,11 +93,9 @@ export default async ({ core, context, github }) => {
 };
 
 /** @param {ActiveBodyOptions} options @returns {string} */
-function activeBody({ marker, config, head, branch }) {
+function activeBody({ config, head, branch }) {
 	const shortSha = head.ref.substring(0, 7);
-	return `${marker}\n
-## 🧪 Test this PR
-
+	return `
 You can test this PR directly using [\`uvx\`]:
 
 **From branch:**
@@ -117,11 +119,9 @@ ${FENCE}${examplesSection(config, head.gitUrl, branch)}
 }
 
 /** @param {ArchivedBodyOptions} options @returns {string} */
-function archivedBody({ marker, config, source, commitMessage, branch, merged }) {
+function archivedBody({ config, source, commitMessage, branch, merged }) {
 	const verb = merged ? 'merged' : 'closed';
-	return `${marker}\n
-## 📦 Test this PR (archived)
-
+	return `
 > **Status:** ${merged ? '✅ Merged' : '❌ Closed'}
 
 This PR has been ${verb}. You can still test the final state:
@@ -169,18 +169,20 @@ function shellQuote(value) {
 }
 
 /** @param {Octokit} github @param {RepoContext} repo @param {number} pullNumber @returns {Promise<boolean>} */
-async function touchesPython(github, { owner, repo }, pullNumber) {
+async function touchesPackage(github, { owner, repo }, pullNumber) {
 	const files = await github.paginate(
 		github.rest.pulls.listFiles,
 		{ owner, repo, pull_number: pullNumber },
 	);
-	return files.some(isCommentablePythonFile);
+	return files.some(isChangedPackageFile);
 }
 
 /** @param {ChangedFile} file @returns {boolean} */
-function isCommentablePythonFile(file) {
-	const isPython = file.filename.endsWith('.py') || file.previous_filename?.endsWith('.py') === true;
-	return isPython && COMMENTABLE_FILE_STATUSES.has(file.status);
+function isChangedPackageFile(file) {
+	if (!CHANGED_FILE_STATUSES.has(file.status)) return false;
+	return [file.filename, file.previous_filename].some(name =>
+		name !== undefined && (PACKAGE_FILES.has(name) || PACKAGE_DIRS.some(dir => name.startsWith(dir)))
+	);
 }
 
 /** @param {string} defaultCliName @returns {CommentConfig} */

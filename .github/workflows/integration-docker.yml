@@ -89,7 +89,7 @@ jobs:
       - run: uv sync --frozen
 
       - name: Set up Bitwarden CLI (${{ matrix.bw-version }})
-        uses: ./.github/actions/setup-bw
+        uses: $/.github/actions/setup-bw
         with: { version: "${{ matrix.bw-version }}" }
 
       - name: Run Vaultwarden end-to-end migration test
