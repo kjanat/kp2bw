@@ -90,7 +90,9 @@ src/kp2bw/
   `b64.` marker, `keyValue`, relying party, user handle and names); managed stamps are excluded. Pre-3.8.1 stamps
   remain valid over their original field/URI coverage and 3.8.1 stamps over everything but passkeys
   (`_item_sync.sync_stamp_generation`); both are upgraded on a safe write, and ambiguous edits to newly covered
-  values fail closed. When content differs **and** the item was user-edited **and** not
+  values fail closed. An item without passkeys hashes identically under the current and 3.8.1 algorithms, so its
+  3.8.1 stamp reads as current and a passkey that appears from KeePass syncs; a passkey deleted in Bitwarden under a
+  3.8.1 stamp is not detectable and is written again. When content differs **and** the item was user-edited **and** not
   `force_update`/`_force_update_all`, it returns `"protected"` (no PUT, attachments skipped) instead of clobbering.
   kp2bw's own writes restamp, so they never self-trip; an unstamped (legacy/first-run) item returns `False` and updates
   normally to establish the stamp. The signature mechanism is deliberate over comparing Bitwarden's `revisionDate` to a

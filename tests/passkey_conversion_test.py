@@ -78,7 +78,9 @@ def _credential(credential_id: str, *, rp_id: str = "example.com") -> BwFido2Cre
     )
 
 
-def _desired(credentials: list[BwFido2Credential] | None) -> BwItemCreate:
+def _desired(
+    credentials: list[BwFido2Credential] | None, *, notes: str = ""
+) -> BwItemCreate:
     """A freshly converted item, stamped the way the migration emits it."""
     item: dict[str, Any] = {
         "organizationId": None,
@@ -86,7 +88,7 @@ def _desired(credentials: list[BwFido2Credential] | None) -> BwItemCreate:
         "folderId": None,
         "type": 1,
         "name": "Passkey",
-        "notes": "",
+        "notes": notes,
         "favorite": False,
         "fields": [{"name": KP2BW_ID_FIELD_NAME, "value": "UUID", "type": 0}],
         "login": {
@@ -202,12 +204,61 @@ def assert_bitwarden_passkey_edit_under_old_stamp_is_protected() -> None:
         raise AssertionError(f"edited passkey was overwritten: {outcome}")
 
 
-def assert_keepass_added_passkey_under_old_stamp_syncs() -> None:
-    """A passkey added in KeePassXC reaches an item that had none."""
+def assert_passkey_added_to_passkeyless_item_syncs() -> None:
+    """A stamp over an item without passkeys reads as current, so KeePass wins."""
     existing = _existing_from_3_8_1(None)
     outcome, updates = _reconcile(existing, _desired([_credential(MARKED_ID)]))
     if outcome != "updated" or len(updates) != 1:
         raise AssertionError(f"new KeePassXC passkey was not synced: {outcome}")
+
+
+def assert_bitwarden_native_passkey_is_not_protected() -> None:
+    """A UUID credential ID Bitwarden created itself must not look like an edit."""
+    native_id = "3c9f2a1e-5b7d-4c8a-9e2f-1a2b3c4d5e6f"
+    existing = _existing_from_3_8_1([_credential(native_id)])
+    outcome, updates = _reconcile(existing, _desired(None, notes="renamed"))
+    if outcome != "updated" or len(updates) != 1:
+        raise AssertionError(f"Bitwarden-native passkey blocked the update: {outcome}")
+    login = updates[0].get("login")
+    kept = (login.get("fido2Credentials") or []) if login is not None else []
+    if [credential["credentialId"] for credential in kept] != [native_id]:
+        raise AssertionError("Bitwarden-native credential ID was rewritten")
+
+
+def assert_bitwarden_only_passkey_survives_and_settles() -> None:
+    """A passkey KeePass never had is kept, restamped, and then left alone."""
+    existing = _existing_from_3_8_1([_credential(MARKED_ID)])
+    outcome, updates = _reconcile(existing, _desired(None))
+    if outcome != "updated" or len(updates) != 1:
+        raise AssertionError(
+            f"3.8.1 stamp on a passkey item was not repaired: {outcome}"
+        )
+    payload = updates[0]
+    login = payload.get("login")
+    kept = (login.get("fido2Credentials") or []) if login is not None else []
+    if [credential["credentialId"] for credential in kept] != [MARKED_ID]:
+        raise AssertionError("Bitwarden-only passkey was dropped by the update")
+    stamp = item_kp2bw_sync(payload)
+    if stamp is None or sync_stamp_generation(payload, stamp) != "current":
+        raise AssertionError("update stamp does not cover the kept passkey")
+    outcome, updates = _reconcile(copy.deepcopy(payload), _desired(None))
+    if outcome != "skipped" or updates:
+        raise AssertionError(f"kept passkey kept triggering writes: {outcome}")
+
+
+def assert_kept_unmarked_passkey_is_repaired() -> None:
+    """A 3.8.1-written passkey KeePass no longer yields still gets its marker."""
+    existing = _existing_from_3_8_1([_credential(SOURCE_ID)])
+    outcome, updates = _reconcile(existing, _desired(None))
+    if outcome != "updated" or len(updates) != 1:
+        raise AssertionError(f"kept unmarked passkey was not repaired: {outcome}")
+    login = updates[0].get("login")
+    kept = (login.get("fido2Credentials") or []) if login is not None else []
+    if [credential["credentialId"] for credential in kept] != [MARKED_ID]:
+        raise AssertionError("kept passkey was sealed without its marker")
+    outcome, updates = _reconcile(copy.deepcopy(updates[0]), _desired(None))
+    if outcome != "skipped" or updates:
+        raise AssertionError(f"repaired kept passkey was written again: {outcome}")
 
 
 def assert_strict_signature_ignores_marker() -> None:
@@ -227,7 +278,10 @@ def main() -> None:
     assert_rerun_repairs_unmarked_credential_id()
     assert_repaired_passkey_item_is_idempotent()
     assert_bitwarden_passkey_edit_under_old_stamp_is_protected()
-    assert_keepass_added_passkey_under_old_stamp_syncs()
+    assert_passkey_added_to_passkeyless_item_syncs()
+    assert_bitwarden_native_passkey_is_not_protected()
+    assert_bitwarden_only_passkey_survives_and_settles()
+    assert_kept_unmarked_passkey_is_repaired()
     assert_strict_signature_ignores_marker()
 
 

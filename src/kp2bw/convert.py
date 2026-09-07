@@ -1389,7 +1389,9 @@ class Converter:
         stamp_content(item)
 
     @classmethod
-    def _content_differs(cls, existing: BwItemResponse, desired: BwItemCreate) -> bool:
+    def _content_differs(
+        cls, existing: BwItemResponse, desired: BwItemCreate | BwItemResponse
+    ) -> bool:
         """True if the KeePass-derived content diverges from the vault item.
 
         Compares only the fields kp2bw manages (name, notes, custom fields and
@@ -1460,20 +1462,28 @@ class Converter:
         payload: BwItemResponse = copy.copy(existing)
         payload["name"] = desired["name"]
         payload["notes"] = desired["notes"]
-        payload["fields"] = desired["fields"]
+        payload["fields"] = [copy.copy(field) for field in desired["fields"]]
 
         desired_login: BwItemLogin = copy.copy(desired["login"])
         ex_login = existing.get("login")
         if "fido2Credentials" not in desired_login and ex_login:
             ex_fido2 = ex_login.get("fido2Credentials")
             if ex_fido2:
-                desired_login["fido2Credentials"] = ex_fido2
+                kept: list[BwFido2Credential] = []
+                for credential in ex_fido2:
+                    kept_credential = copy.copy(credential)
+                    kept_credential["credentialId"] = mark_credential_id(
+                        credential["credentialId"]
+                    )
+                    kept.append(kept_credential)
+                desired_login["fido2Credentials"] = kept
         payload["login"] = desired_login
 
         target_colls = desired.get("collectionIds") or []
         existing_colls = existing.get("collectionIds") or []
         missing = [c for c in target_colls if c not in existing_colls]
         payload["collectionIds"] = existing_colls + missing
+        stamp_content(payload)
         return payload
 
     @staticmethod
@@ -1591,7 +1601,8 @@ class Converter:
         try:
             # Content sync: PUT only when the KeePass-derived content changed
             # (keeps re-runs idempotent).
-            content_differs = self._content_differs(existing, bw_item)
+            update_payload = self._build_update_payload(existing, bw_item)
+            content_differs = self._content_differs(existing, update_payload)
             sync_stamp_stale = self._is_user_modified(existing)
             sync_stamp = item_kp2bw_sync(existing)
             stamp_generation = (
@@ -1601,10 +1612,9 @@ class Converter:
             )
             legacy_sync_stamp = stamp_generation in {"pre_fido2", "legacy"}
             ambiguous_legacy_edit = (
-                stamp_generation is not None
-                and legacy_sync_stamp
+                legacy_sync_stamp
                 and content_differs
-                and legacy_extensions_differ(existing, bw_item, stamp_generation)
+                and legacy_extensions_differ(existing, update_payload, stamp_generation)
             )
             legacy_ref_status = self._legacy_ref_status(existing, kp_uuid)
             legacy_ref_output = legacy_ref_status == "exact"
@@ -1644,7 +1654,7 @@ class Converter:
                     ]
                     self._stamp_content(payload)
                 else:
-                    payload = self._build_update_payload(existing, bw_item)
+                    payload = update_payload
                     if legacy_ref_output:
                         existing_login = existing.get("login")
                         payload_login = payload.get("login")
