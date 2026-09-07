@@ -18,7 +18,12 @@ jobs:
       - name: Resolve pinned @bitwarden/cli version
         id: pin
         run: |
-          $spec = (gc package.json | ConvertFrom-Json).devDependencies.'@bitwarden/cli'
+          $pkg = gc package.json | ConvertFrom-Json
+          $spec = $pkg.devDependencies.'@bitwarden/cli'
+          if ($spec -match '^catalog:(.*)$') {
+          	$catalog = if ($Matches[1]) { $pkg.catalogs.($Matches[1]) } else { $pkg.catalog }
+          	$spec = $catalog.'@bitwarden/cli'
+          }
           $version = $spec -replace '^[\^~]', ''
           if ($version -notmatch '\A\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?\z') {
           	Write-Host "::error::Unexpected @bitwarden/cli version in package.json: '$spec'"; exit 1
