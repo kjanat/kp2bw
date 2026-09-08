@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: kjanat/runner@master
       - uses: oven-sh/setup-bun@v2
-      - run: runner i docs:build
+      - run: runner i --pm bun docs:build
         env: { BASE_PATH: "/${{ github.event.repository.name }}" }
       - uses: actions/upload-pages-artifact@v5
         with: { path: docs/build }
