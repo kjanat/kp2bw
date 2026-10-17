@@ -6,6 +6,7 @@ jobs:
   pages:
     environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: kjanat/runner@b32ea932a1813ae0be44e755c16df9f9f5ca86a4 # master

@@ -6,10 +6,12 @@ on:
   pull_request:
   push: { branches: [master] }
   workflow_dispatch:
+permissions: {}
 defaults: { run: { shell: pwsh } }
 jobs:
   config:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions: { contents: read }
     outputs: { matrix: "${{ steps.pin.outputs.matrix }}" }
     steps:

@@ -4,6 +4,7 @@ name: Codegen drift check
 on:
   pull_request: { paths: [src/kp2bw/_bw_api_types.py, specs/vault-management-api.json] }
   push: { branches: [master], paths: [src/kp2bw/_bw_api_types.py, specs/vault-management-api.json] }
+permissions: {}
 jobs:
   check-bw-api-types:
     runs-on: ubuntu-latest

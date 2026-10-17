@@ -8,6 +8,7 @@ concurrency: { group: "pr-test-comment-${{ github.event.pull_request.number }}",
 jobs:
   comment:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Create, update, or archive PR comment
         uses: $/.github/actions/pr-test-comment
