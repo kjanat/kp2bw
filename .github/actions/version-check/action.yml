@@ -39,5 +39,12 @@ runs:
       with:
         result-encoding: json
         script: |
+          core.info(`probe action path=[${process.env.GITHUB_ACTION_PATH}]`);
           const { default: checkVersion } = await import(`${process.env.GITHUB_ACTION_PATH}/version-check.mjs`);
-          return await checkVersion({ core, context, exec });
+          core.info(`probe default=[${typeof checkVersion}]`);
+          const probe = await checkVersion({ core, context, exec });
+          core.info(`probe returned=[${JSON.stringify(probe)}]`);
+          return probe;
+    - shell: bash
+      env: { RESULT: "${{ steps.uv-version.outputs.result }}" }
+      run: printf 'probe result=[%s]\n' "$RESULT"
