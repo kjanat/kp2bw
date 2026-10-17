@@ -7,6 +7,7 @@ storage-quota or size limits) as HTTP 400 with the reason in the JSON body's
 """
 
 import asyncio
+import json
 from typing import Any, cast
 
 from kp2bw.bw_serve import BitwardenServeClient
@@ -21,6 +22,10 @@ class _FakeResponse:
     def __init__(self, status_code: int, payload: Any) -> None:
         self.status_code = status_code
         self._payload = payload
+
+    @property
+    def text(self) -> str:
+        return "" if self._payload is _NO_JSON else json.dumps(self._payload)
 
     def json(self) -> Any:
         if self._payload is _NO_JSON:

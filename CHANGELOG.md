@@ -8,6 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- When Bitwarden answers a folder, item or attachment request with HTTP 429, kp2bw waits as long as the server asks
+  and sends the request again. Large imports into Bitwarden Cloud finish in one run (#65, reported by [robertl87](https://github.com/robertl87)).
+
 ## [3.8.2] - 2026-09-07
 
 ### Fixed

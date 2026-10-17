@@ -12,7 +12,7 @@ import signal
 import socket
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from types import FrameType, TracebackType
 from typing import Any, NamedTuple, Self, cast
 
@@ -77,6 +77,17 @@ _IDEMPOTENT_METHODS: frozenset[str] = frozenset({
     "HEAD",
     "OPTIONS",
 })
+
+_RATE_LIMITED_RE: re.Pattern[str] = re.compile(
+    r"status code 429|too many requests|rate limit exceeded", re.IGNORECASE
+)
+_RETRY_IN_RE: re.Pattern[str] = re.compile(
+    r"try again in (\d+(?:\.\d+)?)([smhd])\b", re.IGNORECASE
+)
+_PERIOD_UNIT_S: Mapping[str, float] = {"s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
+_RATE_LIMIT_MAX_RETRIES: int = 8
+_RATE_LIMIT_BACKOFF_BASE_S: float = 1.0
+_RATE_LIMIT_MAX_WAIT_S: float = 60.0
 
 # Response-only keys returned by ``GET``/``list`` that are normally stripped from
 # a ``PUT`` body. ``revisionDate`` is added back only when a caller explicitly
@@ -556,6 +567,80 @@ def send_with_retry(
     raise BitwardenClientError(f"bw serve {method} {path}: no attempt was made")
 
 
+def rate_limit_wait_s(status_code: int, body: str, *, attempt: int) -> float | None:
+    """Return how long to wait before retry *attempt* of a rate-limited request.
+
+    Bitwarden's server rejects excess requests with HTTP 429 and the message
+    "Slow down! Too many requests. Try again in {rule.Period}." [1].  Its
+    defaults allow POST, PUT and DELETE 5 times per second and 60 times per
+    minute for each client IP [2].  ``bw serve`` answers every failed command
+    with HTTP 400 [3].  The 429 then appears only in the message: the SDK writes
+    "error in response: status code 429 Too Many Requests: <body>" [4], and the
+    legacy API client writes "Rate limit exceeded. Try again later." [5].  The
+    period carries one of AspNetCoreRateLimit's units ``s``, ``m``, ``h``, ``d`` [6].
+
+    Returns ``None`` when the response is not a Bitwarden rate-limit rejection,
+    when *attempt* exceeds the retry budget, or when the server names a window
+    longer than ``_RATE_LIMIT_MAX_WAIT_S``.  A named window ("Try again in 1m")
+    is waited in full; without one the wait doubles per attempt up to the cap.
+
+    [1] https://github.com/bitwarden/server/blob/9129efbd1531d5d8472345638efad7ef25a7337a/src/Core/Utilities/CustomIpRateLimitMiddleware.cs#L26-L33
+    [2] https://github.com/bitwarden/server/blob/9129efbd1531d5d8472345638efad7ef25a7337a/src/Api/appsettings.json#L88-L118
+    [3] https://github.com/bitwarden/clients/blob/abccf1e342dccba06a3cc635cd4c706defa64a32/apps/cli/src/oss-serve-configurator.ts#L451-L454
+    [4] https://github.com/bitwarden/sdk-internal/blob/c159ee882654e65dd885014001c7f3253d1a170e/crates/bitwarden-api-base/src/error.rs#L37-L50
+    [5] https://github.com/bitwarden/clients/blob/abccf1e342dccba06a3cc635cd4c706defa64a32/libs/common/src/models/response/error.response.ts#L22-L23
+    [6] https://github.com/stefanprodan/AspNetCoreRateLimit/blob/3a574a8e6a6ab1bfe3ecf285490568c08cf1aa65/src/AspNetCoreRateLimit/Core/Extensions.cs#L49-L63
+    """
+    if status_code < 400 or attempt > _RATE_LIMIT_MAX_RETRIES:
+        return None
+    if status_code != 429 and not _RATE_LIMITED_RE.search(body):
+        return None
+    match = _RETRY_IN_RE.search(body)
+    if match is None:
+        return min(
+            _RATE_LIMIT_BACKOFF_BASE_S * 2 ** (attempt - 1), _RATE_LIMIT_MAX_WAIT_S
+        )
+    wait = float(match.group(1)) * _PERIOD_UNIT_S[match.group(2).lower()]
+    return wait if wait <= _RATE_LIMIT_MAX_WAIT_S else None
+
+
+async def _asyncio_sleep(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+
+def _log_rate_limit_wait(method: str, path: str, wait: float, attempt: int) -> None:
+    logger.warning(
+        f"Bitwarden rate limit on {method} {path}; waiting {wait:g}s "
+        f"(retry {attempt}/{_RATE_LIMIT_MAX_RETRIES})"
+    )
+
+
+def send_with_rate_limit_retry(
+    send: Callable[[], httpx.Response],
+    *,
+    method: str,
+    path: str,
+    sleep: Callable[[float], None] = time.sleep,
+) -> httpx.Response:
+    """Call *send*, waiting out and retrying Bitwarden rate-limit rejections.
+
+    The server rejects a rate-limited request before acting on it, so retrying
+    is safe for every method, ``POST`` creates included.  The last response is
+    returned unchanged once it is not rate-limited or the budget is spent, so
+    the caller's usual error handling reports it.  *sleep* is injectable for tests.
+    """
+    resp = send()
+    attempt = 1
+    while (
+        wait := rate_limit_wait_s(resp.status_code, resp.text, attempt=attempt)
+    ) is not None:
+        _log_rate_limit_wait(method, path, wait, attempt)
+        sleep(wait)
+        resp = send()
+        attempt += 1
+    return resp
+
+
 def _find_free_port() -> int:
     """Find an available TCP port on localhost."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -632,6 +717,8 @@ class BitwardenServeClient:
     _bw_cmd: list[str]  # argv prefix for invoking bw (handles Windows shims)
     _bw_cwd: str | None  # cwd for bw subprocess calls (set for shim invocation)
     _bw_via_shell: bool  # True when bw runs through a cmd.exe wrapper
+    _sleep: Callable[[float], None] = staticmethod(time.sleep)
+    _async_sleep: Callable[[float], Awaitable[None]] = staticmethod(_asyncio_sleep)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -895,13 +982,19 @@ class BitwardenServeClient:
 
         *idempotent* overrides method-based retry classification for a ``POST``
         that merely replays state (``/sync``, ``/unlock``); see
-        :func:`send_with_retry`.
+        :func:`send_with_retry`.  Bitwarden rate-limit rejections are waited
+        out and retried; see :func:`send_with_rate_limit_retry`.
         """
-        resp = send_with_retry(
-            lambda: self._http.request(method, path, json=json_body, params=params),
+        resp = send_with_rate_limit_retry(
+            lambda: send_with_retry(
+                lambda: self._http.request(method, path, json=json_body, params=params),
+                method=method,
+                path=path,
+                idempotent=idempotent,
+            ),
             method=method,
             path=path,
-            idempotent=idempotent,
+            sleep=self._sleep,
         )
         if resp.status_code >= 400:
             raise BitwardenHttpError(
@@ -1446,9 +1539,12 @@ class BitwardenServeClient:
         Used by content-aware reconciliation to compare a vault attachment
         against the KeePass-derived bytes before deciding whether to refresh it.
         """
-        resp = self._http.get(
-            f"/object/attachment/{attachment_id}",
-            params={"itemid": item_id},
+        path = f"/object/attachment/{attachment_id}"
+        resp = send_with_rate_limit_retry(
+            lambda: self._http.get(path, params={"itemid": item_id}),
+            method="GET",
+            path=path,
+            sleep=self._sleep,
         )
         if resp.status_code >= 400:
             raise BitwardenClientError(
@@ -1488,13 +1584,18 @@ class BitwardenServeClient:
         attachment endpoint, which resolves ``itemid`` from its local vault
         cache rather than from the server.  On such a not-found failure, force a
         vault sync (so freshly created IDs become visible) and retry once before
-        treating the upload as failed.
+        treating the upload as failed.  Bitwarden rate-limit rejections are
+        waited out and retried; see :func:`send_with_rate_limit_retry`.
         """
         for attempt in range(2):
-            resp = await client.post(
-                "/attachment",
-                params={"itemid": item_id},
-                files={"file": (filename, data)},
+            resp = await self._send_async_with_rate_limit_retry(
+                lambda: client.post(
+                    "/attachment",
+                    params={"itemid": item_id},
+                    files={"file": (filename, data)},
+                ),
+                method="POST",
+                path="/attachment",
             )
             try:
                 parsed: Any = resp.json()
@@ -1531,13 +1632,34 @@ class BitwardenServeClient:
                     f"Item {item_id} not yet resolvable for attachment "
                     f"{filename!r}; syncing vault and retrying",
                 )
-                await client.post("/sync")
+                await self._send_async_with_rate_limit_retry(
+                    lambda: client.post("/sync"), method="POST", path="/sync"
+                )
                 continue
 
             raise BitwardenClientError(
                 f"Attachment upload failed for {filename!r} on item {item_id}: "
                 f"{message}"
             )
+
+    async def _send_async_with_rate_limit_retry(
+        self,
+        send: Callable[[], Awaitable[httpx.Response]],
+        *,
+        method: str,
+        path: str,
+    ) -> httpx.Response:
+        """Async counterpart of :func:`send_with_rate_limit_retry`."""
+        resp = await send()
+        attempt = 1
+        while (
+            wait := rate_limit_wait_s(resp.status_code, resp.text, attempt=attempt)
+        ) is not None:
+            _log_rate_limit_wait(method, path, wait, attempt)
+            await self._async_sleep(wait)
+            resp = await send()
+            attempt += 1
+        return resp
 
     async def upload_attachments_parallel(
         self,

@@ -143,7 +143,21 @@ file (for example, an image too large for your plan, or an upload that needs pre
 the server's actual message and is skipped -- it no longer aborts the whole migration, so the rest of your entries still
 import. Resolve the underlying limit and re-run to upload the remaining files.
 
+## Large imports pause with "Bitwarden rate limit" warnings
+
+Bitwarden limits write requests per client IP. The defaults in [Bitwarden's server code][bw:rate-limits] allow 5 writes
+per second and 60 per minute; the live Bitwarden Cloud figures can differ. A rejected request comes back as HTTP 429
+with "Try again in 1s" or "Try again in 1m". kp2bw waits that long and sends the same request again:
+
+```console
+WARNING  Bitwarden rate limit on POST /object/item; waiting 60s (retry 2/8)
+```
+
+Let the run continue. At 60 writes per minute, 1000 entries take at least 17 minutes. kp2bw skips a request that is
+still rejected after 8 retries and reports it; the next run picks it up.
+
 [Bitwarden CLI]: https://bitwarden.com/help/cli/
+[bw:rate-limits]: https://github.com/bitwarden/server/blob/9129efbd1531d5d8472345638efad7ef25a7337a/src/Api/appsettings.json#L88-L118
 [Vaultwarden 1.36.0]: https://github.com/dani-garcia/vaultwarden/releases/tag/1.36.0
 [bw:versions]: https://npm.im/package/@bitwarden/cli?activeTab=versions "@bitwarden/cli | npm versions tab"
 [kp2bw:release:latest]: https://github.com/kjanat/kp2bw/releases/latest
