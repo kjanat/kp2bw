@@ -16,13 +16,13 @@ inputs:
 outputs:
   name:
     description: "Package name reported by `uv version`."
-    value: ${{ fromJson(steps.uv-version.outputs.result).name }}
+    value: ${{ steps.fields.outputs.name }}
   version:
     description: "Package version reported by `uv version`."
-    value: ${{ fromJson(steps.uv-version.outputs.result).version }}
+    value: ${{ steps.fields.outputs.version }}
   pypi_url:
     description: "PyPI project URL for this version."
-    value: ${{ fromJson(steps.uv-version.outputs.result).pypi_url }}
+    value: ${{ steps.fields.outputs.pypi_url }}
 
 runs:
   using: composite
@@ -45,6 +45,7 @@ runs:
           const probe = await checkVersion({ core, context, exec });
           core.info(`probe returned=[${JSON.stringify(probe)}]`);
           return probe;
-    - shell: bash
+    - id: fields
+      shell: bash
       env: { RESULT: "${{ steps.uv-version.outputs.result }}" }
-      run: printf 'probe result=[%s]\n' "$RESULT"
+      run: jq --raw-output 'to_entries[] | "\(.key)=\(.value)"' <<< "$RESULT" >> "$GITHUB_OUTPUT"

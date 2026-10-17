@@ -30,6 +30,8 @@ jobs:
     environment: { name: pypi-pykeepass-stubs, url: "${{ needs.check.outputs.pypi_url }}" }
     permissions: { id-token: write, contents: read }
     steps:
+      - env: { N: "${{ needs.check.outputs.name }}", V: "${{ needs.check.outputs.version }}", U: "${{ needs.check.outputs.pypi_url }}" }
+        run: printf 'probe needs=[%s|%s|%s]\n' "$N" "$V" "$U"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync
