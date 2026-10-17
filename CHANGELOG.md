@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.8.3] - 2026-10-17
+
 ### Fixed
 
 - When Bitwarden answers a folder, item or attachment request with HTTP 429, kp2bw waits as long as the server asks
@@ -649,7 +651,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.8.2...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.8.3...HEAD
+[3.8.3]: https://github.com/kjanat/kp2bw/compare/v3.8.2...v3.8.3
 [3.8.2]: https://github.com/kjanat/kp2bw/compare/v3.8.1...v3.8.2
 [3.8.1]: https://github.com/kjanat/kp2bw/compare/v3.8.0...v3.8.1
 [3.8.0]: https://github.com/kjanat/kp2bw/compare/v3.7.1...v3.8.0
