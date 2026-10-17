@@ -16,13 +16,13 @@ inputs:
 outputs:
   name:
     description: "Package name reported by `uv version`."
-    value: ${{ fromJson(steps.check.outputs.result).name }}
+    value: ${{ fromJson(steps.uv-version.outputs.result).name }}
   version:
     description: "Package version reported by `uv version`."
-    value: ${{ fromJson(steps.check.outputs.result).version }}
+    value: ${{ fromJson(steps.uv-version.outputs.result).version }}
   pypi_url:
     description: "PyPI project URL for this version."
-    value: ${{ fromJson(steps.check.outputs.result).pypi_url }}
+    value: ${{ fromJson(steps.uv-version.outputs.result).pypi_url }}
 
 runs:
   using: composite
@@ -31,7 +31,7 @@ runs:
     - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
     - run: uv sync
       shell: bash
-    - id: check
+    - id: uv-version
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:
         PACKAGE: ${{ inputs.package }}
