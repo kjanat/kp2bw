@@ -293,8 +293,10 @@ def render_report(report: DoctorReport) -> list[Text]:
     )
     width = max(len(label) for label, _ in rows)
     lines = [Text(f"{label.ljust(width)}  ") + value for label, value in rows]
-    lines.append(Text(""))
-    lines.append(Text("Need help? Include this report when you open an issue:"))
-    lines.append(Text("  issues        https://github.com/kjanat/kp2bw/issues"))
-    lines.append(Text("  pull requests https://github.com/kjanat/kp2bw/pulls"))
+    lines.extend([
+        Text(""),
+        Text("Need help? Include this report when you open an issue:"),
+        Text("  issues        https://github.com/kjanat/kp2bw/issues"),
+        Text("  pull requests https://github.com/kjanat/kp2bw/pulls"),
+    ])
     return lines

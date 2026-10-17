@@ -17,7 +17,7 @@ from kp2bw.bw_serve import (
     KP2BW_SYNC_FIELD_NAME,
     BitwardenServeClient,
 )
-from kp2bw.bw_types import BwField, BwItemCreate, BwItemResponse, BwUri
+from kp2bw.bw_types import BwField, BwItemCreate, BwItemResponse
 from kp2bw.convert import Converter
 
 _BW_LOGIN = 1
@@ -40,34 +40,31 @@ def _make_converter(*, force_update: bool = False) -> Converter:
 
 
 def _field(name: str, value: str) -> BwField:
-    return cast(BwField, {"name": name, "value": value, "type": 0})
+    return {"name": name, "value": value, "type": 0}
 
 
 def _desired(*, name: str, password: str, note: str = "") -> BwItemCreate:
     """A freshly-built item as the migration would emit it (KeePass-authoritative)."""
-    return cast(
-        BwItemCreate,
-        {
-            "organizationId": None,
-            "collectionIds": [],
-            "folderId": None,
-            "type": _BW_LOGIN,
-            "name": name,
-            "notes": note,
-            "favorite": False,
-            "fields": [_field(KP2BW_ID_FIELD_NAME, "UUID")],
-            "login": {
-                "uris": [],
-                "username": "u",
-                "password": password,
-                "totp": None,
-                "passwordRevisionDate": None,
-            },
-            "secureNote": None,
-            "card": None,
-            "identity": None,
+    return {
+        "organizationId": None,
+        "collectionIds": [],
+        "folderId": None,
+        "type": _BW_LOGIN,
+        "name": name,
+        "notes": note,
+        "favorite": False,
+        "fields": [_field(KP2BW_ID_FIELD_NAME, "UUID")],
+        "login": {
+            "uris": [],
+            "username": "u",
+            "password": password,
+            "totp": None,
+            "passwordRevisionDate": None,
         },
-    )
+        "secureNote": None,
+        "card": None,
+        "identity": None,
+    }
 
 
 def _existing_as_kp2bw_wrote_it(*, name: str, password: str) -> BwItemResponse:
@@ -180,7 +177,7 @@ def assert_uri_match_edit_detected() -> None:
     existing = _existing_as_kp2bw_wrote_it(name="X", password="p")
     login = existing.get("login")
     assert login is not None
-    login["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 0})]
+    login["uris"] = [{"uri": "https://example.com", "match": 0}]
     Converter._stamp_content(existing)
     login["uris"][0]["match"] = 1
     if not Converter._is_user_modified(existing):
@@ -189,12 +186,12 @@ def assert_uri_match_edit_detected() -> None:
 
 def assert_linked_field_edit_detected() -> None:
     existing = _existing_as_kp2bw_wrote_it(name="X", password="p")
-    existing["fields"].append(
-        cast(
-            BwField,
-            {"name": "linked", "value": "", "type": 3, "linkedId": 100},
-        )
-    )
+    existing["fields"].append({
+        "name": "linked",
+        "value": "",
+        "type": 3,
+        "linkedId": 100,
+    })
     Converter._stamp_content(existing)
     existing["fields"][-1]["linkedId"] = 101
     if not Converter._is_user_modified(existing):
@@ -214,8 +211,8 @@ def assert_legacy_stamp_fails_closed_on_newly_covered_edit() -> None:
     desired = _desired(name="X", password="p")
     existing_login = existing.get("login")
     assert existing_login is not None
-    existing_login["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 1})]
-    desired["login"]["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 0})]
+    existing_login["uris"] = [{"uri": "https://example.com", "match": 1}]
+    desired["login"]["uris"] = [{"uri": "https://example.com", "match": 0}]
     existing["fields"][-1]["value"] = legacy_content_signature(existing)
 
     outcome, bw = _reconcile(_make_converter(), existing, desired)
@@ -229,8 +226,8 @@ def assert_legacy_stamp_mixed_uri_edit_fails_closed() -> None:
     desired = _desired(name="X", password="new")
     existing_login = existing.get("login")
     assert existing_login is not None
-    existing_login["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 1})]
-    desired["login"]["uris"] = [cast(BwUri, {"uri": "https://example.com", "match": 0})]
+    existing_login["uris"] = [{"uri": "https://example.com", "match": 1}]
+    desired["login"]["uris"] = [{"uri": "https://example.com", "match": 0}]
     existing["fields"][-1]["value"] = legacy_content_signature(existing)
 
     outcome, bw = _reconcile(_make_converter(), existing, desired)
@@ -244,8 +241,8 @@ def assert_legacy_stamp_changed_uri_fails_closed() -> None:
     desired = _desired(name="X", password="new")
     existing_login = existing.get("login")
     assert existing_login is not None
-    existing_login["uris"] = [cast(BwUri, {"uri": "https://old.example", "match": 1})]
-    desired["login"]["uris"] = [cast(BwUri, {"uri": "https://new.example", "match": 0})]
+    existing_login["uris"] = [{"uri": "https://old.example", "match": 1}]
+    desired["login"]["uris"] = [{"uri": "https://new.example", "match": 0}]
     existing["fields"][-1]["value"] = legacy_content_signature(existing)
 
     outcome, bw = _reconcile(_make_converter(), existing, desired)
@@ -259,17 +256,11 @@ def assert_legacy_stamp_mixed_linked_field_edit_fails_closed() -> None:
     desired = _desired(name="X", password="new")
     existing["fields"].insert(
         0,
-        cast(
-            BwField,
-            {"name": "linked", "value": "", "type": 3, "linkedId": 101},
-        ),
+        {"name": "linked", "value": "", "type": 3, "linkedId": 101},
     )
     desired["fields"].insert(
         0,
-        cast(
-            BwField,
-            {"name": "linked", "value": "", "type": 3, "linkedId": 100},
-        ),
+        {"name": "linked", "value": "", "type": 3, "linkedId": 100},
     )
     existing["fields"][-1]["value"] = legacy_content_signature(existing)
 
@@ -284,14 +275,11 @@ def assert_null_linked_id_on_text_field_is_compatible() -> None:
     desired = _desired(name="X", password="new")
     existing["fields"].insert(
         0,
-        cast(
-            BwField,
-            {"name": "text", "value": "same", "type": 0, "linkedId": None},
-        ),
+        {"name": "text", "value": "same", "type": 0, "linkedId": None},
     )
     desired["fields"].insert(
         0,
-        cast(BwField, {"name": "text", "value": "same", "type": 0}),
+        {"name": "text", "value": "same", "type": 0},
     )
     existing["fields"][-1]["value"] = legacy_content_signature(existing)
 

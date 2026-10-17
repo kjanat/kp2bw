@@ -153,5 +153,11 @@ src/kp2bw/
 - A full DEBUG log is always written to a per-user file (`_configure_logging` in `cli.py`; `%LOCALAPPDATA%/kp2bw/logs`,
   override `KP2BW_LOG_FILE` / `KP2BW_LOG_DIR`) independent of console verbosity. `bw serve` HTTP errors carry the
   response body via `format_http_error` (no more opaque `HTTP 400`).
+- Bitwarden rate limits (issue #65): `bw serve` answers the server's 429 with HTTP 400, so `rate_limit_wait_s` reads
+  it from the raw body (`status code 429`, `Too many requests`, or the legacy client's `Rate limit exceeded`). It waits
+  the named `Try again in <n><s|m|h|d>` window, or backs off from 1s doubling to 60s, for up to 8 retries; a window
+  over 60s fails the request at once. `_request`, `get_attachment` and `upload_attachment` (including its self-heal `/sync`)
+  retry every method, POST included, since the server rejects before acting. Tests override `_sleep` /
+  `_async_sleep`. Upstream permalinks live in the `rate_limit_wait_s` docstring. Tests: `tests/bw_serve_rate_limit_test.py`.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.

@@ -7,10 +7,12 @@ on:
     inputs:
       version: { description: "Version number (e.g. 0.1.0 or stubs-v0.1.0)", type: string }
       dry: { description: "Do not publish", type: boolean, default: false }
+permissions: {}
 defaults: { run: { shell: bash } }
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions: { contents: read }
     outputs:
       name: ${{ steps.check.outputs.name }}
@@ -24,11 +26,12 @@ jobs:
   publish:
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: { name: pypi-pykeepass-stubs, url: "${{ needs.check.outputs.pypi_url }}" }
     permissions: { id-token: write, contents: read }
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync
       - run: uv build --package pykeepass-stubs --no-sources --out-dir dist-stubs
 

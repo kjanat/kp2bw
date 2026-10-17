@@ -526,7 +526,7 @@ class Converter:
         return False
 
     def _build_metadata_field(self, entry: Entry) -> FieldSpec | None:
-        """Build the single ``KP2BW_META`` field for KeePass metadata, as YAML.
+        r"""Build the single ``KP2BW_META`` field for KeePass metadata, as YAML.
 
         Carries only the metadata Bitwarden has no native slot for and that we
         keep -- tags and expiry -- as readable YAML.  KeePass ``Created``/
@@ -538,7 +538,7 @@ class Converter:
         Serialised with PyYAML's ``safe_dump`` at ``allow_unicode=False`` so
         every value is escaped correctly -- including control characters and the
         YAML line-break code points (U+0085/U+2028/U+2029) that a hand-rolled
-        emitter silently corrupts.  Non-ASCII is escaped (e.g. ``"caf\\xE9"``) as
+        emitter silently corrupts.  Non-ASCII is escaped (e.g. ``"caf\xE9"``) as
         the price of that guarantee.  Sorted keys + KeePass tag order make the
         output byte-stable for idempotent re-runs.
         """
@@ -639,10 +639,10 @@ class Converter:
         bw_item_object = self._create_bw_python_object(
             title=title,
             notes=notes,
-            url=entry.url if entry.url else "",
+            url=entry.url or "",
             totp=otp_result.totp or "",
-            username=entry.username if entry.username else "",
-            password=entry.password if entry.password else "",
+            username=entry.username or "",
+            password=entry.password or "",
             custom_properties=custom_properties,
             fido2_credentials=fido2_credentials,
             additional_urls=[v for _, v in sorted(url_attrs)],
@@ -819,8 +819,8 @@ class Converter:
                 continue
 
             # prevent not iterable errors at "in" checks
-            username: str = entry.username if entry.username else ""
-            password: str = entry.password if entry.password else ""
+            username: str = entry.username or ""
+            password: str = entry.password or ""
 
             # Skip REFs as ID might not be in dict yet
             if KP_REF_IDENTIFIER in username or KP_REF_IDENTIFIER in password:
@@ -1294,7 +1294,7 @@ class Converter:
             # Long custom property — (key, value) text tuple
             return att[0] + ".txt"
         # Real pykeepass Attachment
-        return att.filename if att.filename else "attachment"
+        return att.filename or "attachment"
 
     @staticmethod
     def _materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:

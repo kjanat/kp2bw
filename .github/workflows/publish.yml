@@ -7,10 +7,12 @@ on:
     inputs:
       version: { description: "Version number (e.g. v3.1.7)", type: string }
       dry: { description: "Do not publish", type: boolean, default: false }
+permissions: {}
 defaults: { run: { shell: bash } }
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions: { contents: read }
     outputs:
       name: ${{ steps.check.outputs.name }}
@@ -28,18 +30,23 @@ jobs:
   publish:
     needs: [check, integration]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: { name: pypi-kp2bw, url: "${{ needs.check.outputs.pypi_url }}" }
     permissions: { id-token: write, contents: read }
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: uv sync
       - name: Stamp build revision
         run: |
           sha="$(git rev-parse HEAD)"
-          printf '%s\n\n%s\n' \
-            '"""Build-time metadata; the release workflow stamps BUILD_SHA before ``uv build``."""' \
-            "BUILD_SHA: str | None = \"$sha\"" > src/kp2bw/_build_info.py
+          {
+            cat <<'EOF'
+          """Build-time metadata; the release workflow stamps BUILD_SHA before ``uv build``."""
+
+          EOF
+            printf 'BUILD_SHA: str | None = "%s"\n' "${sha}"
+          } > src/kp2bw/_build_info.py
       - run: uv build --no-sources
 
       # Check that basic features work and we didn't miss to include crucial files

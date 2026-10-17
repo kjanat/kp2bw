@@ -86,7 +86,7 @@ def assert_dotenv_supplies_keepass_file() -> None:
         # Neutralize the side-effecting downstream: no real bw, no real migration.
         # patch.object auto-restores both names when the block exits.
         with (
-            mock.patch.object(cli, "ensure_bw_available", lambda: None),
+            mock.patch.object(cli, "ensure_bw_available", return_value=None),
             mock.patch.object(cli, "Converter", _CapturingConverter),
         ):
             cli.main()
@@ -178,7 +178,7 @@ def assert_org_disables_personal_folders_by_default() -> None:
 
         def _run() -> object:
             with (
-                mock.patch.object(cli, "ensure_bw_available", lambda: None),
+                mock.patch.object(cli, "ensure_bw_available", return_value=None),
                 mock.patch.object(cli, "Converter", _CapturingConverter),
             ):
                 cli.main()
@@ -230,7 +230,7 @@ def assert_totp_pps_reaches_converter() -> None:
         def _run(argv: list[str]) -> object:
             sys.argv = argv
             with (
-                mock.patch.object(cli, "ensure_bw_available", lambda: None),
+                mock.patch.object(cli, "ensure_bw_available", return_value=None),
                 mock.patch.object(cli, "Converter", _CapturingConverter),
             ):
                 cli.main()
