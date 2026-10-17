@@ -37,9 +37,13 @@ jobs:
       - name: Stamp build revision
         run: |
           sha="$(git rev-parse HEAD)"
-          printf '%s\n\n%s\n' \
-            '"""Build-time metadata; the release workflow stamps BUILD_SHA before ``uv build``."""' \
-            "BUILD_SHA: str | None = \"$sha\"" > src/kp2bw/_build_info.py
+          {
+            cat <<'EOF'
+          """Build-time metadata; the release workflow stamps BUILD_SHA before ``uv build``."""
+
+          EOF
+            printf 'BUILD_SHA: str | None = "%s"\n' "${sha}"
+          } > src/kp2bw/_build_info.py
       - run: uv build --no-sources
 
       # Check that basic features work and we didn't miss to include crucial files
