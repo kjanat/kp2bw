@@ -11,14 +11,14 @@ jobs:
     if: github.event.pull_request.stack == null
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: oven-sh/setup-bun@v2
-      - uses: astral-sh/setup-uv@v10.0.1
-      - uses: kjanat/runner@master
-      - uses: kjanat/install-dprint@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: kjanat/runner@b32ea932a1813ae0be44e755c16df9f9f5ca86a4 # master
+      - uses: kjanat/install-dprint@c2cdca92154b44b2a2c15222d25d91d1cddfca1b # v2
       - run: runner install -fk fmt:ci ruff:check:fix
 
       - if: ${{ github.event_name != 'pull_request' }}
         run: run dprint:update
 
-      - uses: autofix-ci/action@v1
+      - uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1
