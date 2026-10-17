@@ -23,15 +23,6 @@ jobs:
         uses: $/.github/actions/version-check
         with: { package: pykeepass-stubs, tag-prefixes: "stubs-,v" }
 
-  probe:
-    needs: check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - env: { N: "${{ needs.check.outputs.name }}", V: "${{ needs.check.outputs.version }}", U: "${{ needs.check.outputs.pypi_url }}" }
-        run: printf 'probe needs=[%s|%s|%s]\n' "$N" "$V" "$U"
-
   publish:
     needs: check
     runs-on: ubuntu-latest

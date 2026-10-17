@@ -31,7 +31,7 @@ runs:
     - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
     - run: uv sync
       shell: bash
-    - id: uv-version
+    - id: check
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:
         PACKAGE: ${{ inputs.package }}
@@ -39,13 +39,9 @@ runs:
       with:
         result-encoding: json
         script: |
-          core.info(`probe action path=[${process.env.GITHUB_ACTION_PATH}]`);
           const { default: checkVersion } = await import(`${process.env.GITHUB_ACTION_PATH}/version-check.mjs`);
-          core.info(`probe default=[${typeof checkVersion}]`);
-          const probe = await checkVersion({ core, context, exec });
-          core.info(`probe returned=[${JSON.stringify(probe)}]`);
-          return probe;
+          return await checkVersion({ core, context, exec });
     - id: fields
       shell: bash
-      env: { RESULT: "${{ steps.uv-version.outputs.result }}" }
+      env: { RESULT: "${{ steps.check.outputs.result }}" }
       run: jq --raw-output 'to_entries[] | "\(.key)=\(.value)"' <<< "$RESULT" >> "$GITHUB_OUTPUT"
