@@ -159,5 +159,8 @@ src/kp2bw/
   over 60s fails the request at once. `_request`, `get_attachment` and `upload_attachment` (including its self-heal `/sync`)
   retry every method, POST included, since the server rejects before acting. Tests override `_sleep` /
   `_async_sleep`. Upstream permalinks live in the `rate_limit_wait_s` docstring. Tests: `tests/bw_serve_rate_limit_test.py`.
+- `_get_session` retries `bw unlock` once when stderr names `KeyIdBackfillError` (bitwarden/clients#23937): the CLI
+  starts a 24-hour cooldown on that failure, so the retry passes. Tests: `tests/bw_serve_unlock_test.py`. The e2e login
+  tolerates the same error and falls back to unlock.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.

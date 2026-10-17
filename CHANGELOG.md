@@ -8,6 +8,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Retry `bw unlock` once when `bw` 2026.9.0 or later fails it with `KeyIdBackfillError` against Vaultwarden 1.37.3
+  and older ([bitwarden/clients#23937](https://github.com/bitwarden/clients/issues/23937)).
+
 ## [3.8.3] - 2026-10-17
 
 ### Fixed

@@ -85,6 +85,7 @@ def _run(
     *,
     env: dict[str, str],
     timeout: float = 300,
+    tolerated_error: str | None = None,
 ) -> str:
     secrets = _collect_sensitive_values(command)
 
@@ -118,6 +119,13 @@ def _run(
             f"stdout:\n{stdout}\n"
             f"stderr:\n{stderr}"
         ) from exc
+    if (
+        result.returncode != 0
+        and tolerated_error is not None
+        and tolerated_error in result.stderr
+    ):
+        logger.warning(f"  exit {result.returncode} with {tolerated_error}; continuing")
+        return ""
     if result.returncode != 0:
         stdout = _redact_output(result.stdout, command=command, secrets=secrets)
         stderr = _redact_output(result.stderr, command=command, secrets=secrets)
@@ -171,13 +179,20 @@ def _get_session(env: dict[str, str], password: str) -> str:
 
 
 def _login_session(env: dict[str, str], email: str, password: str) -> str:
-    """Log in and return the session token in a single step."""
+    """Log in and return the session token in a single step.
+
+    ``bw`` 2026.9.0 and later authenticate, then fail ``bw login`` with
+    ``KeyIdBackfillError`` against Vaultwarden up to 1.37.3, leaving the account
+    logged in and locked; the unlock fallback below covers that.
+    https://github.com/bitwarden/clients/issues/23937
+    """
     pw_env = env.copy()
     pw_env["BW_PASSWORD"] = password
 
     session = _run(
         ["bw", "login", email, "--passwordenv", "BW_PASSWORD", "--raw"],
         env=pw_env,
+        tolerated_error="KeyIdBackfillError",
     )
     if session:
         return session

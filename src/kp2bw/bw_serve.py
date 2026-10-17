@@ -89,6 +89,8 @@ _RATE_LIMIT_MAX_RETRIES: int = 8
 _RATE_LIMIT_BACKOFF_BASE_S: float = 1.0
 _RATE_LIMIT_MAX_WAIT_S: float = 60.0
 
+_KEY_ID_BACKFILL_ERROR: str = "KeyIdBackfillError"
+
 # Response-only keys returned by ``GET``/``list`` that are normally stripped from
 # a ``PUT`` body. ``revisionDate`` is added back only when a caller explicitly
 # binds a write to an observed revision; other server-managed fields must never be
@@ -796,11 +798,10 @@ class BitwardenServeClient:
 
     # -- Start / stop --------------------------------------------------
 
-    def _get_session(self, password: str) -> str | None:
-        """Unlock the vault via ``bw unlock --raw`` and return the session key."""
-        logger.log(VERBOSE, "Obtaining session key via bw unlock --raw")
+    def _run_unlock(self, password: str) -> subprocess.CompletedProcess[str] | None:
+        """Run ``bw unlock --raw`` once; ``None`` when it times out."""
         try:
-            result = subprocess.run(
+            return subprocess.run(
                 [*self._bw_cmd, "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
                 check=False,
                 capture_output=True,
@@ -816,6 +817,30 @@ class BitwardenServeClient:
             raise BitwardenClientError(BW_NOT_FOUND_MSG) from exc
         except subprocess.TimeoutExpired:
             logger.warning("bw unlock timed out while obtaining session key")
+            return None
+
+    def _get_session(self, password: str) -> str | None:
+        """Unlock the vault via ``bw unlock --raw`` and return the session key.
+
+        ``bw`` 2026.9.0 and later fail an unlock with ``KeyIdBackfillError``
+        when the server lacks ``POST /api/accounts/key-management/user-key-id``
+        (Vaultwarden up to 1.37.3), then start a 24-hour cooldown that lets the
+        next unlock through.  That failure is retried once.
+        https://github.com/bitwarden/clients/issues/23937
+        """
+        logger.log(VERBOSE, "Obtaining session key via bw unlock --raw")
+        result = self._run_unlock(password)
+        if (
+            result is not None
+            and result.returncode != 0
+            and _KEY_ID_BACKFILL_ERROR in result.stderr
+        ):
+            logger.log(
+                VERBOSE,
+                "bw unlock failed in the CLI's user key id backfill; retrying once",
+            )
+            result = self._run_unlock(password)
+        if result is None:
             return None
         if result.returncode != 0:
             stderr_text = sanitize_cli_output(result.stderr, secrets=(password,))

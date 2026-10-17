@@ -107,6 +107,19 @@ npx --package @bitwarden/cli@<version> bw login <user>
 
 Either way you stay frozen behind newer clients until the server is upgraded, so upgrade when you can.
 
+## `bw login` fails with `KeyIdBackfillError` (Vaultwarden 1.37.3 and older)
+
+`bw` 2026.9.0 and later post the user key id to `/api/accounts/key-management/user-key-id` after logging in. Vaultwarden
+1.37.3 and older have no such route and answer 404, and `bw login` exits with:
+
+```console
+KeyIdBackfillError: API call failed during user key id backfill
+```
+
+The login itself went through: `bw status` reports `locked`. Run kp2bw as usual. The CLI fails the first `bw unlock`
+after each 24-hour cooldown the same way, and kp2bw retries that unlock once. The CLI bug is [bitwarden/clients#23937];
+Vaultwarden adds the route in [vaultwarden#7693], after 1.37.3.
+
 ## "Invalid master password" on `bw unlock`
 
 If your password contains special shell characters (`?`, `>`, `&`, etc.), wrap it in double quotes when prompted. See
@@ -157,6 +170,8 @@ Let the run continue. At 60 writes per minute, 1000 entries take at least 17 min
 still rejected after 8 retries and reports it; the next run picks it up.
 
 [Bitwarden CLI]: https://bitwarden.com/help/cli/
+[bitwarden/clients#23937]: https://github.com/bitwarden/clients/issues/23937
+[vaultwarden#7693]: https://github.com/dani-garcia/vaultwarden/pull/7693
 [bw:rate-limits]: https://github.com/bitwarden/server/blob/9129efbd1531d5d8472345638efad7ef25a7337a/src/Api/appsettings.json#L88-L118
 [Vaultwarden 1.36.0]: https://github.com/dani-garcia/vaultwarden/releases/tag/1.36.0
 [bw:versions]: https://npm.im/package/@bitwarden/cli?activeTab=versions "@bitwarden/cli | npm versions tab"
