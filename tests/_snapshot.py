@@ -38,7 +38,7 @@ from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME
 # rather than ``dict[Unknown, Unknown]`` -- keeping the module strict-clean with
 # no ``Any``, ``cast``, or lint suppression.
 type JsonValue = (
-    None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
+    bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
 )
 
 # Separates an item id from a file name when keying attachment hashes; NUL never
@@ -324,7 +324,7 @@ def env_flag(name: str) -> bool:
 
 
 def canonical_json(vault: NormVault) -> str:
-    """Serialize a vault deterministically (sorted keys, UTF-8, ``\\n`` lines)."""
+    r"""Serialize a vault deterministically (sorted keys, UTF-8, ``\n`` lines)."""
     return json.dumps(vault, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
 

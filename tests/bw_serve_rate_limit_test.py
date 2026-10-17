@@ -10,6 +10,7 @@ These checks drive the real request paths over ``httpx.MockTransport``.
 import asyncio
 import json
 import logging
+import math
 import time
 from collections.abc import Callable
 from typing import Any
@@ -136,7 +137,7 @@ def assert_wait_backs_off_without_named_period() -> None:
     if got != [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]:
         raise AssertionError(f"legacy rate limit must back off to the cap, got {got}")
     raw = rate_limit_wait_s(429, "", attempt=2)
-    if raw != 2.0:
+    if raw is None or not math.isclose(raw, 2.0):
         raise AssertionError(f"a bare HTTP 429 must back off too, got {raw}")
 
 

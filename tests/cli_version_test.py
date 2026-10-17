@@ -1,9 +1,9 @@
-"""`kp2bw --version` must print the program name, not the launcher's argv.
+r"""`kp2bw --version` must print the program name, not the launcher's argv.
 
 Python 3.14's argparse computes the default ``prog`` via ``_prog_name``: when
 ``__main__`` has a module spec (a packaged / console-script / zipapp launch, as
 uv's trampoline produces) it returns ``f"{basename(sys.executable)} {argv[0]}"``
-(e.g. ``python.exe C:\\...\\Scripts\\kp2bw``), which leaked into ``--version``,
+(e.g. ``python.exe C:\...\Scripts\kp2bw``), which leaked into ``--version``,
 usage, and error messages. Pinning ``prog="kp2bw"`` fixes it. This reproduces
 that launch condition and checks the user-facing output through the public
 entry point.

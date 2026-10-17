@@ -184,16 +184,11 @@ def assert_unambiguous_legacy_stamp_is_upgraded() -> None:
     if login is None:
         raise AssertionError("legacy test item must be a login")
     login["uris"] = []
-    legacy["fields"].append(
-        cast(
-            BwField,
-            {
-                "name": KP2BW_SYNC_FIELD_NAME,
-                "value": legacy_content_signature(legacy),
-                "type": 0,
-            },
-        )
-    )
+    legacy["fields"].append({
+        "name": KP2BW_SYNC_FIELD_NAME,
+        "value": legacy_content_signature(legacy),
+        "type": 0,
+    })
     client = _MigrateClient([legacy])
 
     result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
@@ -205,22 +200,12 @@ def assert_unambiguous_legacy_stamp_is_upgraded() -> None:
 
 def assert_legacy_stamp_is_preserved_as_ambiguous() -> None:
     legacy = _login("old-stamp", ["KP2A_URL"], "https://legacy.example")
-    legacy["fields"].append(
-        cast(
-            BwField,
-            {"name": "linked", "value": "", "type": 3, "linkedId": 100},
-        )
-    )
-    legacy["fields"].append(
-        cast(
-            BwField,
-            {
-                "name": KP2BW_SYNC_FIELD_NAME,
-                "value": legacy_content_signature(legacy),
-                "type": 0,
-            },
-        )
-    )
+    legacy["fields"].append({"name": "linked", "value": "", "type": 3, "linkedId": 100})
+    legacy["fields"].append({
+        "name": KP2BW_SYNC_FIELD_NAME,
+        "value": legacy_content_signature(legacy),
+        "type": 0,
+    })
     login = legacy.get("login")
     if login is None:
         raise AssertionError("legacy test item must be a login")
@@ -252,16 +237,11 @@ def _passkey_item(item_id: str, uri: str) -> BwItemResponse:
 
 def assert_pre_fido2_stamp_with_passkey_is_preserved_as_ambiguous() -> None:
     item = _passkey_item("old-passkey-stamp", "https://legacy.example")
-    item["fields"].append(
-        cast(
-            BwField,
-            {
-                "name": KP2BW_SYNC_FIELD_NAME,
-                "value": pre_fido2_content_signature(item),
-                "type": 0,
-            },
-        )
-    )
+    item["fields"].append({
+        "name": KP2BW_SYNC_FIELD_NAME,
+        "value": pre_fido2_content_signature(item),
+        "type": 0,
+    })
     client = _MigrateClient([item])
 
     result = client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)

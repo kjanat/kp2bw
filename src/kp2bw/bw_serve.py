@@ -1011,7 +1011,7 @@ class BitwardenServeClient:
                 f"(HTTP {resp.status_code}) for {method} {path}"
             ) from exc
 
-        if not body.get("success", False):
+        if not body.get("success"):
             msg = body.get("message", "unknown error")
             raise BitwardenClientError(f"bw serve error on {method} {path}: {msg}")
 
@@ -1607,7 +1607,7 @@ class BitwardenServeClient:
                 cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
             )
 
-            if resp.status_code < 400 and body.get("success", False):
+            if resp.status_code < 400 and body.get("success"):
                 logger.log(
                     VERBOSE, f"Uploaded attachment {filename!r} to item {item_id}"
                 )

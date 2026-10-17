@@ -7,6 +7,7 @@ without code changes; bad values fall back to the default rather than crashing.
 These checks lock that parsing in, exercising the real resolver.
 """
 
+import math
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -47,10 +48,10 @@ def assert_unset_uses_default() -> None:
 def assert_valid_override_applied() -> None:
     """A positive numeric value (int or float form) is used verbatim."""
     with _env("300"):
-        if _resolve_http_timeout() != 300.0:
+        if not math.isclose(_resolve_http_timeout(), 300.0):
             raise AssertionError("integer override not applied")
     with _env("12.5"):
-        if _resolve_http_timeout() != 12.5:
+        if not math.isclose(_resolve_http_timeout(), 12.5):
             raise AssertionError("float override not applied")
 
 
