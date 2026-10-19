@@ -6,6 +6,9 @@
     alt="PyPI"
   >
 </a>
+<a href="https://github.com/sponsors/kjanat">
+  <img src="https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></img>
+</a>
 
 Migrates KeePass databases to Bitwarden via the `bw` CLI,\
 with advantages over the built-in Bitwarden importer:
