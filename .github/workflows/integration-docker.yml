@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 permissions: {}
 # Compatibility tests must include newly published stable releases.
-env: { MISE_MINIMUM_RELEASE_AGE: "0s" }
+env: { MISE_MINIMUM_RELEASE_AGE: "0s", MISE_NPM_PACKAGE_MANAGER: npm }
 defaults: { run: { shell: pwsh } }
 jobs:
   config:
