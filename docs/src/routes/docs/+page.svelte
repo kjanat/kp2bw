@@ -429,8 +429,8 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 					Want both? Pass <code>--folder</code> alongside <code>-o</code> (the
 					planner's <strong>Also create personal folders</strong> toggle) and
 					every item is filed into its org collection <em>and</em> a personal
-					folder — the same double-filing Bitwarden's own org import does.
-					Leave it off unless you specifically want that private copy.
+					folder — the same double-filing Bitwarden's own org import does. Leave
+					it off unless you specifically want that private copy.
 				</p>
 				<div class="fact-grid">
 					<article id="full-path-collections">
