@@ -1108,7 +1108,12 @@ class BitwardenServeClient:
         organization_id: str | None = None,
         collection_id: str | None = None,
     ) -> list[BwItemResponse]:
-        """Return vault items, optionally filtered by folder, organization, or collection."""
+        """Return items matching every supplied scope constraint.
+
+        The official CLI combines list filters with OR semantics. Recheck the
+        intersection locally before any caller can index, report, or mutate an
+        item; missing membership data must never widen a requested scope.
+        """
         params: dict[str, str] = {}
         if folder_id is not None:
             params["folderid"] = folder_id
@@ -1118,7 +1123,18 @@ class BitwardenServeClient:
             params["collectionId"] = collection_id
         data = self._request("GET", "/list/object/items", params=params or None)
         items: list[BwItemResponse] = data.get("data", [])
-        return items
+        return [
+            item
+            for item in items
+            if (folder_id is None or item.get("folderId") == folder_id)
+            and (
+                organization_id is None or item.get("organizationId") == organization_id
+            )
+            and (
+                collection_id is None
+                or collection_id in (item.get("collectionIds") or [])
+            )
+        ]
 
     def create_item(self, item: BwItemCreate) -> str:
         """Create a single vault item via HTTP and return its ID."""
