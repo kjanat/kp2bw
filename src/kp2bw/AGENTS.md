@@ -164,5 +164,9 @@ src/kp2bw/
 - `_get_session` retries `bw unlock` once when stderr names `KeyIdBackfillError` (bitwarden/clients#23937): the CLI
   starts a 24-hour cooldown on that failure, so the retry passes. Tests: `tests/bw_serve_unlock_test.py`. The e2e login
   tolerates the same error and falls back to unlock.
+- The serve process is checked before requests and after transport disconnects. Confirmed exit raises
+  `BitwardenServeExitedError` (a fatal `ConversionError`, not a recoverable `BitwardenClientError`), so item loops and
+  gathered attachment tasks cannot turn a dead process into repeated per-item warnings. Diagnostics include the cached
+  CLI version and compatibility link, never raw crash output. Live-process disconnects retain their retry policy.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.

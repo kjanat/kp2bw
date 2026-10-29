@@ -234,7 +234,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **`kp2bw --version` (and usage/error messages) now print `kp2bw`, not the launcher path.** Python 3.14's argparse
   derives the default program name from how the script was launched, so a console-script run through uv's trampoline
-  printed `python.exe C:\...\Scripts\kp2bw 3.4.1`. The program name is now pinned to `kp2bw`.
+  printed `python.exe C:\...\Scripts\kp2bw 3.4.1`. The program name is now always `kp2bw`.
 - **Distinct entries sharing a title no longer collapse onto one Bitwarden item (silent data loss)** -- deduplication
   keyed on `(folder, title)`, so several different logins that happened to share a title (e.g. four accounts all named
   `192.168.2.67`) merged into a single item and re-runs churned non-idempotently. Every migrated item now carries its
@@ -271,8 +271,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   seed (every TOTP shape, text and hidden custom fields, real file/image attachments, nested folders, unicode, empty
   password) into a real Vaultwarden and captures the result as normalized golden snapshots under `tests/__snapshots__/`,
   so migration drift surfaces as a reviewable diff; idempotency is proven at the snapshot level (pass 1 == pass 2). CI
-  runs a host-mode `@bitwarden/cli` version matrix via a new `setup-bw` composite action -- the pinned leg gates the
-  golden, `latest` is a behavioral-only canary -- with Vaultwarden and `bw` version-pinned and Dependabot-managed.
+  runs a host-mode `@bitwarden/cli` version matrix via a new `setup-bw` composite action -- the version from the lockfile gates the
+  golden, `latest` is a behavioral-only canary -- with Vaultwarden and `bw` versions managed by Dependabot.
 - **`--include-oversize-secrets` to recover over-limit secret fields** (#21) -- a hidden OTP secret (e.g. an HOTP
   `HmacOtp-Secret`), a passkey attribute, or a KeePass-protected custom field whose value tops the 10k inline limit
   survives nowhere else, so it was dropped. The new flag (env: `KP2BW_INCLUDE_OVERSIZE_SECRETS`, default off) offloads

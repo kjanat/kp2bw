@@ -10,6 +10,8 @@
   <img src="https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></img>
 </a>
 
+[![Compatibility tests](https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml/badge.svg?branch=master)](https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml?query=branch%3Amaster)
+
 Migrates KeePass databases to Bitwarden via the `bw` CLI,\
 with advantages over the built-in Bitwarden importer:
 
@@ -244,6 +246,15 @@ Then just run `kp2bw` with no arguments. A real shell environment variable still
 (precedence is unchanged: CLI flag > env var > default), and `.env` is gitignored so secrets stay local.
 
 ## Troubleshooting
+
+### Compatibility
+
+If the `bw serve` process exits during migration, kp2bw stops and reports the CLI version and exit code. Check the
+[compatibility test results](https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml) before rerunning;
+a server may have accepted the last write before the CLI crashed. Normal stable-ID reconciliation handles that on a
+rerun. A temporary connection drop while the process is still running retains the normal retry behaviour.
+
+### Logs and timeouts
 
 Every run writes a full DEBUG log to a per-user file even when the console stays quiet, so a failed run leaves a
 complete record to share. On Windows that is `%LOCALAPPDATA%\kp2bw\logs`; override the file with `KP2BW_LOG_FILE` or the

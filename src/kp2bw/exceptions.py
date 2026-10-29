@@ -12,3 +12,7 @@ class BitwardenHttpError(BitwardenClientError):
 
 class ConversionError(Exception):
     """Raised when a KeePass to Bitwarden conversion operation fails."""
+
+
+class BitwardenServeExitedError(ConversionError):
+    """Fatal transport loss; per-item failure handlers must not swallow it."""

@@ -47,10 +47,9 @@ GOLDEN_AFTER_UPDATE = _SNAPSHOT_DIR / "vault_after_update.json"
 def _golden_enabled() -> bool:
     """Whether to compare/update golden snapshots this run.
 
-    The pinned-CLI matrix leg sets ``KP2BW_SNAPSHOT_GOLDEN`` truthy and owns the
-    golden; the ``latest`` leg sets it falsy and runs behavioral + idempotency
-    checks only, so an upstream ``bw`` release that reshapes the JSON cannot
-    redden CI on its own.  ``KP2BW_UPDATE_SNAPSHOTS`` (regeneration) implies it.
+    The official CLI job sets ``KP2BW_SNAPSHOT_GOLDEN`` to compare expected
+    vault contents. Both CLIs run behavioral and idempotency checks.
+    ``KP2BW_UPDATE_SNAPSHOTS`` enables regeneration and implies comparison.
     Both accept ``1``/``true``/``yes``/``on`` (see ``env_flag``).
     """
     return env_flag("KP2BW_SNAPSHOT_GOLDEN") or env_flag("KP2BW_UPDATE_SNAPSHOTS")
@@ -571,7 +570,7 @@ def _bw_version(env: dict[str, str]) -> str:
 
 
 def _server_version(server_url: str, cert_path: Path) -> str:
-    """Return the server's name and version from ``/api/config``, or ``unknown``."""
+    """Return the server name and advertised API version, or ``unknown``."""
     context = ssl.create_default_context(cafile=str(cert_path))
     try:
         with urllib.request.urlopen(
@@ -586,7 +585,7 @@ def _server_version(server_url: str, cert_path: Path) -> str:
         if isinstance(server, dict)
         else None
     )
-    return f"{name or 'server'} {config.get('version') or 'unknown'}"
+    return f"{name or 'server'} (API {config.get('version') or 'unknown'})"
 
 
 def _assert_bw_serve_available(env: dict[str, str]) -> None:
@@ -905,7 +904,11 @@ def main() -> None:
 
         logger.info("Checking bw serve availability")
         _assert_bw_serve_available(env)
-        logger.info(f"Using @bitwarden/cli {_bw_version(env)}")
+        logger.info(
+            "Using %s %s",
+            env.get("KP2BW_TEST_CLI_PACKAGE", "@bitwarden/cli"),
+            _bw_version(env),
+        )
         logger.info(f"Using server {_server_version(server_url, cert_path)}")
         _ = _run(["bw", "config", "server", server_url], env=env)
 
