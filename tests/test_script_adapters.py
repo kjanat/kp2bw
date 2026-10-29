@@ -23,6 +23,10 @@ def test_bw_serve_attachment_script() -> None:
     _run_script_main("bw_serve_attachment_test.py")
 
 
+def test_bw_serve_upload_batch_script() -> None:
+    _run_script_main("bw_serve_upload_batch_test.py")
+
+
 def test_bw_serve_bw_missing_script() -> None:
     _run_script_main("bw_serve_bw_missing_test.py")
 

@@ -1139,6 +1139,9 @@ def main() -> None:
     from e2e_scope_test import main as run_scope_test
 
     run_scope_test()
+    from e2e_attachment_batch_test import main as run_attachment_batch_test
+
+    run_attachment_batch_test()
     print("vaultwarden end-to-end integration test passed")
 
 

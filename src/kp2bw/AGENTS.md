@@ -161,5 +161,9 @@ src/kp2bw/
 - `_get_session` retries `bw unlock` once when stderr names `KeyIdBackfillError` (bitwarden/clients#23937): the CLI
   starts a 24-hour cooldown on that failure, so the retry passes. Tests: `tests/bw_serve_unlock_test.py`. The e2e login
   tolerates the same error and falls back to unlock.
+- Attachment batches serialize mutations by item ID, including repeated IDs in separate batch records, while retaining
+  cross-item concurrency. After all uploads finish, a sync and byte comparison verify acknowledged files. Missing,
+  unreadable, or mismatched files count as failures and prevent stale-copy deletion. Tests:
+  `tests/bw_serve_upload_batch_test.py`, `tests/e2e_attachment_batch_test.py`.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.
