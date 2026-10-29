@@ -28,6 +28,7 @@ with advantages over the built-in Bitwarden importer:
 - <details>
     <summary><b>Custom properties &amp; attachments</b></summary>
     Imported as Bitwarden custom fields or attachments (values &gt;10k chars auto-upload as files).
+    Uploads run serially per item and concurrently across items. Uploaded files are synced and downloaded to verify their bytes before success is reported or an old copy is deleted. A verification failure makes the migration exit nonzero and retains the old copy.
   </details>
 - <details>
     <summary><b>Long notes handling</b></summary>

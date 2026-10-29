@@ -1943,7 +1943,8 @@ class Converter:
 
                 # --- Phase 4: remove stale copies of refreshed attachments --
                 # Upload-then-delete: only drop the old copy once its
-                # replacement landed, so a failed re-upload never loses data. A
+                # replacement was verified after sync, so a failed or silently
+                # missing re-upload never loses data. A
                 # failed delete is non-fatal (it just leaves a harmless extra
                 # copy that collapses on the next run).
                 if pending_deletes:

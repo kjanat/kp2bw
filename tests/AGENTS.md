@@ -34,6 +34,11 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
   API, and the official CLI verifies fixed-collection import, URI reporting/migration, finalization, outside controls,
   and unchanged reruns. This fixture uses the test account's PBKDF2 configuration and keeps generated keys in memory.
 - Fixtures are contract data; path and naming changes require docker + test updates together.
+- The final live attachment batch regression verifies four distinct files on each of two items, unchanged reruns,
+  replacement and a falsely acknowledged upload that must fail without deleting the old copy.
+  `e2e_attachment_batch_test.py` can also run independently against an official Bitwarden test account using
+  `BW_SERVER_URL`, `BW_TEST_EMAIL`, and `BW_TEST_PASSWORD`. `KP2BW_E2E_CLEANUP=1` removes only this run's synthetic
+  items, identified by both random names and source UUIDs, including after a failed assertion.
 
 ## GOLDEN SNAPSHOTS
 
