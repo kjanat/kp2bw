@@ -4,13 +4,18 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import islice
 from typing import Literal
+from uuid import UUID
 
 import yaml
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from pykeepass import Attachment, Entry, Group, PyKeePass
 from pykeepass.exceptions import (
     CredentialsError,
@@ -385,12 +390,47 @@ class Converter:
 
     @staticmethod
     def _convert_pem_to_base64url(pem_key: str) -> str:
-        """Convert a PEM-encoded private key to base64url (no padding)."""
-        lines = pem_key.strip().splitlines()
-        # Strip PEM header/footer lines
-        b64_data = "".join(line for line in lines if not line.startswith("-----"))
-        raw_bytes = base64.b64decode(b64_data)
-        return base64.urlsafe_b64encode(raw_bytes).rstrip(b"=").decode()
+        """Validate a PKCS#8 P-256 private key and encode it for Bitwarden."""
+        match = re.fullmatch(
+            r"-----BEGIN PRIVATE KEY-----\s+([A-Za-z0-9+/=\s]+)\s+-----END PRIVATE KEY-----",
+            pem_key.strip(),
+        )
+        if match is None:
+            raise ValueError("Expected a PKCS#8 private key")
+        raw_bytes = base64.b64decode("".join(match[1].split()), validate=True)
+        key = serialization.load_der_private_key(raw_bytes, password=None)
+        if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(
+            key.curve, ec.SECP256R1
+        ):
+            raise TypeError("Only ECDSA P-256 passkeys are supported")
+        encoded = key.private_bytes(
+            serialization.Encoding.DER,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        if encoded != raw_bytes:
+            raise ValueError("Expected canonical PKCS#8 DER without trailing data")
+        return base64.urlsafe_b64encode(encoded).rstrip(b"=").decode()
+
+    @staticmethod
+    def _passkey_identifier(value: str, *, user_handle: bool = False) -> None:
+        """Reject malformed identifiers without repairing or discarding bytes."""
+        if not user_handle:
+            try:
+                if str(UUID(value)) == value.lower():
+                    return
+            except ValueError:
+                pass
+            value = value.removeprefix("b64.")
+        if re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", value) is None:
+            raise ValueError("Invalid base64url identifier")
+        decoded = base64.b64decode(
+            value + "=" * (-len(value) % 4), altchars=b"-_", validate=True
+        )
+        if not decoded or (user_handle and len(decoded) > 64):
+            raise ValueError("Invalid identifier length")
+        if base64.urlsafe_b64encode(decoded).decode().rstrip("=") != value.rstrip("="):
+            raise ValueError("Noncanonical base64url identifier")
 
     def _build_fido2_credentials(
         self,
@@ -401,14 +441,34 @@ class Converter:
         credential_id = custom_properties.get("KPEX_PASSKEY_CREDENTIAL_ID")
         private_key_pem = custom_properties.get("KPEX_PASSKEY_PRIVATE_KEY_PEM")
 
-        if not credential_id or not private_key_pem:
+        if not any(key.startswith(KPEX_PASSKEY_PREFIX) for key in custom_properties):
             return None
 
+        relying_party = custom_properties.get("KPEX_PASSKEY_RELYING_PARTY")
+        user_handle = custom_properties.get("KPEX_PASSKEY_USER_HANDLE")
         try:
+            if (
+                not credential_id
+                or not private_key_pem
+                or not relying_party
+                or not user_handle
+            ):
+                raise ValueError("Missing required passkey attribute")
+            self._passkey_identifier(credential_id)
+            self._passkey_identifier(user_handle, user_handle=True)
+            domain = relying_party.encode("idna").decode()
+            if len(domain) > 253 or any(
+                re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+                is None
+                for label in domain.split(".")
+            ):
+                raise ValueError("Invalid relying party ID")
             key_value = self._convert_pem_to_base64url(private_key_pem)
-        except ValueError, binascii.Error:
+        except ValueError, TypeError, binascii.Error, UnsupportedAlgorithm:
             logger.warning(
-                f"Could not convert passkey private key for entry: {entry.title}"
+                "Passkey conversion failed for entry %s; keeping source attributes "
+                "as hidden fields (oversized-secret policy still applies).",
+                entry.title,
             )
             return None
 
@@ -554,6 +614,7 @@ class Converter:
         custom_property_data = _read_entry_custom_properties(entry)
         custom_props = custom_property_data.values
         custom_protected = custom_property_data.protected_keys
+        fido2_credentials = self._build_fido2_credentials(entry, custom_props)
 
         # Resolve TOTP/HOTP from entry.otp or the KeePass TimeOtp-*/HmacOtp-*
         # custom fields.  This decides which fields are folded into login.totp
@@ -575,7 +636,9 @@ class Converter:
         app_attrs: list[tuple[int, str]] = []
         for key, value in custom_props.items():
             # Skip passkey attributes and OTP fields folded into login.totp.
-            if key.startswith(KPEX_PASSKEY_PREFIX) or key in otp_result.consumed_keys:
+            if (
+                fido2_credentials and key.startswith(KPEX_PASSKEY_PREFIX)
+            ) or key in otp_result.consumed_keys:
                 continue
             # Route URL/app attributes to login.uris instead of custom fields.
             if is_url_attribute_key(key):
@@ -589,7 +652,11 @@ class Converter:
             # duplicate it and can hit Bitwarden's field-size limit.
             if value is not None and len(value) > MAX_BW_ITEM_LENGTH:
                 continue
-            if key in otp_result.hidden_keys or key in custom_protected:
+            if (
+                key.startswith(KPEX_PASSKEY_PREFIX)
+                or key in otp_result.hidden_keys
+                or key in custom_protected
+            ):
                 custom_properties[key] = (value, 1)
             else:
                 custom_properties[key] = (value, 0)
@@ -612,7 +679,6 @@ class Converter:
         custom_properties[KP2BW_ID_FIELD_NAME] = (entry_uuid, 0)
 
         # Build FIDO2/passkey credentials from KeePassXC attributes
-        fido2_credentials = self._build_fido2_credentials(entry, custom_props)
         if fido2_credentials:
             logger.log(VERBOSE, f"  Migrating passkey for entry: {entry.title}")
 
@@ -663,7 +729,9 @@ class Converter:
         for key, value in custom_props.items():
             if value is None or len(value) <= MAX_BW_ITEM_LENGTH:
                 continue
-            if key in otp_result.consumed_keys:
+            if key in otp_result.consumed_keys or (
+                fido2_credentials and key.startswith(KPEX_PASSKEY_PREFIX)
+            ):
                 continue
             if (
                 key.startswith(KPEX_PASSKEY_PREFIX)

@@ -115,6 +115,10 @@ src/kp2bw/
   untouched stamps remain valid, manually edited items stay protected, and subsequent JSON reruns write nothing.
   The historical REF shadow still reproduces YAML to recognize safe pre-fix output. Created/modified timestamps
   are not migrated because Bitwarden owns its timestamps.
+- Passkey conversion validates PKCS#8 DER, ECDSA P-256, relying-party IDs and credential/user identifiers before
+  consuming source attributes. Failed conversions retain inline source attributes as hidden fields; oversized values
+  still require `--include-oversize-secrets`. Tests cover final items and signing with the serialized credential, plus
+  live round-trip and unchanged-rerun checks in `tests/e2e_passkey_test.py`.
 - OTP lives in `otp.py`, which is pure: `resolve_otp()` takes `entry.otp` plus the raw custom properties and returns an
   `OtpMigration` (the `login.totp` value, the keys to drop, the keys to keep **hidden**, and warning strings the caller
   logs). Precedence: a non-blank `entry.otp` URI wins outright and the secret fields are then kept hidden rather than
