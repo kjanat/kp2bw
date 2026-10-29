@@ -4,6 +4,7 @@ All normal passes invoke the installed CLI. One fault-injected conversion
 acknowledges a replacement without storing it, to verify the old file survives.
 """
 
+import json
 import logging
 import os
 import tempfile
@@ -42,10 +43,26 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as directory:
         tmp = Path(directory)
         env = os.environ.copy()
-        env.update(BITWARDENCLI_APPDATA_DIR=str(tmp / "bw"), NODE_EXTRA_CA_CERTS=cert)
+        profile = os.environ.get("KP2BW_E2E_BW_PROFILE")
+        env.update(
+            BITWARDENCLI_APPDATA_DIR=profile or str(tmp / "bw"),
+            NODE_EXTRA_CA_CERTS=cert,
+        )
         env["BW_NOINTERACTION"] = "true"
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(env, email, password)
+        if profile:
+            # Reuse an authenticated test account without registering another
+            # device or triggering Cloud email verification on every run.
+            status = json.loads(_run(["bw", "status"], env=env))
+            assert status.get("serverUrl", "").rstrip("/") == server.rstrip("/"), (
+                "Saved CLI profile targets a different server"
+            )
+            assert status.get("userEmail", "").casefold() == email.casefold(), (
+                "Saved CLI profile belongs to a different test account"
+            )
+            _get_session(env, password)
+        else:
+            _run(["bw", "config", "server", server], env=env)
+            _login_session(env, email, password)
         source = tmp / "attachments.kdbx"
         db = create_database(source, password=kp_password)
         expected: dict[str, dict[str, str]] = {}
