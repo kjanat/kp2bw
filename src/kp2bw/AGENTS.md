@@ -110,14 +110,11 @@ src/kp2bw/
   `KP2BW_SYNC` against a freshly fetched full item and skips mismatches; unstamped legacy items remain eligible. It
   rechecks the outgoing full-object body against another fetch immediately before the `PUT`. Every transformed item is
   restamped, and a repeated pass writes nothing.
-- `--metadata` (default on) folds the KeePass metadata Bitwarden has no native slot for — **tags and expiry** — into a
-  single readable **YAML** `KP2BW_META` text field (`_build_metadata_field`, via PyYAML
-  `safe_dump(allow_unicode=
-  False)` so control chars and the U+0085/2028/2029 line-break code points are escaped, not
-  silently corrupted), omitted when an entry has neither (so most items get no metadata field at all).
-  `Created`/`Modified` timestamps are **not** migrated: Bitwarden manages its own creation/revision dates and the API
-  cannot backdate them (a client-supplied `creationDate` is ignored on create and rejected on update), so the originals
-  had no native home and were dropped rather than clutter every item.
+- `--metadata` (default on) writes KeePass tags and expiry as deterministic JSON in `KP2BW_META`, omitted
+  when both are absent. Existing YAML is upgraded by ordinary reconciliation without changing signature algorithms:
+  untouched stamps remain valid, manually edited items stay protected, and subsequent JSON reruns write nothing.
+  The historical REF shadow still reproduces YAML to recognize safe pre-fix output. Created/modified timestamps
+  are not migrated because Bitwarden owns its timestamps.
 - OTP lives in `otp.py`, which is pure: `resolve_otp()` takes `entry.otp` plus the raw custom properties and returns an
   `OtpMigration` (the `login.totp` value, the keys to drop, the keys to keep **hidden**, and warning strings the caller
   logs). Precedence: a non-blank `entry.otp` URI wins outright and the secret fields are then kept hidden rather than
@@ -168,5 +165,9 @@ src/kp2bw/
   `BitwardenServeExitedError` (a fatal `ConversionError`, not a recoverable `BitwardenClientError`), so item loops and
   gathered attachment tasks cannot turn a dead process into repeated per-item warnings. Diagnostics include the cached
   CLI version and compatibility link, never raw crash output. Live-process disconnects retain their retry policy.
+- Attachment batches serialize mutations by item ID, including repeated IDs in separate batch records, while retaining
+  cross-item concurrency. After all uploads finish, a sync and byte comparison verify acknowledged files. Missing,
+  unreadable, or mismatched files count as failures and prevent stale-copy deletion. Tests:
+  `tests/bw_serve_upload_batch_test.py`, `tests/e2e_attachment_batch_test.py`.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.

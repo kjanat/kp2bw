@@ -8,9 +8,12 @@ Protected members are exercised through a ``Converter`` subclass (mirroring
 ``convert_ref_resolution_test``) so the checks stay type-clean.
 """
 
+import copy
+import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from kp2bw._item_sync import stamp_content
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemCreate, BwItemResponse, BwUri
 from kp2bw.convert import AttachmentItem, Converter, FieldSpec
@@ -611,11 +614,62 @@ def assert_metadata_field_folds_tags_and_expiry() -> None:
     value, ftype = spec
     if ftype != 0:
         raise AssertionError(f"KP2BW_META must be a text field (type 0), got {ftype}")
-    # Readable YAML, byte-stable (sorted keys, KeePass tag order) so an unchanged
-    # re-run never looks "changed".
-    expected = "expires: '2025-01-01T00:00:00+00:00'\ntags:\n- b\n- a"
+    # Stable key order and original tag order make reruns byte-identical.
+    expected = '{"expires": "2025-01-01T00:00:00+00:00", "tags": ["b", "a"]}'
     if value != expected:
-        raise AssertionError(f"KP2BW_META YAML not as expected: {value!r}")
+        raise AssertionError(f"KP2BW_META JSON not as expected: {value!r}")
+
+
+def assert_yaml_metadata_upgrades_safely() -> None:
+    conv = UpdateTestConverter()
+    desired = _make_desired(
+        fields=[{"name": "KP2BW_META", "value": '{"tags": ["b", "a"]}', "type": 0}]
+    )
+    for stamped in (False, True):
+        existing = _make_existing(
+            fields=[{"name": "KP2BW_META", "value": "tags:\n- b\n- a", "type": 0}]
+        )
+        if stamped:
+            stamp_content(existing)
+        bw = FakeBw()
+        outcome, _, _ = conv.reconcile(
+            _as_bw(bw), existing, None, desired, [], fixed_coll_id=None
+        )
+        assert outcome == "updated" and len(bw.updates) == 1
+        updated = bw.updates[0][1]
+        assert updated["fields"][0]["value"] == desired["fields"][0]["value"]
+        rerun, _, _ = conv.reconcile(
+            _as_bw(bw), updated, None, desired, [], fixed_coll_id=None
+        )
+        assert rerun == "skipped" and len(bw.updates) == 1
+        if stamped:
+            edited = copy.deepcopy(existing)
+            edited["fields"][0]["value"] = "tags:\n- manually-edited"
+            outcome, _, _ = conv.reconcile(
+                _as_bw(bw), edited, None, desired, [], fixed_coll_id=None
+            )
+            assert outcome == "protected" and len(bw.updates) == 1
+        disabled = UpdateTestConverter(update_existing=False)
+        outcome, _, _ = disabled.reconcile(
+            _as_bw(bw), existing, None, desired, [], fixed_coll_id=None
+        )
+        assert outcome == "skipped" and len(bw.updates) == 1
+
+
+def assert_metadata_json_preserves_strings() -> None:
+    tags = [
+        "café",
+        "colon: value",
+        '"quoted"',
+        "line\nbreak",
+        "\x00\x85\u2028\u2029",
+        "true",
+        "2026-01-01",
+    ]
+    result = UpdateTestConverter().meta_field(_FakeEntry(tags=tags))
+    assert result is not None
+    assert result[0] is not None
+    assert json.loads(result[0]) == {"tags": tags}
 
 
 def assert_metadata_field_none_without_tags_or_expiry() -> None:
@@ -648,6 +702,8 @@ def main() -> None:
     assert_non_login_collision_is_not_mutated()
     assert_adoption_forces_stamp_put()
     assert_no_update_skips_forced_stamp()
+    assert_yaml_metadata_upgrades_safely()
+    assert_metadata_json_preserves_strings()
     assert_metadata_field_folds_tags_and_expiry()
     assert_metadata_field_none_without_tags_or_expiry()
     print("convert update test passed")

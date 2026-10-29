@@ -533,6 +533,8 @@ def _run_migration(
     kp_password: str,
     bw_password: str,
     env: dict[str, str],
+    *,
+    metadata: bool = False,
 ) -> str:
     """Run a single kp2bw migration pass against the snapshot."""
     return _run(
@@ -547,7 +549,7 @@ def _run_migration(
             bw_password,
             "--path-to-name-skip",
             "999",
-            "--no-metadata",
+            "--metadata" if metadata else "--no-metadata",
             "-y",
             "-v",
         ],
@@ -1131,10 +1133,18 @@ def main() -> None:
         if ref_v2_rerun != ref_v2:
             raise AssertionError("Updated REF re-run changed item revisions")
 
+        # Metadata has its own enabled passes after the metadata-free goldens.
+        from e2e_metadata_test import run_metadata_test
+
+        run_metadata_test(tmp, env, bw_password)
+
     # Scope fixtures run last so their org items do not enter personal goldens.
     from e2e_scope_test import main as run_scope_test
 
     run_scope_test()
+    from e2e_attachment_batch_test import main as run_attachment_batch_test
+
+    run_attachment_batch_test()
     print("vaultwarden end-to-end integration test passed")
 
 

@@ -30,6 +30,7 @@ with advantages over the built-in Bitwarden importer:
 - <details>
     <summary><b>Custom properties &amp; attachments</b></summary>
     Imported as Bitwarden custom fields or attachments (values &gt;10k chars auto-upload as files).
+    Uploads run serially per item and concurrently across items. Uploaded files are synced and downloaded to verify their bytes before success is reported or an old copy is deleted. A verification failure makes the migration exit nonzero and retains the old copy.
   </details>
 - <details>
     <summary><b>Long notes handling</b></summary>
@@ -53,7 +54,7 @@ with advantages over the built-in Bitwarden importer:
   </details>
 - <details>
     <summary><b>Metadata preservation</b></summary>
-    KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (YAML), omitted when an entry has neither. Created/modified timestamps are not migrated — Bitwarden manages its own creation/revision dates.
+    KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (JSON), omitted when an entry has neither. Existing YAML metadata upgrades on the next safe migration; manually edited items remain protected. Created/modified timestamps are not migrated — Bitwarden manages its own creation/revision dates.
   </details>
 - <details>
     <summary><b>Tag filtering</b></summary>

@@ -811,7 +811,11 @@ class BitwardenServeClient:
                 timeout=30,
                 stdin=subprocess.DEVNULL,
                 cwd=self._bw_cwd,
-                env={**os.environ, "_KP2BW_BW_PW": password},
+                env={
+                    **os.environ,
+                    "BW_NOINTERACTION": "true",
+                    "_KP2BW_BW_PW": password,
+                },
             )
         except FileNotFoundError as exc:
             # The resolved command (bw, or cmd.exe for a shim) could not be
@@ -879,7 +883,7 @@ class BitwardenServeClient:
         # Annotated so the type stays dict[str, str] after env.pop() below;
         # without it the inferred type widens and subprocess.Popen's overload
         # no longer resolves to Popen[bytes].
-        env: dict[str, str] = {**os.environ}
+        env: dict[str, str] = {**os.environ, "BW_NOINTERACTION": "true"}
         if session:
             env["BW_SESSION"] = session
         else:
@@ -1755,7 +1759,7 @@ class BitwardenServeClient:
         *,
         max_concurrency: int = 4,
     ) -> list[tuple[str, str]]:
-        """Upload all attachments with bounded parallelism.
+        """Upload serially per item, concurrently across items, then verify bytes.
 
         *items* is a list of ``(item_id, [(filename, data), ...])`` tuples.
 
@@ -1763,15 +1767,19 @@ class BitwardenServeClient:
         (empty list when all succeed).  The structured pairs let the caller
         pair a successful upload with the stale copy it replaces (so a
         content-changed attachment is only deleted once its replacement
-        landed).  Failures are **non-fatal**: a single rejected file must not
-        abort the whole migration and discard every other entry's progress.
+        landed and was read back after sync). Failures are **non-fatal**: a
+        single rejected file must not abort the whole migration and discard
+        every other entry's progress.
         """
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
         total = sum(len(atts) for _, atts in items)
         if total == 0:
             return []
 
         logger.info(f"Uploading {total} attachments (concurrency={max_concurrency})")
         sem = asyncio.Semaphore(max_concurrency)
+        item_locks = {item_id: asyncio.Lock() for item_id, _ in items}
 
         async def _upload_one(
             client: httpx.AsyncClient,
@@ -1779,7 +1787,9 @@ class BitwardenServeClient:
             filename: str,
             data: bytes,
         ) -> None:
-            async with sem:
+            # Acquire the item lock first: queued files for one item must not
+            # occupy all global slots and prevent other items making progress.
+            async with item_locks[item_id], sem:
                 await self.upload_attachment(client, item_id, filename, data)
 
         async with httpx.AsyncClient(
@@ -1810,6 +1820,13 @@ class BitwardenServeClient:
                 )
                 failed.append((item_id, filename))
 
+        # The CLI may acknowledge uploads that disappear after a vault sync.
+        # Verify after every writer has finished, before permitting stale-copy
+        # deletion. Run blocking HTTP work off the event loop, in one thread.
+        failed = await asyncio.to_thread(
+            self._verify_uploaded_attachments, items, failed
+        )
+
         succeeded = total - len(failed)
         if failed:
             logger.warning(
@@ -1817,6 +1834,61 @@ class BitwardenServeClient:
                 f"continuing with the remaining entries"
             )
         logger.info(f"Uploaded {succeeded}/{total} attachments")
+        return failed
+
+    def _verify_uploaded_attachments(
+        self,
+        items: list[tuple[str, list[tuple[str, bytes]]]],
+        failed: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        """Fail closed when a successful upload cannot be read back after sync."""
+        failures = set(failed)
+        pending = [
+            (item_id, filename, data)
+            for item_id, attachments in items
+            for filename, data in attachments
+            if (item_id, filename) not in failures
+        ]
+        if not pending:
+            return failed
+        try:
+            self.sync()
+        except (BitwardenClientError, httpx.HTTPError):
+            logger.error(
+                "Could not sync uploaded attachments for verification; retaining old copies"
+            )
+            return [*failed, *((item_id, filename) for item_id, filename, _ in pending)]
+
+        by_item: dict[str, BwItemResponse | None] = {}
+        for item_id, filename, desired in pending:
+            try:
+                if item_id not in by_item:
+                    # Cache failures too: don't repeat a failing item fetch for
+                    # every attachment, and never accept an unverified upload.
+                    by_item[item_id] = None
+                    by_item[item_id] = self.get_item(item_id)
+                item = by_item[item_id]
+                candidates = (
+                    []
+                    if item is None
+                    else [
+                        attachment["id"]
+                        for attachment in item.get("attachments") or []
+                        if attachment.get("fileName") == filename
+                        and attachment.get("id")
+                    ]
+                )
+                verified = any(
+                    self.get_attachment(item_id, attachment_id) == desired
+                    for attachment_id in candidates
+                )
+            except (BitwardenClientError, httpx.HTTPError):
+                verified = False
+            if not verified:
+                logger.error(
+                    f"Could not verify uploaded attachment {filename!r} on item {item_id}; retaining old copies"
+                )
+                failed.append((item_id, filename))
         return failed
 
     def upload_attachments(
