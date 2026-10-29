@@ -254,6 +254,11 @@ timeout with `KP2BW_HTTP_TIMEOUT` (seconds; default 180, capped at 3600) to let 
 
 See [TROUBLESHOOTING].
 
+## Security
+
+For supported versions and private vulnerability reporting, see the [security policy](SECURITY.md). Use synthetic
+fixtures and redact evidence; do not share real vaults, credentials or production attachments.
+
 [^offload]: Bitwarden has a 10k character limit for text fields.
 
     kp2bw can offload any field exceeding that limit (hidden OTP secrets, passkey attributes, KeePass-protected fields)
