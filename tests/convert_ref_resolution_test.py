@@ -930,7 +930,9 @@ def assert_strict_signature_ignores_fido_key_order() -> None:
         raise AssertionError("FIDO dictionary order changed the legacy signature")
 
 
-def assert_pre_fix_ref_output_upgrades_without_force() -> None:
+def assert_pre_fix_ref_output_upgrades_without_force(
+    *, with_metadata: bool = False
+) -> None:
     """Exact old URI-only output gains REF TOTP despite its known-stale stamp."""
     with tempfile.TemporaryDirectory(prefix="kp2bw-ref-upgrade-") as tmp_dir:
         db_path = str(Path(tmp_dir) / "upgrade.kdbx")
@@ -942,6 +944,10 @@ def assert_pre_fix_ref_output_upgrades_without_force() -> None:
             "shared-password",
             url="https://upgrade-target.example",
         )
+        if with_metadata:
+            target.tags = ["legacy", "metadata"]
+        else:
+            target.set_custom_property("KP2BW_META", "ordinary source text")
         alias = kp.add_entry(
             kp.root_group,
             "Upgrade Alias",
@@ -968,6 +974,15 @@ def assert_pre_fix_ref_output_upgrades_without_force() -> None:
     desired = items["Upgrade Target"]
     kp_uuid = _field(desired, "KP2BW_ID")["value"]
     initial_stamp, legacy_item = converter.legacy_output(kp_uuid)
+    if with_metadata:
+        assert (
+            _field(legacy_item, "KP2BW_META")["value"] == "tags:\n- legacy\n- metadata"
+        )
+        assert (
+            _field(desired, "KP2BW_META")["value"] == '{"tags": ["legacy", "metadata"]}'
+        )
+    else:
+        assert _field(legacy_item, "KP2BW_META")["value"] == "ordinary source text"
     if legacy_item["login"]["totp"] is not None:
         raise AssertionError("Simulated pre-fix REF output unexpectedly contains TOTP")
     if _field(legacy_item, KP2BW_SYNC_FIELD_NAME)["value"] != initial_stamp:
@@ -1315,6 +1330,7 @@ def main() -> None:
     assert_matching_ref_accepts_semantically_equal_totp()
     assert_strict_signature_ignores_fido_key_order()
     assert_pre_fix_ref_output_upgrades_without_force()
+    assert_pre_fix_ref_output_upgrades_without_force(with_metadata=True)
     assert_conflicting_ref_totp_creates_separate_item()
     assert_conflicting_ref_totp_is_order_independent()
     assert_legacy_ref_shadow_preserves_historical_order()

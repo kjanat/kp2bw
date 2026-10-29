@@ -51,7 +51,7 @@ with advantages over the built-in Bitwarden importer:
   </details>
 - <details>
     <summary><b>Metadata preservation</b></summary>
-    KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (YAML), omitted when an entry has neither. Created/modified timestamps are not migrated — Bitwarden manages its own creation/revision dates.
+    KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (JSON), omitted when an entry has neither. Existing YAML metadata upgrades on the next safe migration; manually edited items remain protected. Created/modified timestamps are not migrated — Bitwarden manages its own creation/revision dates.
   </details>
 - <details>
     <summary><b>Tag filtering</b></summary>
