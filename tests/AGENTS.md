@@ -30,6 +30,9 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - Integration expectations include idempotency (second run must not duplicate items).
 - The Vaultwarden E2E runs focused REF/TOTP/protected-field checks after golden snapshots, so those checks can mutate
   the vault without changing the comprehensive golden fixtures.
+- It then runs `e2e_scope_test.py`: `_scope_fixture.py` creates an ephemeral organization via the disposable server's
+  API, and the official CLI verifies fixed-collection import, URI reporting/migration, finalization, outside controls,
+  and unchanged reruns. This fixture uses the test account's PBKDF2 configuration and keeps generated keys in memory.
 - Fixtures are contract data; path and naming changes require docker + test updates together.
 
 ## GOLDEN SNAPSHOTS

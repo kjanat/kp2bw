@@ -145,7 +145,9 @@ src/kp2bw/
   replays the historical DFS/XML order so deterministic fresh ordering does not reject untouched old output.
 - Dedup is org-scoped when `--bitwarden-org` is set and collection-scoped when a fixed `--bitwarden-collection` is
   given: `_build_dedup_index()` / `list_items()` pass `organization_id` / `collection_id`. Personal vault (both `None`)
-  indexes all visible items.
+  indexes all visible items. `list_items()` locally intersects all supplied filters because the official CLI combines
+  them as a union; missing membership data is excluded from a constrained scope. All maintenance/reporting callers
+  share this boundary. Tests: `bw_serve_scope_test.py`, `e2e_scope_test.py`.
 - `bw serve` teardown is **port-based** on Windows: a shim-launched serve runs as a `node` grandchild that `taskkill /T`
   does not reliably reap, so `terminate_serve(port=)` / `close()` also kill whatever still `LISTEN`s on the serve port
   (`parse_listening_pids` → `_kill_port_listeners`). Without this, orphaned serves accumulate and deadlock the shared

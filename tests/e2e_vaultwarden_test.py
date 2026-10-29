@@ -144,10 +144,10 @@ def _bw_json(env: dict[str, str], *args: str) -> list[dict[str, JsonValue]]:
         data: JsonValue = json.loads(output)
     except json.JSONDecodeError as exc:
         raise AssertionError(
-            f"Expected JSON output from bw command {' '.join(args)}, got:\n{output}"
+            "Expected JSON output from bw command (output withheld)"
         ) from exc
     if not isinstance(data, list):
-        raise TypeError(f"Expected a JSON array from bw {' '.join(args)}")
+        raise TypeError("Expected a JSON array from bw (output withheld)")
     return [as_object(entry) for entry in data]
 
 
@@ -1128,6 +1128,10 @@ def main() -> None:
         if ref_v2_rerun != ref_v2:
             raise AssertionError("Updated REF re-run changed item revisions")
 
+    # Scope fixtures run last so their org items do not enter personal goldens.
+    from e2e_scope_test import main as run_scope_test
+
+    run_scope_test()
     print("vaultwarden end-to-end integration test passed")
 
 

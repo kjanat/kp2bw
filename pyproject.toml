@@ -45,7 +45,12 @@ dev     = [
   { include-group = "test" },
 ]
 codegen = ["datamodel-code-generator[ruff]>=0.31"]
-lint    = ["basedpyright>=1.38.1", "dprint-py>=0.53.1.0", "ruff>=0.15.2", "tombi>=0.7.32", "ty>=0.0.18"]
+lint    = [
+  "basedpyright>=1.38.1",
+  "ruff>=0.15.2",
+  "tombi>=0.7.32",
+  "ty>=0.0.18",
+]
 stubs   = ["pykeepass-stubs", "types-pyyaml>=6.0.12.20260518"]
 test    = ["coverage>=7.13.4", "pytest>=9.0.2", "pytest-cov>=7.0.0"]
 
