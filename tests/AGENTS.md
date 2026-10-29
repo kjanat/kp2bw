@@ -30,6 +30,10 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - Integration expectations include idempotency (second run must not duplicate items).
 - The Vaultwarden E2E runs focused REF/TOTP/protected-field checks after golden snapshots, so those checks can mutate
   the vault without changing the comprehensive golden fixtures.
+- It also runs `e2e_metadata_test.py` with metadata explicitly enabled: persisted JSON tags/expiry, untouched YAML
+  upgrades with and without sync stamps, protected metadata/notes edits, omitted empty metadata, and unchanged
+  revisions on reruns. Synthetic items are cleaned up by both unique name and source UUID. The standalone script
+  reuses `KP2BW_E2E_BW_PROFILE` after checking `BW_SERVER_URL` and `BW_TEST_EMAIL` against that saved profile.
 - It then runs `e2e_scope_test.py`: `_scope_fixture.py` creates an ephemeral organization via the disposable server's
   API, and the official CLI verifies fixed-collection import, URI reporting/migration, finalization, outside controls,
   and unchanged reruns. This fixture uses the test account's PBKDF2 configuration and keeps generated keys in memory.

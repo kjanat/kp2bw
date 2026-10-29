@@ -104,7 +104,7 @@
 			env: 'KP2BW_MIGRATE_METADATA',
 			default: 'On',
 			detail:
-				'Store tags and expiry in a readable YAML KP2BW_META custom field when present.',
+				'Store tags and expiry in a JSON KP2BW_META custom field when present.',
 		},
 		{
 			flag: '--include-oversize-secrets',
