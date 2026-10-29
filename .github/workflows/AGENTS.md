@@ -23,7 +23,8 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 - Preserve workflow output keys from check jobs (`name`, `version`, `pypi_url`) and downstream references.
 - Keep main publish gated by `integration-docker.yml` (`needs: [check, integration]`).
 - Preserve smoke tests from built artifacts before `uv publish`.
-- Keep stubs `dry` guard behavior in publish step; root workflow `dry` is currently informational.
+- Stubs build/smoke validation runs without a deployment environment or OIDC write permission. The protected publish
+  job is skipped for dry dispatches and consumes the exact validated artifact ID; root workflow `dry` is informational.
 
 ## ANTI-PATTERNS
 
