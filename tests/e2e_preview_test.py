@@ -41,6 +41,7 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
         )
 
     def preview(expected: str) -> MigrationPreview:
+        print(f"Checking read-only preview: {expected}", flush=True)
         source_before = source.read_bytes()
         checkpoint_before = {
             p.name: p.read_bytes() for p in tmp.glob("*checkpoint*") if p.is_file()
@@ -72,7 +73,10 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 report = converter().preview(bw)
                 assert not report.blockers
                 assert len(report.entries) == 1
-                assert report.entries[0].outcome == expected
+                assert report.entries[0].outcome == expected, (
+                    report.entries[0].outcome,
+                    report.entries[0].blockers,
+                )
                 assert not report.entries[0].blockers
                 bw.sync(force=True)
                 after = {
@@ -101,7 +105,7 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
     db.save()
     planned = preview("update")
     assert planned.entries[0].uploads == 1
-    run_crash("after-upload", source, checkpoint, env)
+    run_crash("after-upload", source, checkpoint, {**env, "BW_TEST_PASSWORD": password})
     resumed = preview("update")
     assert resumed.entries[0].uploads == 0, "Completed upload should be adopted"
     assert resumed.entries[0].attachments == planned.entries[0].attachments

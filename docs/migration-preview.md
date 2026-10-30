@@ -4,7 +4,7 @@ Read your KeePass database and inspect the conversion without opening Bitwarden:
 
 ```sh
 kp2bw vault.kdbx --preview
-kp2bw vault.kdbx --preview json > migration-plan.json
+kp2bw vault.kdbx --preview json >migration-plan.json
 ```
 
 The preview uses the same source conversion as migration. It lists source UUIDs, destination item types, native field

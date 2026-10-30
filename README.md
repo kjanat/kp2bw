@@ -128,19 +128,19 @@ bw status | jq . # jq optional but makes it easier to read the JSON output
 
 ## Usage
 
-```pwsh
+```text
 kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
-       [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
-       [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
-       [--include-recycle-bin | --no-include-recycle-bin]
-       [--entry-id UUID] [--item-id UUID]
-       [--metadata | --no-metadata] [--update | --no-update] [--force-update]
-       [--map-templates] [--template-map JSON] [--ssh-map JSON]
-       [--include-oversize-secrets] [--folder | --no-folder] [--uri-match MODE]
-       [--totp-pps | --no-totp-pps]
-       [--interpret-uri-syntax | --no-interpret-uri-syntax]
-       [--migrate-uris] [--report-uris SOURCE] [--strip-ids] [-y] [-v] [-d]
-       [FILE]
+[-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
+[--path-to-name-skip N] [--skip-expired | --no-skip-expired]
+[--include-recycle-bin | --no-include-recycle-bin]
+[--entry-id UUID] [--item-id UUID]
+[--metadata | --no-metadata] [--update | --no-update] [--force-update]
+[--map-templates] [--template-map JSON] [--ssh-map JSON]
+[--include-oversize-secrets] [--folder | --no-folder] [--uri-match MODE]
+[--totp-pps | --no-totp-pps]
+[--interpret-uri-syntax | --no-interpret-uri-syntax]
+[--migrate-uris] [--report-uris SOURCE] [--strip-ids] [-y] [-v] [-d]
+[FILE]
 ```
 
 | Flag                                     | Description                                                                                                                                                                                         | Env var                               |
@@ -255,7 +255,7 @@ re-runs so nothing duplicates. Once you're satisfied the migration is complete a
 Bitwarden, run
 
 ```bash
-kp2bw --strip-ids            # personal vault; add -o/-c to scope to an org/collection
+kp2bw --strip-ids # personal vault; add -o/-c to scope to an org/collection
 ```
 
 to remove migration stamps and attachment associations from every migrated item and exit. No KeePass database is read.
