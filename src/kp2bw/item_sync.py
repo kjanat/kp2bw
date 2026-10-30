@@ -4,7 +4,6 @@ import hashlib
 import re
 from typing import Literal
 
-from ._history import has_managed_history, history_signature
 from .bw_types import (
     BwFido2Credential,
     BwField,
@@ -12,17 +11,18 @@ from .bw_types import (
     BwItemLogin,
     BwItemResponse,
 )
+from .history import has_managed_history, history_signature
 
 KP2BW_ID_FIELD_NAME: str = "KP2BW_ID"
 KP2BW_SYNC_FIELD_NAME: str = "KP2BW_SYNC"
 BW_B64_CREDENTIAL_ID_PREFIX: str = "b64."
 
-_MANAGED_FIELD_NAMES: frozenset[str] = frozenset({
+MANAGED_FIELD_NAMES: frozenset[str] = frozenset({
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
 })
 
-_UUID_CREDENTIAL_ID = re.compile(
+UUID_CREDENTIAL_ID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
 
@@ -35,12 +35,12 @@ def mark_credential_id(credential_id: str) -> str:
     """Prefix a base64url credential ID with Bitwarden's ``b64.`` marker."""
     if credential_id.startswith(
         BW_B64_CREDENTIAL_ID_PREFIX
-    ) or _UUID_CREDENTIAL_ID.match(credential_id):
+    ) or UUID_CREDENTIAL_ID.match(credential_id):
         return credential_id
     return f"{BW_B64_CREDENTIAL_ID_PREFIX}{credential_id}"
 
 
-def _legacy_fields_signature(
+def legacy_fields_signature(
     fields: list[BwField] | None,
 ) -> list[tuple[str, str, int]]:
     """Return the signature emitted before linked fields were covered."""
@@ -48,7 +48,7 @@ def _legacy_fields_signature(
         (
             (field.get("name") or "", field.get("value") or "", field.get("type") or 0)
             for field in (fields or [])
-            if (field.get("name") or "") not in _MANAGED_FIELD_NAMES
+            if (field.get("name") or "") not in MANAGED_FIELD_NAMES
         ),
         key=lambda value: (value[0], value[2], value[1]),
     )
@@ -67,7 +67,7 @@ def fields_signature(
                 field.get("linkedId"),
             )
             for field in (fields or [])
-            if (field.get("name") or "") not in _MANAGED_FIELD_NAMES
+            if (field.get("name") or "") not in MANAGED_FIELD_NAMES
         ),
         key=lambda value: (
             value[0],
@@ -78,7 +78,7 @@ def fields_signature(
     )
 
 
-def _legacy_login_signature(
+def legacy_login_signature(
     login: BwItemLogin | None,
 ) -> tuple[str, str, str, list[str]]:
     """Return the signature emitted before URI match modes were covered."""
@@ -106,7 +106,7 @@ def login_signature(
     )
 
 
-def _fido2_credential_signature(
+def fido2_credential_signature(
     credential: BwFido2Credential, *, mark_id: bool
 ) -> Fido2CredentialSignature:
     """Return the signature of one passkey, optionally with its ID marked."""
@@ -122,7 +122,7 @@ def _fido2_credential_signature(
     )
 
 
-def _fido2_credentials(
+def fido2_credentials(
     item: BwItemResponse | BwItemCreate,
 ) -> list[BwFido2Credential]:
     """Return the item's passkeys, or an empty list without a login."""
@@ -137,12 +137,12 @@ def fido2_signature(login: BwItemLogin | None) -> Fido2Signature:
     if login is None:
         return []
     return sorted(
-        _fido2_credential_signature(credential, mark_id=False)
+        fido2_credential_signature(credential, mark_id=False)
         for credential in (login.get("fido2Credentials") or [])
     )
 
 
-def _content_parts(
+def content_parts(
     item: BwItemResponse | BwItemCreate,
 ) -> tuple[
     str,
@@ -186,7 +186,7 @@ def content_signature(item: BwItemResponse | BwItemCreate) -> str:
             else native_content
         )
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
-    parts = _content_parts(item)
+    parts = content_parts(item)
     fido2 = fido2_signature(item.get("login"))
     content = (*parts, fido2) if fido2 else parts
     blob = repr(
@@ -197,13 +197,13 @@ def content_signature(item: BwItemResponse | BwItemCreate) -> str:
 
 def pre_fido2_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     """Return the 3.8.1 signature, which did not cover passkeys."""
-    blob = repr(_content_parts(item))
+    blob = repr(content_parts(item))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def pre_history_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     """Return the signature before native history became part of item content."""
-    parts = _content_parts(item)
+    parts = content_parts(item)
     fido2 = fido2_signature(item.get("login"))
     return hashlib.sha256(
         repr((*parts, fido2) if fido2 else parts).encode("utf-8")
@@ -227,8 +227,8 @@ def legacy_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     blob = repr((
         item.get("name") or "",
         item.get("notes") or "",
-        _legacy_fields_signature(item.get("fields")),
-        _legacy_login_signature(item.get("login")),
+        legacy_fields_signature(item.get("fields")),
+        legacy_login_signature(item.get("login")),
     ))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -261,7 +261,7 @@ def legacy_extensions_are_ambiguous(
     """Return whether an older stamp omitted live values that cannot be verified."""
     if generation == "current":
         return False
-    if _fido2_credentials(item):
+    if fido2_credentials(item):
         return True
     if generation != "legacy":
         return False
@@ -274,18 +274,18 @@ def legacy_extensions_are_ambiguous(
     )
 
 
-def _fido2_differs(
+def fido2_differs(
     existing: BwItemResponse, desired: BwItemCreate | BwItemResponse
 ) -> bool:
     """Compare passkeys, accepting an existing ID with or without its marker."""
-    existing_fido2 = _fido2_credentials(existing)
+    existing_fido2 = fido2_credentials(existing)
     desired_fido2 = fido2_signature(desired.get("login"))
     if len(existing_fido2) != len(desired_fido2):
         return True
     desired_set = set(desired_fido2)
     return any(
-        _fido2_credential_signature(credential, mark_id=False) not in desired_set
-        and _fido2_credential_signature(credential, mark_id=True) not in desired_set
+        fido2_credential_signature(credential, mark_id=False) not in desired_set
+        and fido2_credential_signature(credential, mark_id=True) not in desired_set
         for credential in existing_fido2
     )
 
@@ -298,18 +298,18 @@ def legacy_extensions_differ(
     """Compare values an older stamp omitted that can be aligned under it."""
     if generation is None or generation == "current":
         return False
-    if _fido2_differs(existing, desired):
+    if fido2_differs(existing, desired):
         return True
     if generation != "legacy":
         return False
 
-    def _linked_ids(
+    def linked_ids(
         item: BwItemResponse | BwItemCreate,
     ) -> dict[tuple[str, str, int], list[int | None]]:
         result: dict[tuple[str, str, int], list[int | None]] = {}
         for field in item.get("fields") or []:
             name = field.get("name") or ""
-            if name in _MANAGED_FIELD_NAMES:
+            if name in MANAGED_FIELD_NAMES:
                 continue
             if field.get("type") != 3 and field.get("linkedId") is None:
                 continue
@@ -317,7 +317,7 @@ def legacy_extensions_differ(
             result.setdefault(key, []).append(field.get("linkedId"))
         return result
 
-    def _uri_matches(
+    def uri_matches(
         item: BwItemResponse | BwItemCreate,
     ) -> dict[str, list[int | None]]:
         result: dict[str, list[int | None]] = {}
@@ -326,8 +326,8 @@ def legacy_extensions_differ(
             result.setdefault(uri.get("uri", ""), []).append(uri.get("match"))
         return result
 
-    existing_fields = _linked_ids(existing)
-    desired_fields = _linked_ids(desired)
+    existing_fields = linked_ids(existing)
+    desired_fields = linked_ids(desired)
     if existing_fields.keys() != desired_fields.keys():
         return True
     if any(
@@ -336,8 +336,8 @@ def legacy_extensions_differ(
     ):
         return True
 
-    existing_uris = _uri_matches(existing)
-    desired_uris = _uri_matches(desired)
+    existing_uris = uri_matches(existing)
+    desired_uris = uri_matches(desired)
     if existing_uris.keys() != desired_uris.keys():
         return True
     return any(

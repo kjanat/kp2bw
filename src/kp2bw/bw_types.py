@@ -1,6 +1,6 @@
 """Bitwarden API types.
 
-``_bw_api_types`` is auto-generated from ``specs/vault-management-api.json``
+``bw_api_types`` is auto-generated from ``specs/vault-management-api.json``
 via ``scripts/generate-bw-types.sh`` — never edit it by hand.
 
 This module re-exports those types and supplements with three categories of
@@ -18,7 +18,7 @@ things the upstream spec cannot express:
 
 from typing import Literal, NotRequired, TypedDict
 
-from ._bw_api_types import (
+from .bw_api_types import (
     Group,
     ItemCard,
     ItemIdentity,
@@ -155,7 +155,7 @@ class BwPasswordHistory(TypedDict):
     lastUsedDate: str | None
 
 
-class _BwItemCommon(TypedDict):
+class BwItemCommon(TypedDict):
     """Fields shared across both the create payload and every API response.
 
     ``notes`` and ``collectionIds`` are typed nullable because ``bw serve``
@@ -186,7 +186,7 @@ class _BwItemCommon(TypedDict):
     passwordHistory: NotRequired[list[BwPasswordHistory] | None]
 
 
-class BwItemCreate(_BwItemCommon):
+class BwItemCreate(BwItemCommon):
     """Payload for ``POST /object/item`` and ``PUT /object/item/{id}``.
 
     Parsing retains the source login for REF resolution and provenance, even
@@ -197,7 +197,7 @@ class BwItemCreate(_BwItemCommon):
     login: BwItemLogin
 
 
-class BwItemResponse(_BwItemCommon):
+class BwItemResponse(BwItemCommon):
     """Item returned by ``GET /list/object/items`` and ``POST /object/item``.
 
     Server appends ``id``, ``object``, ``revisionDate`` to the template shape.

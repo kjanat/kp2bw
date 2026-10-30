@@ -8,12 +8,14 @@ from unittest.mock import patch
 import httpx
 
 from kp2bw import cli
-from kp2bw._item_sync import stamp_content
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.item_sync import stamp_content
 
 
-def _item(item_id: str, org: str | None, collections: list[str]) -> BwItemResponse:
+def unused_item(
+    item_id: str, org: str | None, collections: list[str]
+) -> BwItemResponse:
     item = cast(
         BwItemResponse,
         {
@@ -39,17 +41,17 @@ def _item(item_id: str, org: str | None, collections: list[str]) -> BwItemRespon
     return item
 
 
-class _ScopeClient(BitwardenServeClient):
+class ScopeClient(BitwardenServeClient):
     def __init__(self, *, reverse: bool = False) -> None:
-        self._org_id = "org"
-        self._collection_id = "inside"
-        self._folders = {}
+        self.organization_id = "org"
+        self.collection_id = "inside"
+        self.folder_cache = {}
         items = [
-            _item("inside", "org", ["inside"]),
-            _item("outside", "org", ["outside"]),
-            _item("other-org", "other", ["inside"]),
-            _item("personal", None, []),
-            _item("missing", None, []),
+            unused_item("inside", "org", ["inside"]),
+            unused_item("outside", "org", ["outside"]),
+            unused_item("other-org", "other", ["inside"]),
+            unused_item("personal", None, []),
+            unused_item("missing", None, []),
         ]
         items[-1] = cast(
             BwItemResponse,
@@ -61,11 +63,11 @@ class _ScopeClient(BitwardenServeClient):
         )
         self.items = list(reversed(items)) if reverse else items
         self.writes: list[str] = []
-        self._http = httpx.Client(
-            base_url="http://localhost", transport=httpx.MockTransport(self._respond)
+        self.http = httpx.Client(
+            base_url="http://localhost", transport=httpx.MockTransport(self.respond)
         )
 
-    def _respond(self, request: httpx.Request) -> httpx.Response:
+    def respond(self, request: httpx.Request) -> httpx.Response:
         if request.method != "GET":
             raise AssertionError(f"Unexpected request method: {request.method}")
         # Deliberately return the union even for specific query parameters.
@@ -95,12 +97,12 @@ class _ScopeClient(BitwardenServeClient):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        self._http.close()
+        self.http.close()
 
 
 def main() -> None:
     for reverse in (False, True):
-        with _ScopeClient(reverse=reverse) as client:
+        with ScopeClient(reverse=reverse) as client:
             assert len(client.list_items()) == 5
             assert {i["id"] for i in client.list_items(organization_id="org")} == {
                 "inside",
@@ -111,7 +113,7 @@ def main() -> None:
                 "other-org",
             }
             assert client.list_items(folder_id="absent", organization_id="org") == []
-            client._build_dedup_index()
+            client.build_dedup_index()
             match = client.get_item_by_uuid("shared-source-uuid")
             assert match is not None and match["id"] == "inside"
             outside = copy.deepcopy(client.items)
@@ -122,7 +124,7 @@ def main() -> None:
             assert [i for i in client.items if i["id"] != "inside"] == [
                 i for i in outside if i["id"] != "inside"
             ]
-        with _ScopeClient(reverse=reverse) as client:
+        with ScopeClient(reverse=reverse) as client:
             outside = copy.deepcopy(client.items)
             client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
             client.migrate_url_fields_to_uris(plain_match=0, interpret_syntax=True)
@@ -130,12 +132,12 @@ def main() -> None:
             assert [i for i in client.items if i["id"] != "inside"] == [
                 i for i in outside if i["id"] != "inside"
             ]
-        with _ScopeClient(reverse=reverse) as client:
+        with ScopeClient(reverse=reverse) as client:
             with (
                 patch.object(cli, "BitwardenServeClient", return_value=client),
-                patch.object(cli, "_print_uri_report") as report,
+                patch.object(cli, "print_uri_report") as report,
             ):
-                cli._run_report_uris_bitwarden(
+                cli.run_report_uris_bitwarden(
                     bitwarden_password_arg="synthetic",
                     org_id="org",
                     collection_id="inside",

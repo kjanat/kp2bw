@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from _scope_fixture import create_scope_organization
-from e2e_vaultwarden_test import _bw_json, _get_session, _login_session, _run
+from e2e_vaultwarden_test import bw_json, get_session, login_session, run
 from pykeepass import create_database
+from scope_fixture import create_scope_organization
 
-from kp2bw._item_sync import stamp_content
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemCreate, BwItemResponse
+from kp2bw.item_sync import stamp_content
 
 
 def main() -> None:
@@ -34,8 +34,8 @@ def main() -> None:
             NODE_EXTRA_CA_CERTS=str(cert),
             KP2BW_BITWARDEN_PASSWORD=password,
         )
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(env, email, password)
+        run(["bw", "config", "server", server], env=env)
+        login_session(env, email, password)
         source = tmp / "scope.kdbx"
         db = create_database(source, password="synthetic-keepass-password")
         entry = db.add_entry(
@@ -72,11 +72,11 @@ def main() -> None:
                 ids.append(bw.create_item(cast(BwItemCreate, item)))
 
         def read_items() -> dict[str, BwItemResponse]:
-            session = _get_session(env, password)
-            _run(["bw", "sync", "--session", session], env=env)
+            session = get_session(env, password)
+            run(["bw", "sync", "--session", session], env=env)
             return {
                 str(item["id"]): cast(BwItemResponse, item)
-                for item in _bw_json(env, "list", "items", "--session", session)
+                for item in bw_json(env, "list", "items", "--session", session)
             }
 
         original = read_items()
@@ -90,13 +90,13 @@ def main() -> None:
             "999",
             "--no-metadata",
         ]
-        _run(import_command, env=env)
+        run(import_command, env=env)
         imported = read_items()
         assert imported[ids[0]]["name"] == "A imported"
         assert imported[ids[1]] == original[ids[1]], (
             "Import changed the outside control"
         )
-        _run(import_command, env=env)
+        run(import_command, env=env)
         assert read_items() == imported, "Unchanged scoped import wrote an item"
 
         # Seed distinct reporting domains and legacy fields after import, then
@@ -126,12 +126,12 @@ def main() -> None:
                 stamp_content(item)
                 bw.update_item(item_id, item)
         before = read_items()
-        report = _run([*command, "--report-uris", "bitwarden"], env=env)
+        report = run([*command, "--report-uris", "bitwarden"], env=env)
         assert (
             "inside-scope.example" in report and "outside-scope.example" not in report
         )
         assert read_items() == before, "Reporting changed vault content"
-        _run([*command, "--migrate-uris"], env=env)
+        run([*command, "--migrate-uris"], env=env)
         migrated = read_items()
         assert migrated[ids[1]] == before[ids[1]], (
             "URI migration changed the outside control"
@@ -139,9 +139,9 @@ def main() -> None:
         assert not any(
             f.get("name") == "KP2A_URL" for f in migrated[ids[0]].get("fields") or []
         )
-        _run([*command, "--migrate-uris"], env=env)
+        run([*command, "--migrate-uris"], env=env)
         assert read_items() == migrated, "Repeated URI migration wrote an item"
-        _run([*command, "--strip-ids"], env=env)
+        run([*command, "--strip-ids"], env=env)
         stripped = read_items()
         assert stripped[ids[1]] == before[ids[1]], (
             "Finalization changed the outside control"
@@ -150,7 +150,7 @@ def main() -> None:
             f.get("name") in {"KP2BW_ID", "KP2BW_SYNC"}
             for f in stripped[ids[0]].get("fields") or []
         )
-        _run([*command, "--strip-ids"], env=env)
+        run([*command, "--strip-ids"], env=env)
         assert read_items() == stripped, "Repeated finalization wrote an item"
     print("live organization/collection scope regression passed")
 

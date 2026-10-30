@@ -6,10 +6,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from e2e_vaultwarden_test import _login_session, _run, _run_migration
+from e2e_vaultwarden_test import login_session, run, run_migration
 from pykeepass import create_database
 
-from kp2bw._attachments import records_from_fields, source_file
+from kp2bw.attachments import records_from_fields, source_file
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.convert import Converter
 from kp2bw.exceptions import BitwardenClientError
@@ -32,12 +32,12 @@ def main() -> None:
             BW_NOINTERACTION="true",
         )
         if env.get("KP2BW_E2E_BW_PROFILE"):
-            status = json.loads(_run(["bw", "status"], env=env))
+            status = json.loads(run(["bw", "status"], env=env))
             assert status.get("serverUrl", "").rstrip("/") == server.rstrip("/")
             assert status.get("userEmail", "").casefold() == email.casefold()
         else:
-            _run(["bw", "config", "server", server], env=env)
-            _login_session(env, email, password)
+            run(["bw", "config", "server", server], env=env)
+            login_session(env, email, password)
         source = tmp / "collisions.kdbx"
         db = create_database(source, password="synthetic")
         entry = db.add_entry(db.root_group, "Attachment collisions", "user", "pw")
@@ -62,7 +62,7 @@ def main() -> None:
         db.save()
 
         def migrate() -> None:
-            _run_migration(source, "synthetic", password, env)
+            run_migration(source, "synthetic", password, env)
 
         def verify() -> tuple[str, dict[str, str]]:
             with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
@@ -192,7 +192,7 @@ def main() -> None:
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
             item = bw.get_item_by_uuid(entry.uuid.hex.upper())
             assert item is not None
-            bw._request("DELETE", f"/object/item/{item['id']}")
+            bw.request("DELETE", f"/object/item/{item['id']}")
     print("attachment collision, identity and replacement round trips passed")
 
 

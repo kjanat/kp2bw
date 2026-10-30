@@ -10,11 +10,11 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pykeepass import create_database
 
-from kp2bw._item_sync import content_signature
-from kp2bw._ssh_mapping import apply_ssh_rule, parse_ssh_rules
 from kp2bw.bw_types import BwItemResponse
 from kp2bw.convert import Converter
 from kp2bw.exceptions import BitwardenClientError
+from kp2bw.item_sync import content_signature
+from kp2bw.ssh_mapping import apply_ssh_rule, parse_ssh_rules
 
 
 def main() -> None:
@@ -70,14 +70,14 @@ def main() -> None:
             ssh_rules=rules,
         )
         with patch.object(
-            converter, "_create_bitwarden_items_for_entries", return_value=0
+            converter, "create_bitwarden_items_for_entries", return_value=0
         ):
             assert converter.convert() == 0
-        item = converter._unpack_entry(converter._entries[entry.uuid.hex.upper()])[2]
+        item = converter.unpack_entry(converter.entries[entry.uuid.hex.upper()])[2]
         assert item["type"] == 5 and item.get("sshKey")
-        alias_item = converter._unpack_entry(
-            converter._entries[alias.uuid.hex.upper()]
-        )[2]
+        alias_item = converter.unpack_entry(converter.entries[alias.uuid.hex.upper()])[
+            2
+        ]
         assert alias_item["type"] == 1
         assert alias_item["login"]["username"] == "user"
         assert alias_item["login"]["password"] == "password"
@@ -86,7 +86,7 @@ def main() -> None:
         ]
 
         assert (
-            converter._unpack_entry(converter._entries[ordinary.uuid.hex.upper()])[2][
+            converter.unpack_entry(converter.entries[ordinary.uuid.hex.upper()])[2][
                 "type"
             ]
             == 1
@@ -101,7 +101,7 @@ def main() -> None:
         ssh = existing.get("sshKey")
         assert ssh is not None
         ssh["publicKey"] += " changed"
-        assert converter._is_user_modified(existing)
+        assert converter.is_user_modified(existing)
         client = MagicMock()
         client.require_ssh_supported.side_effect = BitwardenClientError(
             "Organization policy forbids SSH items"
@@ -109,7 +109,7 @@ def main() -> None:
         with patch("kp2bw.convert.BitwardenServeClient") as factory:
             factory.return_value.__enter__.return_value = client
             try:
-                converter._create_bitwarden_items_for_entries()
+                converter.create_bitwarden_items_for_entries()
             except BitwardenClientError:
                 pass
             else:
@@ -117,7 +117,7 @@ def main() -> None:
         assert client.mock_calls == [call.require_ssh_supported()], (
             "Policy rejection must precede all folder, collection and item operations"
         )
-        fallback = converter._create_bw_python_object("Broken", "", "", "", "", "", {})
+        fallback = converter.create_bw_python_object("Broken", "", "", "", "", "", {})
         source = "unsupported private format " * 1000
         files, warnings = apply_ssh_rule(fallback, {"Private Key": source}, rules[0])
         assert fallback["type"] == 1 and warnings and len(files) == 1

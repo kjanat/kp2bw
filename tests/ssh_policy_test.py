@@ -1,11 +1,11 @@
 """SSH policy decisions match membership and target-vault restrictions."""
 
-from kp2bw._ssh_policy import (
+from kp2bw.exceptions import BitwardenClientError
+from kp2bw.ssh_policy import (
     PolicyObject,
     require_item_policy_allowed,
     require_ssh_policy_allowed,
 )
-from kp2bw.exceptions import BitwardenClientError
 
 
 def main() -> None:

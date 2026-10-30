@@ -12,12 +12,12 @@ from pathlib import Path
 from typing import Never
 from unittest.mock import patch
 
-from e2e_vaultwarden_test import _run
+from e2e_vaultwarden_test import run
 from pykeepass import create_database
 
-from kp2bw._attachments import AttachmentPlan
-from kp2bw._checkpoint import CheckpointRecord
+from kp2bw.attachments import AttachmentPlan
 from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw.checkpoint import CheckpointRecord
 from kp2bw.convert import Converter
 
 
@@ -39,15 +39,15 @@ def converter_for(source: Path, checkpoint: Path, password: str) -> Converter:
 
 def crash_migration(mode: str, source: Path, checkpoint: Path) -> None:
     original_upload = BitwardenServeClient.upload_attachments
-    original_persist = Converter._persist_attachment_plan
+    original_persist = Converter.persist_attachment_plan
     original_delete = BitwardenServeClient.delete_attachment
-    original_start = BitwardenServeClient._start_serve
+    original_start = BitwardenServeClient.start_serve
     servers: list[subprocess.Popen[bytes]] = []
 
     def start(client: BitwardenServeClient, session: str | None) -> None:
         original_start(client, session)
-        assert client._process is not None
-        servers.append(client._process)
+        assert client.serve_process is not None
+        servers.append(client.serve_process)
 
     def crash() -> Never:
         for server in servers:
@@ -88,9 +88,9 @@ def crash_migration(mode: str, source: Path, checkpoint: Path) -> None:
             crash()
 
     with (
-        patch.object(BitwardenServeClient, "_start_serve", start),
+        patch.object(BitwardenServeClient, "start_serve", start),
         patch.object(BitwardenServeClient, "upload_attachments", upload),
-        patch.object(Converter, "_persist_attachment_plan", persist),
+        patch.object(Converter, "persist_attachment_plan", persist),
         patch.object(BitwardenServeClient, "delete_attachment", delete),
     ):
         result = converter_for(
@@ -282,7 +282,7 @@ def main() -> None:
     env = os.environ.copy()
     env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
     env["BW_NOINTERACTION"] = "true"
-    status = json.loads(_run(["bw", "status"], env=env))
+    status = json.loads(run(["bw", "status"], env=env))
     assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")
     assert status.get("userEmail", "").casefold() == env["BW_TEST_EMAIL"].casefold()
     with tempfile.TemporaryDirectory() as directory:

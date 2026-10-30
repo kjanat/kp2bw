@@ -21,7 +21,7 @@ class SshConversion:
     reason: str | None = None
 
 
-def _openssh_private(key: SupportedPrivateKey, public_blob: bytes) -> str:
+def openssh_private(key: SupportedPrivateKey, public_blob: bytes) -> str:
     """Emit a stable unencrypted OpenSSH representation for unchanged reruns.
 
     OpenSSH's two equal check integers detect corruption; they are not a salt
@@ -109,7 +109,7 @@ def convert_ssh_key(
         )
     return SshConversion(
         BwSshKey(
-            privateKey=_openssh_private(key, public_blob),
+            privateKey=openssh_private(key, public_blob),
             publicKey=derived.decode("ascii"),
             keyFingerprint=derived_fingerprint,
         )

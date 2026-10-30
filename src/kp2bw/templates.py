@@ -8,22 +8,22 @@ from dataclasses import dataclass
 from typing import Literal, cast
 from uuid import UUID
 
-from ._attachments import ATTACHMENT_FIELD_PREFIX
-from ._item_sync import stamp_content
-from ._source_fields import RESERVED_FIELD_NAMES, source_field_origin
+from .attachments import ATTACHMENT_FIELD_PREFIX
 from .bw_types import BwField, BwItemCreate, ItemCard, ItemIdentity
 from .exceptions import ConversionError
+from .item_sync import stamp_content
+from .source_fields import RESERVED_FIELD_NAMES, source_field_origin
 
 type TemplateKind = Literal["card", "identity", "secureNote"]
 
 # Stable identifiers from Keepass2Android's AddTemplateEntries.cs. Template
 # titles and field labels are translated; these identifiers are not.
-_DEFAULT_TYPES: dict[str, TemplateKind] = {
+DEFAULT_TYPES: dict[str, TemplateKind] = {
     "49DD48DBFF149445B3392CE90EA75309": "card",
     "A7B525BD0CECC84EB9F0CEDC0B49B5B8": "identity",
     "10F8C25C26AE9B49A47FDA7CDACACEE2": "secureNote",
 }
-_CARD_FIELDS = frozenset({
+CARD_FIELDS = frozenset({
     "cardholderName",
     "brand",
     "number",
@@ -31,7 +31,7 @@ _CARD_FIELDS = frozenset({
     "expYear",
     "code",
 })
-_IDENTITY_FIELDS = frozenset({
+IDENTITY_FIELDS = frozenset({
     "title",
     "firstName",
     "middleName",
@@ -53,7 +53,7 @@ _IDENTITY_FIELDS = frozenset({
 })
 
 
-def _key(value: str) -> str:
+def key(value: str) -> str:
     return "".join(
         c for c in unicodedata.normalize("NFKC", value).casefold() if c.isalnum()
     )
@@ -113,9 +113,9 @@ def parse_template_overrides(value: object) -> dict[str, TemplateRule]:
                 "Template fields must map source names to native field names"
             )
         allowed: frozenset[str] = (
-            _CARD_FIELDS
+            CARD_FIELDS
             if kind == "card"
-            else _IDENTITY_FIELDS
+            else IDENTITY_FIELDS
             if kind == "identity"
             else frozenset()
         )
@@ -137,7 +137,7 @@ def parse_template_overrides(value: object) -> dict[str, TemplateRule]:
 
 def recognize_template(identifier: str, title: str) -> TemplateKind | None:
     """Classify a referenced template, never an ordinary entry's title."""
-    if kind := _DEFAULT_TYPES.get(identifier):
+    if kind := DEFAULT_TYPES.get(identifier):
         return kind
     titles: dict[str, TemplateKind] = {
         "creditcard": "card",
@@ -149,10 +149,10 @@ def recognize_template(identifier: str, title: str) -> TemplateKind | None:
         "note": "secureNote",
         "notes": "secureNote",
     }
-    return titles.get(_key(title))
+    return titles.get(key(title))
 
 
-def _aliases(kind: TemplateKind) -> dict[str, str]:
+def template_aliases(kind: TemplateKind) -> dict[str, str]:
     groups: dict[str, tuple[str, ...]]
     if kind == "card":
         groups = {
@@ -164,7 +164,7 @@ def _aliases(kind: TemplateKind) -> dict[str, str]:
             "expYear": ("expiry year", "expiration year"),
         }
     elif kind == "identity":
-        groups = {field: (field,) for field in _IDENTITY_FIELDS}
+        groups = {field: (field,) for field in IDENTITY_FIELDS}
         groups.update({
             "postalCode": ("postal code", "zip", "zip code"),
             "phone": ("phone", "telephone"),
@@ -173,11 +173,11 @@ def _aliases(kind: TemplateKind) -> dict[str, str]:
     else:
         groups = {}
     return {
-        _key(alias): target for target, aliases in groups.items() for alias in aliases
+        key(alias): target for target, aliases in groups.items() for alias in aliases
     }
 
 
-def _value(target: str, value: str) -> str | None:
+def template_value(target: str, value: str) -> str | None:
     if target == "number":
         number = re.sub(r"[ -]", "", value)
         return number if re.fullmatch(r"[0-9]{8,19}", number) else None
@@ -189,7 +189,7 @@ def _value(target: str, value: str) -> str | None:
         return value if re.fullmatch(r"[0-9]{4}", value) else None
     if target == "brand":
         brands = {
-            _key(b): b
+            key(b): b
             for b in (
                 "Visa",
                 "Mastercard",
@@ -203,7 +203,7 @@ def _value(target: str, value: str) -> str | None:
                 "Other",
             )
         }
-        return brands.get(_key(value))
+        return brands.get(key(value))
     return value
 
 
@@ -211,7 +211,7 @@ def plan_template(rule: TemplateRule, fields: Mapping[str, str | None]) -> Templ
     """Consume only validated, unambiguous native values; retain everything else."""
     candidates: dict[str, list[tuple[str, str]]] = {}
     warnings: list[str] = []
-    aliases = _aliases(rule.kind)
+    aliases = template_aliases(rule.kind)
     for source, raw in fields.items():
         if source in RESERVED_FIELD_NAMES or source.startswith(ATTACHMENT_FIELD_PREFIX):
             continue
@@ -220,16 +220,16 @@ def plan_template(rule: TemplateRule, fields: Mapping[str, str | None]) -> Templ
         if raw is None or not raw or original_name.startswith("_etm_"):
             continue
         targets: dict[str, str] = {}
-        target = rule.fields.get(original_name) or aliases.get(_key(original_name))
+        target = rule.fields.get(original_name) or aliases.get(key(original_name))
         if target:
-            converted = _value(target, raw)
+            converted = template_value(target, raw)
             if converted is not None:
                 targets[target] = converted
             else:
                 warnings.append(
                     "A template value could not be parsed; its custom field was retained"
                 )
-        elif rule.kind == "card" and _key(original_name) in {
+        elif rule.kind == "card" and key(original_name) in {
             "expiration",
             "expiry",
             "validthru",

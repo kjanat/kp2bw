@@ -23,7 +23,7 @@ def assert_terminate_serve_ends_grouped_process() -> None:
         print("skip: POSIX process-group teardown test")
         return
 
-    # Mirror _start_serve: a long-lived child in its own session/process group.
+    # Mirror start_serve: a long-lived child in its own session/process group.
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         stdin=subprocess.DEVNULL,

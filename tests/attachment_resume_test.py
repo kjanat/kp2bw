@@ -9,24 +9,24 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import httpx
-from convert_update_test import UpdateTestConverter, _make_existing
+from convert_update_test import UpdateTestConverter, make_existing
 
-from kp2bw._attachment_resume import inspect_pending_upload, transaction_filename
-from kp2bw._attachments import (
+from kp2bw.attachment_resume import inspect_pending_upload, transaction_filename
+from kp2bw.attachments import (
     AttachmentPlan,
     FileRecord,
     fields_from_records,
     source_file,
 )
-from kp2bw._checkpoint import AttachmentCheckpoint, CheckpointRecord, CheckpointScope
-from kp2bw._item_sync import stamp_content
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwAttachment, BwItemResponse
+from kp2bw.checkpoint import AttachmentCheckpoint, CheckpointRecord, CheckpointScope
 from kp2bw.exceptions import (
     BitwardenAttachmentMissingError,
     BitwardenHttpError,
     ConversionError,
 )
+from kp2bw.item_sync import stamp_content
 
 
 def main() -> None:
@@ -40,10 +40,10 @@ def main() -> None:
     ):
         client = object.__new__(BitwardenServeClient)
 
-        def respond(_request: httpx.Request, message: str = message) -> httpx.Response:
+        def respond(request: httpx.Request, message: str = message) -> httpx.Response:
             return httpx.Response(400, json={"success": False, "message": message})
 
-        client._http = httpx.Client(
+        client.http = httpx.Client(
             base_url="http://localhost", transport=httpx.MockTransport(respond)
         )
         try:
@@ -56,7 +56,7 @@ def main() -> None:
         else:
             raise AssertionError("A failed download was treated as file bytes")
         finally:
-            client._http.close()
+            client.http.close()
     source = source_file("original", "key.bin", 1, "key.bin", b"replacement")
     scope = "a" * 64
     name = transaction_filename(source, scope, "b" * 32, "old")
@@ -140,7 +140,7 @@ def check_missing_checkpoint_adoption() -> None:
         hashlib.sha256(b"old").hexdigest(),
     )
     for condition in ("complete", "edited", "ambiguous"):
-        item = _make_existing(
+        item = make_existing(
             revisionDate="revision",
             fields=[{"name": "KP2BW_ID", "value": "b" * 32, "type": 0}],
             attachments=[
@@ -168,9 +168,9 @@ def check_missing_checkpoint_adoption() -> None:
             tempfile.TemporaryDirectory() as directory,
             AttachmentCheckpoint(Path(directory) / "cache.json", scope) as checkpoint,
         ):
-            converter._checkpoint = checkpoint
+            converter.checkpoint = checkpoint
             try:
-                converter._prepare_checkpoint_uploads(
+                converter.prepare_checkpoint_uploads(
                     cast(BitwardenServeClient, client), item, plan
                 )
             except ConversionError:
@@ -219,7 +219,7 @@ def check_cleanup_protection() -> None:
         "unmapped",
         "replacement-edited",
     ):
-        item = _make_existing(
+        item = make_existing(
             revisionDate="revision",
             fields=[
                 {"name": "KP2BW_ID", "value": "b" * 32, "type": 0},
@@ -242,11 +242,11 @@ def check_cleanup_protection() -> None:
         stamp_content(item)
         client = MagicMock(spec=BitwardenServeClient)
 
-        def get_item(_item_id: str, item: BwItemResponse = item) -> BwItemResponse:
+        def get_item(item_id: str, item: BwItemResponse = item) -> BwItemResponse:
             return copy.deepcopy(item)
 
         def get_attachment(
-            _item_id: str,
+            item_id: str,
             attachment_id: str,
             condition: str = condition,
             item: BwItemResponse = item,
@@ -270,9 +270,9 @@ def check_cleanup_protection() -> None:
             AttachmentCheckpoint(Path(directory) / "cache.json", scope) as checkpoint,
         ):
             checkpoint.save(pending)
-            converter._checkpoint = checkpoint
+            converter.checkpoint = checkpoint
             try:
-                converter._delete_checkpoint_copy(bw, "item-1", "old", name)
+                converter.delete_checkpoint_copy(bw, "item-1", "old", name)
             except ConversionError:
                 assert condition != "unchanged"
                 client.delete_attachment.assert_not_called()
@@ -288,7 +288,7 @@ def check_cleanup_protection() -> None:
                     )
                 }
                 try:
-                    converter._recover_checkpoint_uploads(
+                    converter.recover_checkpoint_uploads(
                         bw, item, [source], associations
                     )
                 except ConversionError:

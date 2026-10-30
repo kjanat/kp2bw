@@ -14,9 +14,9 @@ from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad
 from pykeepass import create_database
 
-from kp2bw._field_limits import encrypted_length, validate_item
 from kp2bw.convert import Converter
 from kp2bw.exceptions import ConversionError, FieldLimitError
+from kp2bw.field_limits import encrypted_length, validate_item
 
 
 def encrypt_fixture(text: str) -> str:
@@ -64,13 +64,13 @@ def main() -> None:
                 )
                 entry.set_custom_property("value", "x" * size)
                 conv = converter(organization)
-                conv._add_bw_entry_to_entries_dict(entry)
-                _, _, item, attachments = next(iter(conv._entries.values()))
+                conv.add_bw_entry_to_entries_dict(entry)
+                _, _, item, attachments = next(iter(conv.entries.values()))
                 fields = {field["name"]: field["value"] for field in item["fields"]}
                 assert ("value" in fields) == (size <= 3695)
                 assert (
                     ("value.txt", ("x" * size).encode())
-                    in [conv._materialise_attachment(a) for a in attachments]
+                    in [conv.materialise_attachment(a) for a in attachments]
                 ) == (size > 3695)
 
             for size in (7438, 7439, 7440):
@@ -79,12 +79,12 @@ def main() -> None:
                 )
                 entry.notes = "é" * (size // 2) + "x" * (size % 2)
                 conv = converter(organization)
-                conv._add_bw_entry_to_entries_dict(entry)
-                _, _, item, attachments = next(iter(conv._entries.values()))
+                conv.add_bw_entry_to_entries_dict(entry)
+                _, _, item, attachments = next(iter(conv.entries.values()))
                 assert (item["notes"] == entry.notes) == (size <= 7439)
                 assert (
                     ("notes.txt", (entry.notes or "").encode())
-                    in [conv._materialise_attachment(a) for a in attachments]
+                    in [conv.materialise_attachment(a) for a in attachments]
                 ) == (size > 7439)
 
             for member, boundary in (
@@ -102,7 +102,7 @@ def main() -> None:
                     setattr(entry, member, "é" * (size // 2) + "z" * (size % 2))
                     conv = converter(organization)
                     try:
-                        conv._add_bw_entry_to_entries_dict(entry)
+                        conv.add_bw_entry_to_entries_dict(entry)
                     except ConversionError as exc:
                         assert size > boundary
                         assert "z" * 50 not in str(exc), (
@@ -115,10 +115,10 @@ def main() -> None:
         for size in (679, 680):
             entry = database.add_entry(group, "x" * size, "user", "pw")
             conv = converter()
-            conv._path2name = True
-            conv._path2nameskip = 0
+            conv.path2name = True
+            conv.path2nameskip = 0
             try:
-                conv._add_bw_entry_to_entries_dict(entry)
+                conv.add_bw_entry_to_entries_dict(entry)
             except ConversionError:
                 assert size == 680
             else:
@@ -131,8 +131,8 @@ def main() -> None:
             entry.expiry_time = datetime(2000, 1, 1, tzinfo=UTC)
             entry.notes = "n" * size
             conv = converter()
-            conv._add_bw_entry_to_entries_dict(entry)
-            _, _, item, attachments = next(iter(conv._entries.values()))
+            conv.add_bw_entry_to_entries_dict(entry)
+            _, _, item, attachments = next(iter(conv.entries.values()))
             assert item["notes"] == (
                 "[EXPIRED] " + (entry.notes or "") if size == 7429 else "[EXPIRED] "
             )
@@ -144,20 +144,20 @@ def main() -> None:
             entry.set_custom_property("KP2A_URL", uri)
             conv = converter()
             try:
-                conv._add_bw_entry_to_entries_dict(entry)
+                conv.add_bw_entry_to_entries_dict(entry)
             except ConversionError:
                 assert size == 7440
             else:
                 assert size <= 7439
-                assert not next(iter(conv._entries.values()))[3], (
+                assert not next(iter(conv.entries.values()))[3], (
                     "Native URI also offloaded"
                 )
         entry = database.add_entry(database.root_group, "Secret", "user", "pw")
         entry.set_custom_property("secret", "é" * 2000, protect=True)
         for allowed in (False, True):
             conv = converter(secrets=allowed)
-            conv._add_bw_entry_to_entries_dict(entry)
-            _, _, item, attachments = next(iter(conv._entries.values()))
+            conv.add_bw_entry_to_entries_dict(entry)
+            _, _, item, attachments = next(iter(conv.entries.values()))
             assert not any(field["name"] == "secret" for field in item["fields"])
             assert bool(attachments) == allowed
         entry = database.add_entry(database.root_group, "Metadata", "user", "pw")
@@ -166,10 +166,10 @@ def main() -> None:
             database.add_binary(b"original metadata file"), "KP2BW_META.txt"
         )
         conv = converter()
-        conv._add_bw_entry_to_entries_dict(entry)
-        _, _, item, attachments = next(iter(conv._entries.values()))
+        conv.add_bw_entry_to_entries_dict(entry)
+        _, _, item, attachments = next(iter(conv.entries.values()))
         assert not any(field["name"] == "KP2BW_META" for field in item["fields"])
-        materialized = dict(conv._materialise_attachment(a) for a in attachments)
+        materialized = dict(conv.materialise_attachment(a) for a in attachments)
         assert len(materialized) == len(attachments) == 2
         assert materialized.pop("KP2BW_META.txt") == b"original metadata file"
         assert json.loads(next(iter(materialized.values())))["tags"] == entry.tags
@@ -178,12 +178,12 @@ def main() -> None:
             entry.set_custom_property("n" * size, "v")
             conv = converter()
             try:
-                conv._add_bw_entry_to_entries_dict(entry)
+                conv.add_bw_entry_to_entries_dict(entry)
             except ConversionError:
                 assert size == 688
             else:
                 assert size <= 687
-                item = next(iter(conv._entries.values()))[2]
+                item = next(iter(conv.entries.values()))[2]
                 item["login"]["totp"] = "x" * size
                 validate_item(item)
                 item["login"]["totp"] = "x" * 688
@@ -197,8 +197,8 @@ def main() -> None:
         database.add_entry(database.root_group, "x" * 688, "user", "pw")
         database.save()
         conv = converter()
-        conv._keepass_file_path = str(Path(directory) / "limits.kdbx")
-        with patch.object(Converter, "_create_bitwarden_items_for_entries") as write:
+        conv.keepass_file_path = str(Path(directory) / "limits.kdbx")
+        with patch.object(Converter, "create_bitwarden_items_for_entries") as write:
             try:
                 conv.convert()
             except ConversionError:
@@ -233,9 +233,9 @@ def main() -> None:
                     parent.password = f"{{REF:P@I:{alias.uuid.hex.upper()}}}"
                 database.save()
                 conv = converter()
-                conv._keepass_file_path = str(path)
+                conv.keepass_file_path = str(path)
                 with patch.object(
-                    Converter, "_create_bitwarden_items_for_entries"
+                    Converter, "create_bitwarden_items_for_entries"
                 ) as write:
                     try:
                         conv.convert()

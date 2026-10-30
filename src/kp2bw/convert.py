@@ -37,9 +37,9 @@ from rich.progress import (
 )
 
 from . import VERBOSE
-from ._attachment_capability import AttachmentCapability
-from ._attachment_resume import inspect_pending_upload, transaction_filename
-from ._attachments import (
+from .attachment_capability import AttachmentCapability
+from .attachment_resume import inspect_pending_upload, transaction_filename
+from .attachments import (
     ATTACHMENT_FIELD_PREFIX,
     AttachmentPlan,
     FileRecord,
@@ -50,57 +50,6 @@ from ._attachments import (
     records_from_fields,
     source_file,
 )
-from ._checkpoint import (
-    AttachmentCheckpoint,
-    CheckpointRecord,
-    CheckpointScope,
-    metadata_digest,
-)
-from ._console import console
-from ._field_limits import (
-    FIELD_VALUE_LIMIT,
-    NAME_LIMIT,
-    NOTES_LIMIT,
-    fits_field,
-    require_field,
-    validate_item,
-)
-from ._history import (
-    HISTORY_FIELD_NAME,
-    apply_native_history,
-    has_managed_history,
-    history_archive,
-    imported_history_count,
-    native_password_history,
-)
-from ._item_sync import (
-    KP2BW_ID_FIELD_NAME,
-    KP2BW_SYNC_FIELD_NAME,
-    content_signature,
-    fields_signature,
-    is_legacy_history_source,
-    legacy_extensions_differ,
-    login_signature,
-    mark_credential_id,
-    pre_history_content_signature,
-    stamp_content,
-    sync_stamp_generation,
-    sync_stamp_matches,
-)
-from ._preview import (
-    MigrationPreview,
-    PreviewEntry,
-    PreviewGroup,
-    describe_attachments,
-    describe_payload,
-    group_inventory,
-    source_inventory,
-)
-from ._preview_transport import PreviewCheckpoint, PreviewTransport
-from ._selection import ItemSelection, resolve_selection, source_uuid
-from ._source_fields import source_field_name, source_field_origin
-from ._ssh_mapping import SshRule, apply_ssh_rule
-from ._templates import TemplateRule, apply_template, recognize_template, template_uuid
 from .bw_serve import (
     BitwardenServeClient,
     item_kp2bw_id,
@@ -114,6 +63,13 @@ from .bw_types import (
     BwItemResponse,
     BwUri,
 )
+from .checkpoint import (
+    AttachmentCheckpoint,
+    CheckpointRecord,
+    CheckpointScope,
+    metadata_digest,
+)
+from .console import console
 from .exceptions import (
     BitwardenAttachmentMissingError,
     BitwardenClientError,
@@ -122,7 +78,51 @@ from .exceptions import (
     FieldLimitError,
     HistoryConversionError,
 )
+from .field_limits import (
+    FIELD_VALUE_LIMIT,
+    NAME_LIMIT,
+    NOTES_LIMIT,
+    fits_field,
+    require_field,
+    validate_item,
+)
+from .history import (
+    HISTORY_FIELD_NAME,
+    apply_native_history,
+    has_managed_history,
+    history_archive,
+    imported_history_count,
+    native_password_history,
+)
+from .item_sync import (
+    KP2BW_ID_FIELD_NAME,
+    KP2BW_SYNC_FIELD_NAME,
+    content_signature,
+    fields_signature,
+    is_legacy_history_source,
+    legacy_extensions_differ,
+    login_signature,
+    mark_credential_id,
+    pre_history_content_signature,
+    stamp_content,
+    sync_stamp_generation,
+    sync_stamp_matches,
+)
 from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
+from .preview import (
+    MigrationPreview,
+    PreviewEntry,
+    PreviewGroup,
+    describe_attachments,
+    describe_payload,
+    group_inventory,
+    source_inventory,
+)
+from .preview_transport import PreviewCheckpoint, PreviewTransport
+from .selection import ItemSelection, resolve_selection, source_uuid
+from .source_fields import source_field_name, source_field_origin
+from .ssh_mapping import SshRule, apply_ssh_rule
+from .templates import TemplateRule, apply_template, recognize_template, template_uuid
 from .uri_mapping import (
     UriMatchValue,
     build_login_uris,
@@ -155,7 +155,7 @@ KP2BW_META_FIELD_NAME: str = "KP2BW_META"
 # Mirrors pykeepass.entry.reserved_keys. Custom-property access in supported
 # PyKeePass versions interpolates keys into XPath, so enumerate the XML once
 # instead of calling Entry.custom_properties for untrusted field names.
-_KEEPASS_RESERVED_STRING_KEYS: frozenset[str] = frozenset({
+KEEPASS_RESERVED_STRING_KEYS: frozenset[str] = frozenset({
     "Title",
     "UserName",
     "Password",
@@ -180,7 +180,7 @@ type FieldSpec = tuple[str | None, Literal[0, 1, 2, 3]]
 
 
 @dataclass(frozen=True)
-class _EntryCustomProperties:
+class EntryCustomProperties:
     """Custom values and memory-protection flags read in one XML traversal."""
 
     values: dict[str, str | None]
@@ -188,7 +188,7 @@ class _EntryCustomProperties:
 
 
 @dataclass
-class _LegacyRefState:
+class LegacyRefState:
     """Exact item shape and stale stamp emitted by the pre-fix REF flow."""
 
     initial_sync_stamp: str
@@ -197,7 +197,7 @@ class _LegacyRefState:
     uri_merges: dict[int, list[BwUri]]
 
 
-def _read_entry_custom_properties(entry: Entry) -> _EntryCustomProperties:
+def read_entry_custom_properties(entry: Entry) -> EntryCustomProperties:
     """Read custom fields without placing attacker-controlled keys in XPath."""
     values: dict[str, str | None] = {}
     protected_keys: set[str] = set()
@@ -206,7 +206,7 @@ def _read_entry_custom_properties(entry: Entry) -> _EntryCustomProperties:
     for string_element in entry._element.findall("String"):
         key_element = string_element.find("Key")
         key = key_element.text if key_element is not None else None
-        if key is None or key in _KEEPASS_RESERVED_STRING_KEYS:
+        if key is None or key in KEEPASS_RESERVED_STRING_KEYS:
             continue
 
         occurrences[key] = occurrences.get(key, 0) + 1
@@ -225,10 +225,10 @@ def _read_entry_custom_properties(entry: Entry) -> _EntryCustomProperties:
         ):
             protected_keys.add(key)
 
-    return _EntryCustomProperties(values, frozenset(protected_keys))
+    return EntryCustomProperties(values, frozenset(protected_keys))
 
 
-def _print_summary(
+def print_summary(
     elapsed: float,
     n_created: int,
     n_updated: int,
@@ -297,12 +297,12 @@ def _print_summary(
         )
 
 
-def _entry_url_inputs(
+def entry_url_inputs(
     entry: Entry, custom_properties: Mapping[str, str | None]
 ) -> tuple[str, list[str], list[str]]:
     """``(primary url, additional URLs, android packages)`` for a KeePass entry.
 
-    Mirrors the extraction in :meth:`Converter._add_bw_entry_to_entries_dict`
+    Mirrors the extraction in :meth:`Converter.add_bw_entry_to_entries_dict`
     (suffix-ordered for determinism) so callers that need an entry's would-be
     ``login.uris`` -- the report and REF merging -- fold the same inputs the
     migration does.
@@ -320,7 +320,7 @@ def _entry_url_inputs(
     )
 
 
-def _open_keepass_database(
+def open_keepass_database(
     keepass_file_path: str,
     keepass_password: str | None,
     keepass_keyfile_path: str | None,
@@ -360,13 +360,13 @@ def collect_keepass_uris(
     including quote/wildcard transforms and dropped non-web schemes -- not the
     raw values.
     """
-    kp = _open_keepass_database(
+    kp = open_keepass_database(
         keepass_file_path, keepass_password, keepass_keyfile_path
     )
     uris: list[str] = []
     for entry in kp.entries:
-        custom_properties = _read_entry_custom_properties(entry).values
-        primary, additional, android = _entry_url_inputs(entry, custom_properties)
+        custom_properties = read_entry_custom_properties(entry).values
+        primary, additional, android = entry_url_inputs(entry, custom_properties)
         uris.extend(
             bw_uri["uri"]
             for bw_uri in build_login_uris(
@@ -381,35 +381,35 @@ def collect_keepass_uris(
 
 
 class Converter:
-    _keepass_file_path: str
-    _keepass_password: str | None
-    _keepass_keyfile_path: str | None
-    _bitwarden_password: str
-    _bitwarden_organization_id: str | None
-    _bitwarden_coll_id: str | None
-    _path2name: bool
-    _path2nameskip: int
-    _import_tags: list[str] | None
-    _skip_expired: bool
-    _include_recyclebin: bool
-    _migrate_metadata: bool
-    _update_existing: bool
-    _include_oversize_secrets: bool
-    _create_folders: bool
-    _uri_match: UriMatchValue
-    _interpret_uri_syntax: bool
-    _totp_pps: bool
-    _kp_ref_entries: list[Entry]
-    _entries: dict[str, EntryValue]
-    _member_reference_resolving_dict: dict[str, str]
-    _ref_entries_by_uuid: dict[str, Entry]
-    _resolved_ref_items: dict[str, EntryValue | None]
-    _refs_in_progress: set[str]
-    _generated_metadata_ids: set[str]
+    keepass_file_path: str
+    keepass_password: str | None
+    keepass_keyfile_path: str | None
+    bitwarden_password: str
+    bitwarden_organization_id: str | None
+    bitwarden_coll_id: str | None
+    path2name: bool
+    path2nameskip: int
+    import_tags: list[str] | None
+    skip_expired: bool
+    include_recyclebin: bool
+    migrate_metadata: bool
+    update_existing: bool
+    include_oversize_secrets: bool
+    create_folders: bool
+    uri_match: UriMatchValue
+    interpret_uri_syntax: bool
+    totp_pps: bool
+    kp_ref_entries: list[Entry]
+    entries: dict[str, EntryValue]
+    member_reference_resolving_dict: dict[str, str]
+    ref_entries_by_uuid: dict[str, Entry]
+    resolved_ref_items: dict[str, EntryValue | None]
+    refs_in_progress: set[str]
+    generated_metadata_ids: set[str]
     legacy_ref_sources: dict[str, BwItemCreate]
-    _legacy_ref_states: dict[str, _LegacyRefState]
-    _legacy_ref_order: dict[str, int]
-    _legacy_ref_results: dict[str, EntryValue | None]
+    legacy_ref_states: dict[str, LegacyRefState]
+    legacy_ref_order: dict[str, int]
+    legacy_ref_results: dict[str, EntryValue | None]
 
     def __init__(
         self,
@@ -443,63 +443,61 @@ class Converter:
         item_id: str | None = None,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
-        self._selected_entry_id = (
-            source_uuid(entry_id) if entry_id is not None else None
-        )
-        self._selected_item_id = item_id
-        self._selection: ItemSelection | None = None
-        self._previewing = False
-        self._preview_sources: dict[str, dict[str, int]] = {}
-        self._preview_groups: list[PreviewGroup] = []
-        self._preview_failures: dict[str, list[str]] = {}
-        self._attachment_plans: dict[str, AttachmentPlan] = {}
-        self._checkpoint_path = checkpoint_path
-        self._checkpoint: AttachmentCheckpoint | None = None
-        self._checkpoint_entry_ids: dict[str, str] = {}
-        self._checkpoint_cleanup: list[tuple[str, str, str]] = []
-        self._source_scope_id = ""
-        self._keepass_file_path = keepass_file_path
-        self._keepass_password = keepass_password
-        self._keepass_keyfile_path = keepass_keyfile_path
-        self._bitwarden_password = bitwarden_password
-        self._bitwarden_organization_id = bitwarden_organization_id
-        self._bitwarden_coll_id = bitwarden_coll_id
-        self._path2name = path2name
-        self._path2nameskip = path2nameskip
-        self._import_tags = import_tags
-        self._skip_expired = skip_expired
-        self._include_recyclebin = include_recyclebin
-        self._migrate_metadata = migrate_metadata
-        self._update_existing = update_existing
-        self._force_update_all = force_update
-        self._include_oversize_secrets = include_oversize_secrets
-        self._create_folders = create_folders
-        self._uri_match = uri_match
-        self._interpret_uri_syntax = interpret_uri_syntax
-        self._totp_pps = totp_pps
-        self._map_templates = map_templates
-        self._template_map = template_map or {}
-        self._ssh_rules = ssh_rules
-        self._ssh_sources: dict[str, tuple[SshRule, dict[str, str | None]]] = {}
-        self._entry_templates: dict[str, TemplateRule] = {}
+        self.selected_entry_id = source_uuid(entry_id) if entry_id is not None else None
+        self.selected_item_id = item_id
+        self.selection: ItemSelection | None = None
+        self.previewing = False
+        self.preview_sources: dict[str, dict[str, int]] = {}
+        self.preview_groups: list[PreviewGroup] = []
+        self.preview_failures: dict[str, list[str]] = {}
+        self.attachment_plans: dict[str, AttachmentPlan] = {}
+        self.checkpoint_path = checkpoint_path
+        self.checkpoint: AttachmentCheckpoint | None = None
+        self.checkpoint_entry_ids: dict[str, str] = {}
+        self.checkpoint_cleanup: list[tuple[str, str, str]] = []
+        self.source_scope_id = ""
+        self.keepass_file_path = keepass_file_path
+        self.keepass_password = keepass_password
+        self.keepass_keyfile_path = keepass_keyfile_path
+        self.bitwarden_password = bitwarden_password
+        self.bitwarden_organization_id = bitwarden_organization_id
+        self.bitwarden_coll_id = bitwarden_coll_id
+        self.path2name = path2name
+        self.path2nameskip = path2nameskip
+        self.import_tags = import_tags
+        self.skip_expired = skip_expired
+        self.include_recyclebin = include_recyclebin
+        self.migrate_metadata = migrate_metadata
+        self.update_existing = update_existing
+        self.force_update_all = force_update
+        self.include_oversize_secrets = include_oversize_secrets
+        self.create_folders = create_folders
+        self.uri_match = uri_match
+        self.interpret_uri_syntax = interpret_uri_syntax
+        self.totp_pps = totp_pps
+        self.map_templates = map_templates
+        self.template_map = template_map or {}
+        self.ssh_rules = ssh_rules
+        self.ssh_sources: dict[str, tuple[SshRule, dict[str, str | None]]] = {}
+        self.entry_templates: dict[str, TemplateRule] = {}
 
-        self._archive_history = archive_history
-        self._migrate_password_history = migrate_password_history
-        self._kp_ref_entries = []
-        self._entries = {}
-        self._ref_entries_by_uuid = {}
-        self._resolved_ref_items = {}
-        self._refs_in_progress = set()
-        self._generated_metadata_ids = set()
-        self._legacy_ref_states = {}
+        self.archive_history = archive_history
+        self.migrate_password_history = migrate_password_history
+        self.kp_ref_entries = []
+        self.entries = {}
+        self.ref_entries_by_uuid = {}
+        self.resolved_ref_items = {}
+        self.refs_in_progress = set()
+        self.generated_metadata_ids = set()
+        self.legacy_ref_states = {}
         self.legacy_ref_sources = {}
-        self._legacy_ref_order = {}
-        self._legacy_ref_results = {}
+        self.legacy_ref_order = {}
+        self.legacy_ref_results = {}
 
-        self._member_reference_resolving_dict = {"username": "U", "password": "P"}
+        self.member_reference_resolving_dict = {"username": "U", "password": "P"}
 
     @staticmethod
-    def _convert_pem_to_base64url(pem_key: str) -> str:
+    def convert_pem_to_base64url(pem_key: str) -> str:
         """Validate a PKCS#8 P-256 private key and encode it for Bitwarden."""
         match = re.fullmatch(
             r"-----BEGIN PRIVATE KEY-----\s+([A-Za-z0-9+/=\s]+)\s+-----END PRIVATE KEY-----",
@@ -523,7 +521,7 @@ class Converter:
         return base64.urlsafe_b64encode(encoded).rstrip(b"=").decode()
 
     @staticmethod
-    def _passkey_identifier(value: str, *, user_handle: bool = False) -> None:
+    def passkey_identifier(value: str, *, user_handle: bool = False) -> None:
         """Reject malformed identifiers without repairing or discarding bytes."""
         if not user_handle:
             try:
@@ -542,7 +540,7 @@ class Converter:
         if base64.urlsafe_b64encode(decoded).decode().rstrip("=") != value.rstrip("="):
             raise ValueError("Noncanonical base64url identifier")
 
-    def _build_fido2_credentials(
+    def build_fido2_credentials(
         self,
         entry: Entry,
         custom_properties: Mapping[str, str | None],
@@ -564,8 +562,8 @@ class Converter:
                 or not user_handle
             ):
                 raise ValueError("Missing required passkey attribute")
-            self._passkey_identifier(credential_id)
-            self._passkey_identifier(user_handle, user_handle=True)
+            self.passkey_identifier(credential_id)
+            self.passkey_identifier(user_handle, user_handle=True)
             domain = relying_party.encode("idna").decode()
             if len(domain) > 253 or any(
                 re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
@@ -573,7 +571,7 @@ class Converter:
                 for label in domain.split(".")
             ):
                 raise ValueError("Invalid relying party ID")
-            key_value = self._convert_pem_to_base64url(private_key_pem)
+            key_value = self.convert_pem_to_base64url(private_key_pem)
         except ValueError, TypeError, binascii.Error, UnsupportedAlgorithm:
             logger.warning(
                 "Passkey conversion failed for entry %s; keeping source attributes "
@@ -605,7 +603,7 @@ class Converter:
         }
         return [cred]
 
-    def _create_bw_python_object(
+    def create_bw_python_object(
         self,
         title: str,
         notes: str,
@@ -628,8 +626,8 @@ class Converter:
             primary_url=url,
             additional_urls=additional_urls or [],
             android_packages=android_packages or [],
-            plain_match=self._uri_match,
-            interpret_syntax=self._interpret_uri_syntax,
+            plain_match=self.uri_match,
+            interpret_syntax=self.interpret_uri_syntax,
         )
         login: BwItemLogin = BwItemLogin(
             uris=uris,
@@ -648,7 +646,7 @@ class Converter:
         ]
 
         return BwItemCreate(
-            organizationId=self._bitwarden_organization_id,
+            organizationId=self.bitwarden_organization_id,
             collectionIds=[],
             folderId=None,
             type=BW_ITEM_TYPE_LOGIN,
@@ -662,14 +660,14 @@ class Converter:
             identity=None,
         )
 
-    def _generate_folder_name(self, entry: Entry) -> str | None:
+    def generate_folder_name(self, entry: Entry) -> str | None:
         """Return the full group path as a ``/``-joined folder name."""
         group = entry.group
         if group is None or not group.path:
             return None
         return "/".join(p for p in group.path if p is not None)
 
-    def _generate_prefix(self, entry: Entry, skip: int) -> str:
+    def generate_prefix(self, entry: Entry, skip: int) -> str:
         """Build a display prefix from the group path, skipping the first *skip* segments."""
         group = entry.group
         if group is None or not group.path:
@@ -680,14 +678,14 @@ class Converter:
                 out += item + " / "
         return out
 
-    def _get_folder_firstlevel(self, entry: Entry) -> str | None:
+    def get_folder_firstlevel(self, entry: Entry) -> str | None:
         """Return the first path segment of the entry's group (top-level folder)."""
         group = entry.group
         if group is None or not group.path:
             return None
         return group.path[0]
 
-    def _is_in_recyclebin(self, entry: Entry, recyclebin_group: Group | None) -> bool:
+    def is_in_recyclebin(self, entry: Entry, recyclebin_group: Group | None) -> bool:
         """Check if an entry is inside the recycle bin group."""
         if recyclebin_group is None:
             return False
@@ -698,7 +696,7 @@ class Converter:
             group = group.parentgroup
         return False
 
-    def _build_metadata_field(self, entry: Entry) -> FieldSpec | None:
+    def build_metadata_field(self, entry: Entry) -> FieldSpec | None:
         """Build deterministic JSON containing KeePass tags and expiry.
 
         Existing YAML fields keep their original sync signatures and are
@@ -714,30 +712,30 @@ class Converter:
         text = json.dumps(meta, ensure_ascii=True, sort_keys=True)
         return (text, 0)
 
-    def _add_bw_entry_to_entries_dict(self, entry: Entry) -> None:
+    def add_bw_entry_to_entries_dict(self, entry: Entry) -> None:
         """Use execution conversion, retaining per-entry blockers during preview."""
         try:
-            self._build_bw_entry(entry)
+            self.build_bw_entry(entry)
         except ConversionError as exc:
-            if not self._previewing:
+            if not self.previewing:
                 raise
-            self._preview_failures.setdefault(entry.uuid.hex.upper(), []).append(
+            self.preview_failures.setdefault(entry.uuid.hex.upper(), []).append(
                 str(exc)
                 if isinstance(exc, FieldLimitError)
                 else "Source conversion failed; check this entry's references, history and mapping configuration"
             )
 
-    def _build_bw_entry(self, entry: Entry) -> None:
-        """Convert a KeePass entry into a Bitwarden item and store it in ``_entries``."""
-        folder = self._generate_folder_name(entry)
+    def build_bw_entry(self, entry: Entry) -> None:
+        """Convert a KeePass entry into a Bitwarden item and store it in ``entries``."""
+        folder = self.generate_folder_name(entry)
         prefix = ""
-        if folder and self._path2name:
-            prefix = self._generate_prefix(entry, self._path2nameskip)
+        if folder and self.path2name:
+            prefix = self.generate_prefix(entry, self.path2nameskip)
 
-        custom_property_data = _read_entry_custom_properties(entry)
+        custom_property_data = read_entry_custom_properties(entry)
         custom_props = custom_property_data.values
         custom_protected = custom_property_data.protected_keys
-        fido2_credentials = self._build_fido2_credentials(entry, custom_props)
+        fido2_credentials = self.build_fido2_credentials(entry, custom_props)
 
         # Resolve TOTP/HOTP from entry.otp or the KeePass TimeOtp-*/HmacOtp-*
         # custom fields.  This decides which fields are folded into login.totp
@@ -746,7 +744,7 @@ class Converter:
             entry.otp,
             custom_props,
             entry_label=entry.title or "_untitled",
-            totp_pps=self._totp_pps,
+            totp_pps=self.totp_pps,
         )
         for warning in otp_result.warnings:
             logger.warning(f"{entry.title or '_untitled'}: {warning}")
@@ -789,10 +787,10 @@ class Converter:
         entry_uuid = str(entry.uuid).replace("-", "").upper()
         # Fold KeePass metadata (tags, expiry) into one KP2BW_META JSON field
         # when enabled; omitted on entries with neither, so most items stay clean.
-        if self._migrate_metadata:
-            meta_field = self._build_metadata_field(entry)
+        if self.migrate_metadata:
+            meta_field = self.build_metadata_field(entry)
             if meta_field is not None:
-                self._generated_metadata_ids.add(entry_uuid)
+                self.generated_metadata_ids.add(entry_uuid)
                 if fits_field(meta_field[0], FIELD_VALUE_LIMIT):
                     custom_properties[KP2BW_META_FIELD_NAME] = meta_field
                 elif meta_field[0] is not None:
@@ -801,7 +799,7 @@ class Converter:
         # Stamp the stable identity marker — always, independent of --metadata.
         # A plain-text field carrying the source KeePass entry UUID so dedup keys
         # on it instead of the mutable (folder, title); see bw_serve.item_kp2bw_id
-        # / _build_dedup_index. Excluded from the content diff (_fields_signature)
+        # / build_dedup_index. Excluded from the content diff (fields_signature)
         # so it never makes a re-run look "changed". Text, not hidden: it is an
         # identifier, not a secret.
         custom_properties[KP2BW_ID_FIELD_NAME] = (entry_uuid, 0)
@@ -820,9 +818,9 @@ class Converter:
             notes = expired_prefix
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
-        firstlevel = self._get_folder_firstlevel(entry)
+        firstlevel = self.get_folder_firstlevel(entry)
 
-        bw_item_object = self._create_bw_python_object(
+        bw_item_object = self.create_bw_python_object(
             title=title,
             notes=notes,
             url=entry.url or "",
@@ -855,8 +853,8 @@ class Converter:
             and not is_url_attribute_key(key)
         }
         if (
-            self._migrate_metadata
-            and (historical_meta := self._build_metadata_field(entry)) is not None
+            self.migrate_metadata
+            and (historical_meta := self.build_metadata_field(entry)) is not None
         ):
             historical_fields[KP2BW_META_FIELD_NAME] = historical_meta
         historical_fields[KP2BW_ID_FIELD_NAME] = (entry_uuid, 0)
@@ -865,7 +863,7 @@ class Converter:
             for key, (value, kind) in historical_fields.items()
             if value is not None
         ]
-        self._stamp_content(historical)
+        self.stamp_content(historical)
         self.legacy_ref_sources[entry_uuid] = historical
 
         # Stamp the content signature kp2bw is writing, so a later re-run can tell
@@ -875,7 +873,7 @@ class Converter:
         # UI-masked, not protected. Excluded from the content signature itself, so
         # it never makes a re-run look "changed".
         previous_passwords = (
-            native_password_history(entry) if self._migrate_password_history else []
+            native_password_history(entry) if self.migrate_password_history else []
         )
         if previous_passwords:
             apply_native_history(bw_item_object, previous_passwords)
@@ -885,7 +883,7 @@ class Converter:
                 len(previous_passwords),
                 entry_uuid,
             )
-        self._stamp_content(bw_item_object)
+        self.stamp_content(bw_item_object)
 
         # get attachments to store later on. A value over the inline size limit
         # is offloaded to a <key>.txt attachment, with three exceptions:
@@ -899,7 +897,7 @@ class Converter:
         # The value itself is never logged in either branch.
         label = entry.title or "_untitled"
         attachments: list[AttachmentItem] = generated_attachments
-        if self._archive_history:
+        if self.archive_history:
             archive = history_archive(entry, entry._kp.binaries if entry._kp else [])
             if archive is not None:
                 attachments.append(
@@ -912,8 +910,8 @@ class Converter:
                     entry_uuid,
                 )
                 if archive.missing_binaries:
-                    if self._previewing:
-                        self._preview_failures.setdefault(entry_uuid, []).append(
+                    if self.previewing:
+                        self.preview_failures.setdefault(entry_uuid, []).append(
                             "Historical attachment bodies are missing; restore them in KeePass to produce a complete archive"
                         )
                     logger.warning(
@@ -935,7 +933,7 @@ class Converter:
                 or key in otp_result.hidden_keys
                 or key in custom_protected
             ):
-                if self._include_oversize_secrets:
+                if self.include_oversize_secrets:
                     logger.warning(
                         f"{label}: secret field '{key}' exceeds the "
                         f"{FIELD_VALUE_LIMIT}-character encrypted field limit; offloading "
@@ -944,8 +942,8 @@ class Converter:
                     )
                     attachments.append((key, value))
                 else:
-                    if self._previewing:
-                        self._preview_failures.setdefault(entry_uuid, []).append(
+                    if self.previewing:
+                        self.preview_failures.setdefault(entry_uuid, []).append(
                             "An oversized secret field would be omitted; shorten it or use --include-oversize-secrets to preserve it as an attachment"
                         )
                     logger.warning(
@@ -963,14 +961,14 @@ class Converter:
             attachments += entry.attachments
 
         validate_item(bw_item_object)
-        self._entries[entry_key] = (
+        self.entries[entry_key] = (
             folder,
             firstlevel,
             bw_item_object,
-            list(self._attachment_sources(attachments)),
+            list(self.attachment_sources(attachments)),
         )
 
-    def _parse_kp_ref_string(self, ref_string: str) -> tuple[str, str, str]:
+    def parse_kp_ref_string(self, ref_string: str) -> tuple[str, str, str]:
         """Parse a ``{REF:...}`` string into ``(field, lookup_mode, uuid)``."""
         # {REF:U@I:CFC0141068E83547BCEEAF0C1ADABAE0}
         tokens = ref_string.split(":")
@@ -989,12 +987,12 @@ class Converter:
 
         return (field_referenced, lookup_mode, ref_compare_string)
 
-    def _get_referenced_entry(
+    def get_referenced_entry(
         self, lookup_mode: str, ref_compare_string: str
     ) -> EntryValue:
         """Look up a referenced entry by UUID, resolving REF chains on demand.
 
-        A reference may point at a normal entry (already in ``_entries``) or at
+        A reference may point at a normal entry (already in ``entries``) or at
         another REF entry that has not been resolved yet -- a chain such as
         ``A -> B -> C``. In the latter case the target REF entry is resolved
         first so the chain collapses onto whatever it ultimately maps to,
@@ -1005,22 +1003,22 @@ class Converter:
 
         # KP_ID lookup: fast path for an already-parsed normal entry.
         key = ref_compare_string.upper()
-        entry = self._entries.get(key)
+        entry = self.entries.get(key)
         if entry is not None:
             return entry
 
         # Target is itself a pending REF entry; resolve it (recursively) so the
         # chain maps onto its eventual item rather than failing here.
-        ref_kp_entry = self._ref_entries_by_uuid.get(key)
+        ref_kp_entry = self.ref_entries_by_uuid.get(key)
         if ref_kp_entry is not None:
-            resolved = self._resolve_single_ref_entry(ref_kp_entry)
+            resolved = self.resolve_single_ref_entry(ref_kp_entry)
             if resolved is not None:
                 return resolved
 
         logger.warning(f"!! - Could not resolve REF to {ref_compare_string} !!")
         raise KeyError(key)
 
-    def _find_referenced_value(
+    def find_referenced_value(
         self, ref_entry: BwItemCreate, field_referenced: str
     ) -> str | None:
         """Extract the referenced login field (username/password) from a resolved entry."""
@@ -1031,62 +1029,62 @@ class Converter:
             "username": login["username"],
             "password": login["password"],
         }
-        for member, reference_key in self._member_reference_resolving_dict.items():
+        for member, reference_key in self.member_reference_resolving_dict.items():
             if field_referenced == reference_key:
                 return field_values.get(member)
 
         raise ConversionError("Unsupported REF field_referenced")
 
-    def _load_keepass_data(self) -> None:
-        """Open the KeePass database and populate ``_entries`` with parsed items."""
+    def load_keepass_data(self) -> None:
+        """Open the KeePass database and populate ``entries`` with parsed items."""
         # aggregate entries
-        kp = _open_keepass_database(
-            self._keepass_file_path,
-            self._keepass_password,
-            self._keepass_keyfile_path,
+        kp = open_keepass_database(
+            self.keepass_file_path,
+            self.keepass_password,
+            self.keepass_keyfile_path,
         )
-        if self._checkpoint_path:
-            self._source_scope_id = metadata_digest({
-                "path": str(Path(self._keepass_file_path).resolve()),
+        if self.checkpoint_path:
+            self.source_scope_id = metadata_digest({
+                "path": str(Path(self.keepass_file_path).resolve()),
                 "root": kp.root_group.uuid.hex,
             })
 
         # reset data structures
-        self._kp_ref_entries = []
-        self._entries = {}
-        self._generated_metadata_ids = set()
-        self._legacy_ref_states = {}
+        self.kp_ref_entries = []
+        self.entries = {}
+        self.generated_metadata_ids = set()
+        self.legacy_ref_states = {}
         self.legacy_ref_sources = {}
-        self._legacy_ref_order = {}
-        self._legacy_ref_results = {}
+        self.legacy_ref_order = {}
+        self.legacy_ref_results = {}
 
         # Identify recycle bin group for filtering
         recyclebin_group: Group | None = kp.recyclebin_group
 
         entries: list[Entry] = kp.entries or []
-        self._resolved_ref_items = {}
-        if self._previewing:
-            self._preview_groups = group_inventory(kp.groups)
-            self._preview_sources = {
+        self.resolved_ref_items = {}
+        if self.previewing:
+            self.preview_groups = group_inventory(kp.groups)
+            self.preview_sources = {
                 entry.uuid.hex.upper(): source_inventory(entry) for entry in entries
             }
             seen: set[str] = set()
             for entry in entries:
                 identifier = entry.uuid.hex.upper()
                 if identifier in seen:
-                    self._preview_failures.setdefault(identifier, []).append(
+                    self.preview_failures.setdefault(identifier, []).append(
                         "Multiple KeePass entries share this UUID; assign distinct source identities before migration"
                     )
                 seen.add(identifier)
-        self._entry_templates = {}
-        self._ssh_sources = {}
+        self.entry_templates = {}
+        self.ssh_sources = {}
         templates_present = {
             source.uuid.hex.upper()
             for source in entries
-            if _read_entry_custom_properties(source).values.get("_etm_template") == "1"
+            if read_entry_custom_properties(source).values.get("_etm_template") == "1"
         }
-        for source in entries if self._ssh_rules else []:
-            props = _read_entry_custom_properties(source).values
+        for source in entries if self.ssh_rules else []:
+            props = read_entry_custom_properties(source).values
             if props.get("_etm_template") == "1":
                 continue
             fields = {
@@ -1102,9 +1100,9 @@ class Converter:
                 template = None
             matching_rules = [
                 rule
-                for rule in self._ssh_rules
+                for rule in self.ssh_rules
                 if rule.matches(
-                    self._generate_folder_name(source) or "", template, fields
+                    self.generate_folder_name(source) or "", template, fields
                 )
             ]
             if len(matching_rules) > 1:
@@ -1112,44 +1110,44 @@ class Converter:
                     "An entry matches multiple SSH mapping rules; make the selectors unambiguous"
                 )
             if matching_rules:
-                self._ssh_sources[source.uuid.hex.upper()] = (matching_rules[0], fields)
-        if self._map_templates:
+                self.ssh_sources[source.uuid.hex.upper()] = (matching_rules[0], fields)
+        if self.map_templates:
             templates: dict[str, TemplateRule] = {}
             for source in entries:
-                props = _read_entry_custom_properties(source).values
+                props = read_entry_custom_properties(source).values
                 if props.get("_etm_template") != "1":
                     continue
                 identifier = source.uuid.hex.upper()
                 kind = recognize_template(identifier, source.title or "")
-                rule = self._template_map.get(identifier)
+                rule = self.template_map.get(identifier)
                 if rule is None and kind:
                     rule = TemplateRule(kind, {})
                 if rule:
                     templates[identifier] = rule
             for source in entries:
-                props = _read_entry_custom_properties(source).values
+                props = read_entry_custom_properties(source).values
                 identifier = template_uuid(props.get("_etm_template_uuid") or "")
                 if identifier and identifier in templates:
-                    self._entry_templates[source.uuid.hex.upper()] = templates[
+                    self.entry_templates[source.uuid.hex.upper()] = templates[
                         identifier
                     ]
 
-        if self._selection is not None:
+        if self.selection is not None:
             matches = [
-                e for e in entries if e.uuid.hex.upper() == self._selection.source_id
+                e for e in entries if e.uuid.hex.upper() == self.selection.source_id
             ]
             if len(matches) != 1:
                 raise ConversionError("Selected KeePass entry is missing or ambiguous")
             selected = matches[0]
             if (
                 (
-                    not self._include_recyclebin
-                    and self._is_in_recyclebin(selected, recyclebin_group)
+                    not self.include_recyclebin
+                    and self.is_in_recyclebin(selected, recyclebin_group)
                 )
-                or (self._skip_expired and selected.expired)
+                or (self.skip_expired and selected.expired)
                 or (
-                    self._import_tags
-                    and not set(self._import_tags).intersection(selected.tags)
+                    self.import_tags
+                    and not set(self.import_tags).intersection(selected.tags)
                 )
             ):
                 raise ConversionError(
@@ -1167,10 +1165,10 @@ class Converter:
                 by_uuid.setdefault(key, []).append(candidate)
                 targets: list[str] = []
                 try:
-                    for member in self._member_reference_resolving_dict:
+                    for member in self.member_reference_resolving_dict:
                         value = getattr(candidate, member)
                         if value and KP_REF_IDENTIFIER in value:
-                            _, lookup, target = self._parse_kp_ref_string(value)
+                            _, lookup, target = self.parse_kp_ref_string(value)
                             if lookup != "I":
                                 raise ConversionError(
                                     "Unsupported selected-entry REF lookup"
@@ -1180,14 +1178,14 @@ class Converter:
                     invalid_refs.add(key)
                 references[key] = targets
                 if (
-                    not self._include_recyclebin
-                    and self._is_in_recyclebin(candidate, recyclebin_group)
-                ) or (self._skip_expired and candidate.expired):
+                    not self.include_recyclebin
+                    and self.is_in_recyclebin(candidate, recyclebin_group)
+                ) or (self.skip_expired and candidate.expired):
                     continue
                 for target in targets:
                     inbound.setdefault(target, set()).add(key)
             needed: set[str] = set()
-            pending = [self._selection.source_id]
+            pending = [self.selection.source_id]
             while pending:
                 key = pending.pop()
                 if key in needed:
@@ -1210,23 +1208,21 @@ class Converter:
 
         logger.info(f"Found {total_entries} entries in KeePass DB. Parsing now...")
         for entry in entries:
-            if (
-                self._map_templates or self._ssh_rules
-            ) and _read_entry_custom_properties(entry).values.get(
-                "_etm_template"
-            ) == "1":
+            if (self.map_templates or self.ssh_rules) and read_entry_custom_properties(
+                entry
+            ).values.get("_etm_template") == "1":
                 continue
             # Skip recycle bin entries unless explicitly included
             if (
-                self._selection is None
-                and not self._include_recyclebin
-                and self._is_in_recyclebin(entry, recyclebin_group)
+                self.selection is None
+                and not self.include_recyclebin
+                and self.is_in_recyclebin(entry, recyclebin_group)
             ):
                 skipped_recyclebin += 1
                 continue
 
             # Skip expired entries if requested
-            if self._selection is None and self._skip_expired and entry.expired:
+            if self.selection is None and self.skip_expired and entry.expired:
                 skipped_expired += 1
                 logger.log(VERBOSE, f"Skipping expired entry: {entry.title}")
                 continue
@@ -1237,27 +1233,27 @@ class Converter:
 
             # Skip REFs as ID might not be in dict yet
             if KP_REF_IDENTIFIER in username or KP_REF_IDENTIFIER in password:
-                self._kp_ref_entries.append(entry)
+                self.kp_ref_entries.append(entry)
                 continue
 
             # Normal entry
-            if self._import_tags and self._selection is None:
-                for tag in self._import_tags:
+            if self.import_tags and self.selection is None:
+                for tag in self.import_tags:
                     if tag in entry.tags:
-                        self._add_bw_entry_to_entries_dict(entry)
+                        self.add_bw_entry_to_entries_dict(entry)
                         break
             else:
-                self._add_bw_entry_to_entries_dict(entry)
+                self.add_bw_entry_to_entries_dict(entry)
 
         if skipped_recyclebin:
             logger.info(f"Skipped {skipped_recyclebin} entries in the Recycle Bin")
         if skipped_expired:
             logger.info(f"Skipped {skipped_expired} expired entries")
-        logger.info(f"Parsed {len(self._entries)} entries")
+        logger.info(f"Parsed {len(self.entries)} entries")
 
-    def _resolve_entries_with_references(self) -> None:
+    def resolve_entries_with_references(self) -> None:
         """Resolve ``{REF:...}`` cross-references and merge or create entries accordingly."""
-        ref_entries_length = len(self._kp_ref_entries)
+        ref_entries_length = len(self.kp_ref_entries)
 
         if ref_entries_length == 0:
             return
@@ -1266,27 +1262,27 @@ class Converter:
 
         # Index pending REF entries by UUID so a reference whose target is itself
         # a REF entry (a chain ``A -> B -> C``) can be resolved on demand rather
-        # than failing with a KeyError because the target isn't in ``_entries``.
-        self._ref_entries_by_uuid = {
+        # than failing with a KeyError because the target isn't in ``entries``.
+        self.ref_entries_by_uuid = {
             str(entry.uuid).replace("-", "").upper(): entry
-            for entry in self._kp_ref_entries
+            for entry in self.kp_ref_entries
         }
-        self._legacy_ref_order = self._build_legacy_ref_order()
+        self.legacy_ref_order = self.build_legacy_ref_order()
         # Memoise each REF entry's resolved item so it is processed exactly once
         # even when reached early through a chain, and track the in-progress set
         # to break reference cycles.
-        self._resolved_ref_items = {}
-        self._refs_in_progress = set()
-        self._legacy_ref_results = {}
+        self.resolved_ref_items = {}
+        self.refs_in_progress = set()
+        self.legacy_ref_results = {}
 
         # Independent sibling aliases can compete to populate one empty TOTP.
         # Resolve them by stable identity so XML ordering cannot pick the winner.
-        for kp_entry in sorted(self._kp_ref_entries, key=lambda entry: entry.uuid.hex):
-            self._resolve_single_ref_entry(kp_entry)
+        for kp_entry in sorted(self.kp_ref_entries, key=lambda entry: entry.uuid.hex):
+            self.resolve_single_ref_entry(kp_entry)
 
         logger.log(VERBOSE, f"Resolved {ref_entries_length} REF entries")
 
-    def _build_legacy_ref_order(self) -> dict[str, int]:
+    def build_legacy_ref_order(self) -> dict[str, int]:
         """Return successful REF completion order under the historical traversal."""
         status: dict[str, Literal["visiting", "resolved", "failed"]] = {}
         ordered: list[str] = []
@@ -1300,22 +1296,22 @@ class Converter:
                 return False
 
             status[entry_key] = "visiting"
-            for member in self._member_reference_resolving_dict:
+            for member in self.member_reference_resolving_dict:
                 value = getattr(entry, member)
                 if not value or KP_REF_IDENTIFIER not in value:
                     continue
                 try:
                     field_referenced, lookup_mode, ref_compare_string = (
-                        self._parse_kp_ref_string(value)
+                        self.parse_kp_ref_string(value)
                     )
                 except ConversionError:
                     status[entry_key] = "failed"
                     return False
 
                 target_key = ref_compare_string.upper()
-                target = self._ref_entries_by_uuid.get(target_key)
+                target = self.ref_entries_by_uuid.get(target_key)
                 if lookup_mode != "I" or (
-                    target is None and target_key not in self._entries
+                    target is None and target_key not in self.entries
                 ):
                     status[entry_key] = "failed"
                     return False
@@ -1324,7 +1320,7 @@ class Converter:
                     return False
                 if (
                     field_referenced
-                    not in self._member_reference_resolving_dict.values()
+                    not in self.member_reference_resolving_dict.values()
                 ):
                     status[entry_key] = "failed"
                     return False
@@ -1333,11 +1329,11 @@ class Converter:
             ordered.append(entry_key)
             return True
 
-        for entry in self._kp_ref_entries:
+        for entry in self.kp_ref_entries:
             visit(entry)
         return {entry_key: index for index, entry_key in enumerate(ordered)}
 
-    def _ref_separate_item_reason(
+    def ref_separate_item_reason(
         self,
         entry: Entry,
         custom_properties: Mapping[str, str | None],
@@ -1353,25 +1349,25 @@ class Converter:
         }
         if unmerged_custom_properties:
             return "custom fields that cannot be merged"
-        if (self._archive_history or self._migrate_password_history) and entry.history:
+        if (self.archive_history or self.migrate_password_history) and entry.history:
             return "historical records that cannot be merged"
         if entry.notes or entry.attachments or entry.expired:
             return "notes, attachments, or expiry state that cannot be merged"
-        if self._migrate_metadata and (
+        if self.migrate_metadata and (
             entry.tags or (entry.expires and entry.expiry_time is not None)
         ):
             return "metadata that cannot be merged"
         return None
 
     @staticmethod
-    def _item_field_value(item: BwItemCreate | BwItemResponse, name: str) -> str | None:
+    def item_field_value(item: BwItemCreate | BwItemResponse, name: str) -> str | None:
         """Return the last named field value, preferring kp2bw's appended fields."""
         for field in reversed(item["fields"]):
             if field["name"] == name:
                 return field["value"]
         return None
 
-    def _merge_ref_uris(
+    def merge_ref_uris(
         self,
         item: BwItemCreate,
         entry: Entry,
@@ -1380,33 +1376,33 @@ class Converter:
         """Merge one REF alias's deduplicated URI inputs into *item*."""
         existing_uris = item["login"]["uris"]
         existing_values = {uri["uri"] for uri in existing_uris}
-        primary, additional, android = _entry_url_inputs(entry, custom_properties)
+        primary, additional, android = entry_url_inputs(entry, custom_properties)
         for bw_uri in build_login_uris(
             primary_url=primary,
             additional_urls=additional,
             android_packages=android,
-            plain_match=self._uri_match,
-            interpret_syntax=self._interpret_uri_syntax,
+            plain_match=self.uri_match,
+            interpret_syntax=self.interpret_uri_syntax,
         ):
             if bw_uri["uri"] not in existing_values:
                 existing_uris.append(bw_uri)
                 existing_values.add(bw_uri["uri"])
 
-    def _record_legacy_ref_merge(
+    def record_legacy_ref_merge(
         self,
         item: BwItemCreate,
         entry: Entry,
         custom_properties: Mapping[str, str | None],
     ) -> None:
         """Replay old URI-only merging so safe upgrades are recognizable."""
-        kp_uuid = self._item_field_value(item, KP2BW_ID_FIELD_NAME)
-        sync_stamp = self._item_field_value(item, KP2BW_SYNC_FIELD_NAME)
+        kp_uuid = self.item_field_value(item, KP2BW_ID_FIELD_NAME)
+        sync_stamp = self.item_field_value(item, KP2BW_SYNC_FIELD_NAME)
         entry_key = str(entry.uuid).replace("-", "").upper()
-        merge_order = self._legacy_ref_order.get(entry_key)
+        merge_order = self.legacy_ref_order.get(entry_key)
         if kp_uuid is None or sync_stamp is None or merge_order is None:
             return
 
-        state = self._legacy_ref_states.get(kp_uuid)
+        state = self.legacy_ref_states.get(kp_uuid)
         if state is None:
             legacy_item = copy.deepcopy(self.legacy_ref_sources.get(kp_uuid, item))
             legacy_item.pop("passwordHistory", None)
@@ -1429,7 +1425,7 @@ class Converter:
                         continue
                     if (
                         name == KP2BW_META_FIELD_NAME
-                        and kp_uuid in self._generated_metadata_ids
+                        and kp_uuid in self.generated_metadata_ids
                     ):
                         continue
                     field["name"] = name
@@ -1437,7 +1433,7 @@ class Converter:
             legacy_item["fields"] = old_fields
             # Replay the historical YAML metadata too. This shadow is built
             # from our own generated JSON, never from arbitrary vault input.
-            if kp_uuid in self._generated_metadata_ids:
+            if kp_uuid in self.generated_metadata_ids:
                 for field in legacy_item["fields"]:
                     if field["name"] == KP2BW_META_FIELD_NAME:
                         field["value"] = yaml.safe_dump(
@@ -1446,22 +1442,22 @@ class Converter:
                             allow_unicode=False,
                             sort_keys=True,
                         ).rstrip("\n")
-            self._stamp_content(legacy_item)
+            self.stamp_content(legacy_item)
             sync_stamp = pre_history_content_signature(legacy_item)
             for field in legacy_item["fields"]:
                 if field["name"] == KP2BW_SYNC_FIELD_NAME:
                     field["value"] = sync_stamp
             base_uris = copy.deepcopy(legacy_item["login"]["uris"])
-            state = _LegacyRefState(sync_stamp, legacy_item, base_uris, {})
-            self._legacy_ref_states[kp_uuid] = state
+            state = LegacyRefState(sync_stamp, legacy_item, base_uris, {})
+            self.legacy_ref_states[kp_uuid] = state
 
-        primary, additional, android = _entry_url_inputs(entry, custom_properties)
+        primary, additional, android = entry_url_inputs(entry, custom_properties)
         state.uri_merges[merge_order] = build_login_uris(
             primary_url=primary,
             additional_urls=additional,
             android_packages=android,
-            plain_match=self._uri_match,
-            interpret_syntax=self._interpret_uri_syntax,
+            plain_match=self.uri_match,
+            interpret_syntax=self.interpret_uri_syntax,
         )
 
         legacy_uris = copy.deepcopy(state.base_uris)
@@ -1474,7 +1470,7 @@ class Converter:
             )
         state.item["login"]["uris"] = legacy_uris
 
-    def _resolve_single_ref_entry(self, kp_entry: Entry) -> EntryValue | None:
+    def resolve_single_ref_entry(self, kp_entry: Entry) -> EntryValue | None:
         """Resolve one REF entry, returning the item references to it should target.
 
         Returns the merged-into item when *kp_entry*'s resolved credentials match
@@ -1486,14 +1482,14 @@ class Converter:
         entry_key: str = str(kp_entry.uuid).replace("-", "").upper()
 
         # Resolve each REF entry once; a chain may have resolved it already.
-        if entry_key in self._resolved_ref_items:
-            return self._resolved_ref_items[entry_key]
+        if entry_key in self.resolved_ref_items:
+            return self.resolved_ref_items[entry_key]
         # Reference cycle (e.g. ``A -> B -> A``): stop so recursion terminates.
         # The originating entry then fails to resolve and is reported below.
-        if entry_key in self._refs_in_progress:
+        if entry_key in self.refs_in_progress:
             return None
 
-        self._refs_in_progress.add(entry_key)
+        self.refs_in_progress.add(entry_key)
         try:
             # replace values
             referenced_results: list[EntryValue] = []
@@ -1501,32 +1497,32 @@ class Converter:
             legacy_username = kp_entry.username
             legacy_password = kp_entry.password
             legacy_resolution_failed = False
-            for member in self._member_reference_resolving_dict:
+            for member in self.member_reference_resolving_dict:
                 val = getattr(kp_entry, member)
                 if val and KP_REF_IDENTIFIER in val:
                     field_referenced, lookup_mode, ref_compare_string = (
-                        self._parse_kp_ref_string(val)
+                        self.parse_kp_ref_string(val)
                     )
-                    ref_result = self._get_referenced_entry(
+                    ref_result = self.get_referenced_entry(
                         lookup_mode, ref_compare_string
                     )
-                    _, _, ref_entry, _ = self._unpack_entry(ref_result)
+                    _, _, ref_entry, _ = self.unpack_entry(ref_result)
 
-                    value = self._find_referenced_value(ref_entry, field_referenced)
+                    value = self.find_referenced_value(ref_entry, field_referenced)
                     setattr(kp_entry, member, value)
 
                     referenced_results.append(ref_result)
                     target_key = ref_compare_string.upper()
                     legacy_result = (
-                        self._legacy_ref_results.get(target_key)
-                        if target_key in self._ref_entries_by_uuid
+                        self.legacy_ref_results.get(target_key)
+                        if target_key in self.ref_entries_by_uuid
                         else ref_result
                     )
                     if legacy_result is None:
                         legacy_resolution_failed = True
                     else:
-                        _, _, legacy_ref_item, _ = self._unpack_entry(legacy_result)
-                        legacy_value = self._find_referenced_value(
+                        _, _, legacy_ref_item, _ = self.unpack_entry(legacy_result)
+                        legacy_value = self.find_referenced_value(
                             legacy_ref_item, field_referenced
                         )
                         if member == "username":
@@ -1542,9 +1538,9 @@ class Converter:
             canonical_result: EntryValue | None = None
             if referenced_results:
                 candidate = referenced_results[0]
-                _, _, candidate_item, _ = self._unpack_entry(candidate)
+                _, _, candidate_item, _ = self.unpack_entry(candidate)
                 if all(
-                    self._unpack_entry(result)[2] is candidate_item
+                    self.unpack_entry(result)[2] is candidate_item
                     for result in referenced_results[1:]
                 ):
                     canonical_result = candidate
@@ -1559,7 +1555,7 @@ class Converter:
             credentials_match = False
             ref_item: BwItemCreate | None = None
             if canonical_result is not None:
-                _, _, ref_item, _ = self._unpack_entry(canonical_result)
+                _, _, ref_item, _ = self.unpack_entry(canonical_result)
                 credentials_match = (
                     ref_item["login"]["username"] == kp_username
                     and ref_item["login"]["password"] == kp_password
@@ -1574,43 +1570,41 @@ class Converter:
                 old_username = legacy_username or ""
                 old_password = legacy_password or ""
                 old_merge_matches = all(
-                    self._unpack_entry(result)[2]["login"]["username"] == old_username
-                    and self._unpack_entry(result)[2]["login"]["password"]
+                    self.unpack_entry(result)[2]["login"]["username"] == old_username
+                    and self.unpack_entry(result)[2]["login"]["password"]
                     == old_password
                     for result in legacy_referenced_results
                 )
                 if old_merge_matches:
                     legacy_canonical_result = legacy_referenced_results[-1]
-                    _, _, old_merge_item, _ = self._unpack_entry(
-                        legacy_canonical_result
-                    )
-                    old_custom_properties = _read_entry_custom_properties(kp_entry)
-                    self._record_legacy_ref_merge(
+                    _, _, old_merge_item, _ = self.unpack_entry(legacy_canonical_result)
+                    old_custom_properties = read_entry_custom_properties(kp_entry)
+                    self.record_legacy_ref_merge(
                         old_merge_item, kp_entry, old_custom_properties.values
                     )
 
             if (
                 credentials_match
-                and (self._selection is None or entry_key != self._selection.source_id)
+                and (self.selection is None or entry_key != self.selection.source_id)
                 and canonical_result is not None
                 and ref_item is not None
             ):
-                custom_property_data = _read_entry_custom_properties(kp_entry)
+                custom_property_data = read_entry_custom_properties(kp_entry)
                 otp_result = resolve_otp(
                     kp_entry.otp,
                     custom_property_data.values,
                     entry_label=kp_entry.title or "_untitled",
-                    totp_pps=self._totp_pps,
+                    totp_pps=self.totp_pps,
                 )
-                separate_reason = self._ref_separate_item_reason(
+                separate_reason = self.ref_separate_item_reason(
                     kp_entry, custom_property_data.values, otp_result
                 )
-                target_id = self._item_field_value(ref_item, KP2BW_ID_FIELD_NAME)
-                rule = self._entry_templates.get(target_id or "")
-                ssh_source = self._ssh_sources.get(target_id or "")
-                if (self._map_templates and rule is not None) or ssh_source is not None:
+                target_id = self.item_field_value(ref_item, KP2BW_ID_FIELD_NAME)
+                rule = self.entry_templates.get(target_id or "")
+                ssh_source = self.ssh_sources.get(target_id or "")
+                if (self.map_templates and rule is not None) or ssh_source is not None:
                     planned_target = copy.deepcopy(ref_item)
-                    if self._map_templates and rule is not None:
+                    if self.map_templates and rule is not None:
                         apply_template(planned_target, rule)
                     if (
                         ssh_source is not None
@@ -1633,29 +1627,27 @@ class Converter:
                         f"{kp_entry.title or '_untitled'}: REF entry carries "
                         f"{separate_reason}; importing as a separate item."
                     )
-                    self._add_bw_entry_to_entries_dict(kp_entry)
-                    canonical = self._entries.get(entry_key)
+                    self.add_bw_entry_to_entries_dict(kp_entry)
+                    canonical = self.entries.get(entry_key)
                 else:
                     for warning in otp_result.warnings:
                         logger.warning(f"{kp_entry.title or '_untitled'}: {warning}")
                     if otp_result.totp is not None and not existing_totp:
                         ref_item["login"]["totp"] = otp_result.totp
 
-                    self._merge_ref_uris(
-                        ref_item, kp_entry, custom_property_data.values
-                    )
+                    self.merge_ref_uris(ref_item, kp_entry, custom_property_data.values)
 
                     # REF merging mutates content after initial item creation;
                     # keep manual-edit protection aligned with the final payload.
-                    self._stamp_content(ref_item)
+                    self.stamp_content(ref_item)
                     canonical = canonical_result
             else:
                 # => create new bitwarden item
-                self._add_bw_entry_to_entries_dict(kp_entry)
-                canonical = self._entries.get(entry_key)
+                self.add_bw_entry_to_entries_dict(kp_entry)
+                canonical = self.entries.get(entry_key)
 
-            self._resolved_ref_items[entry_key] = canonical
-            self._legacy_ref_results[entry_key] = (
+            self.resolved_ref_items[entry_key] = canonical
+            self.legacy_ref_results[entry_key] = (
                 None
                 if legacy_resolution_failed
                 else legacy_canonical_result or canonical
@@ -1670,21 +1662,21 @@ class Converter:
             logger.warning(
                 f"!! Could not resolve entry for {group_path}{kp_entry.title} [{kp_entry.uuid!s}] !!"
             )
-            self._resolved_ref_items[entry_key] = None
-            self._legacy_ref_results[entry_key] = None
+            self.resolved_ref_items[entry_key] = None
+            self.legacy_ref_results[entry_key] = None
             return None
         finally:
-            self._refs_in_progress.discard(entry_key)
+            self.refs_in_progress.discard(entry_key)
 
     @staticmethod
-    def _unpack_entry(
+    def unpack_entry(
         entry_value: EntryValue,
     ) -> tuple[str | None, str | None, BwItemCreate, list[AttachmentItem]]:
         """Destructure an entry value into (folder, firstlevel, item, attachments)."""
         folder, firstlevel, bw_item, attachments = entry_value
         return folder, firstlevel, bw_item, attachments
 
-    def _resolve_collection(
+    def resolve_collection(
         self,
         bw: BitwardenServeClient,
         bw_item: BwItemCreate,
@@ -1693,26 +1685,26 @@ class Converter:
     ) -> str | None:
         """Resolve and set collection ID on *bw_item*."""
         collection_id: str | None = None
-        if self._bitwarden_coll_id in COLLECTION_FOLDER_MODES:
+        if self.bitwarden_coll_id in COLLECTION_FOLDER_MODES:
             collection_name = (
                 folder
-                if self._bitwarden_coll_id == NESTED_COLLECTION_MODE
+                if self.bitwarden_coll_id == NESTED_COLLECTION_MODE
                 else firstlevel
             )
             if collection_name:
                 logger.log(VERBOSE, f"Searching Collection {collection_name}")
                 collection_id = bw.create_org_collection(collection_name)
-        elif self._bitwarden_coll_id:
-            collection_id = self._bitwarden_coll_id
+        elif self.bitwarden_coll_id:
+            collection_id = self.bitwarden_coll_id
 
         if collection_id is not None:
-            # Intentional in-place mutation: _entries is reset by
-            # _load_keepass_data() before each convert() run, so mutating
+            # Intentional in-place mutation: entries is reset by
+            # load_keepass_data() before each convert() run, so mutating
             # bw_item here is safe for the current single-pass architecture.
             bw_item["collectionIds"] = [collection_id]
         return collection_id
 
-    def _resolve_collection_safely(
+    def resolve_collection_safely(
         self,
         bw: BitwardenServeClient,
         bw_item: BwItemCreate,
@@ -1728,7 +1720,7 @@ class Converter:
         phases have (issue #24).
         """
         try:
-            self._resolve_collection(bw, bw_item, folder, firstlevel)
+            self.resolve_collection(bw, bw_item, folder, firstlevel)
         except BitwardenClientError as exc:
             logger.warning(
                 f"Could not resolve the collection for {bw_item.get('name', '?')!r}; "
@@ -1738,7 +1730,7 @@ class Converter:
         return True
 
     @staticmethod
-    def _sync_safely(bw: BitwardenServeClient) -> None:
+    def sync_safely(bw: BitwardenServeClient) -> None:
         """Run the pre-attachment sync, reporting failure non-fatally.
 
         Freshly created item IDs can be momentarily unresolvable by ``bw serve``'s
@@ -1756,7 +1748,7 @@ class Converter:
             )
 
     @staticmethod
-    def _attachment_sources(attachments: list[AttachmentItem]) -> list[SourceFile]:
+    def attachment_sources(attachments: list[AttachmentItem]) -> list[SourceFile]:
         sources: list[SourceFile] = []
         occurrences: dict[tuple[str, str], int] = {}
         for attachment in attachments:
@@ -1770,17 +1762,17 @@ class Converter:
             occurrence_key = kind, key
             ordinal = occurrences.get(occurrence_key, 0) + 1
             occurrences[occurrence_key] = ordinal
-            filename, data = Converter._materialise_attachment(attachment)
+            filename, data = Converter.materialise_attachment(attachment)
             sources.append(source_file(kind, key, ordinal, filename, data))
         sources.sort(key=lambda source: source.kind != "original")
         return plan_attachments(sources, {}, [], lambda _: b"").sources
 
     @staticmethod
-    def _attachment_filename(att: AttachmentItem) -> str:
+    def attachment_filename(att: AttachmentItem) -> str:
         """Return the Bitwarden filename an AttachmentItem materialises to.
 
         Single source of truth for the naming rule, shared by
-        :meth:`_materialise_attachment` (which uploads) and upload-if-missing
+        :meth:`materialise_attachment` (which uploads) and upload-if-missing
         reconciliation (which compares names without encoding the payload), so
         the two can never drift apart.
         """
@@ -1793,9 +1785,9 @@ class Converter:
         return att.filename or "attachment"
 
     @staticmethod
-    def _materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:
+    def materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:
         """Convert an AttachmentItem to a ``(filename, data)`` pair."""
-        name = Converter._attachment_filename(att)
+        name = Converter.attachment_filename(att)
         if isinstance(att, SourceFile):
             return name, att.data
         if isinstance(att, Attachment):
@@ -1803,7 +1795,7 @@ class Converter:
         return name, att[1].encode("UTF-8")
 
     @staticmethod
-    def _fields_signature(
+    def fields_signature(
         fields: list[BwField] | None,
     ) -> list[tuple[str, str, int, int | None]]:
         """Order-independent (name, value, type) signature of custom fields.
@@ -1816,14 +1808,14 @@ class Converter:
         return fields_signature(fields)
 
     @staticmethod
-    def _login_signature(
+    def login_signature(
         login: BwItemLogin | None,
     ) -> tuple[str, str, str, list[tuple[str, int | None]]]:
         """Signature of the login fields kp2bw owns (creds, totp, URIs)."""
         return login_signature(login)
 
     @staticmethod
-    def _strict_login_signature(
+    def strict_login_signature(
         login: BwItemLogin | None,
     ) -> tuple[
         str,
@@ -1863,16 +1855,16 @@ class Converter:
         )
 
     @classmethod
-    def _login_differs(cls, existing: BwItemLogin | None, desired: BwItemLogin) -> bool:
+    def login_differs(cls, existing: BwItemLogin | None, desired: BwItemLogin) -> bool:
         """Compare the login fields kp2bw owns (creds, totp, URIs)."""
-        return cls._login_signature(existing) != cls._login_signature(desired)
+        return cls.login_signature(existing) != cls.login_signature(desired)
 
     @staticmethod
-    def _content_signature(item: BwItemResponse | BwItemCreate) -> str:
+    def content_signature(item: BwItemResponse | BwItemCreate) -> str:
         """Hex digest over exactly the content kp2bw manages on an item.
 
         Covers name, notes, the custom-field signature (managed stamps excluded)
-        and the login signature -- the same surface :meth:`_content_differs`
+        and the login signature -- the same surface :meth:`content_differs`
         compares, so the value stamped into ``KP2BW_SYNC`` on a write and the
         value recomputed on the next run agree whenever a user has not touched
         the item.  A user edit to any of these flips the digest; a kp2bw write
@@ -1882,12 +1874,12 @@ class Converter:
         return content_signature(item)
 
     @staticmethod
-    def _stamp_content(item: BwItemCreate | BwItemResponse) -> None:
+    def stamp_content(item: BwItemCreate | BwItemResponse) -> None:
         """Set the managed sync field to the signature of *item*'s current content."""
         stamp_content(item)
 
     @classmethod
-    def _content_differs(
+    def content_differs(
         cls, existing: BwItemResponse, desired: BwItemCreate | BwItemResponse
     ) -> bool:
         """True if the KeePass-derived content diverges from the vault item.
@@ -1896,10 +1888,10 @@ class Converter:
         the login credentials/URIs) so an unchanged re-run stays idempotent and
         never issues a redundant PUT.
         """
-        return cls._content_signature(existing) != cls._content_signature(desired)
+        return cls.content_signature(existing) != cls.content_signature(desired)
 
     @classmethod
-    def _is_user_modified(cls, existing: BwItemResponse) -> bool:
+    def is_user_modified(cls, existing: BwItemResponse) -> bool:
         """True if a user edited *existing*'s managed content since kp2bw's write.
 
         Compares the item's current content signature against the ``KP2BW_SYNC``
@@ -1916,32 +1908,30 @@ class Converter:
             return False
         return not sync_stamp_matches(existing, stamp)
 
-    def _legacy_ref_status(
+    def legacy_ref_status(
         self, existing: BwItemResponse, kp_uuid: str
     ) -> Literal["unrelated", "exact", "diverged"]:
         """Classify an item carrying a known pre-fix REF sync stamp."""
-        state = self._legacy_ref_states.get(kp_uuid)
+        state = self.legacy_ref_states.get(kp_uuid)
         if state is None or item_kp2bw_sync(existing) != state.initial_sync_stamp:
             return "unrelated"
-        if self._strict_ref_signature(existing) == self._strict_ref_signature(
-            state.item
-        ):
+        if self.strict_ref_signature(existing) == self.strict_ref_signature(state.item):
             return "exact"
         return "diverged"
 
     @classmethod
-    def _strict_ref_signature(cls, item: BwItemResponse | BwItemCreate) -> str:
+    def strict_ref_signature(cls, item: BwItemResponse | BwItemCreate) -> str:
         """Digest all content a legacy-upgrade PUT could overwrite."""
         blob = repr((
             item.get("name") or "",
             item.get("notes") or "",
-            cls._fields_signature(item.get("fields")),
-            cls._strict_login_signature(item.get("login")),
+            cls.fields_signature(item.get("fields")),
+            cls.strict_login_signature(item.get("login")),
         ))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _build_update_payload(
+    def build_update_payload(
         existing: BwItemResponse, desired: BwItemCreate
     ) -> BwItemResponse:
         """Build a PUT body that syncs KeePass content onto an existing item.
@@ -2025,42 +2015,42 @@ class Converter:
         stamp_content(payload)
         return payload
 
-    def _retry_item(
+    def retry_item(
         self, source_id: str, item_id: str, *, force: bool = False, legacy: bool = False
     ) -> str:
         """Return a shell-quoted retry without copying credentials into logs."""
-        args = ["kp2bw", self._keepass_file_path]
+        args = ["kp2bw", self.keepass_file_path]
         if not legacy:
             args.extend(["--entry-id", source_id, "--item-id", item_id])
-        if self._bitwarden_organization_id:
-            args.extend(["--bitwarden-org", self._bitwarden_organization_id])
-        if self._bitwarden_coll_id:
-            args.extend(["--bitwarden-collection", self._bitwarden_coll_id])
-        args.extend(["--path-to-name-skip", str(self._path2nameskip)])
+        if self.bitwarden_organization_id:
+            args.extend(["--bitwarden-org", self.bitwarden_organization_id])
+        if self.bitwarden_coll_id:
+            args.extend(["--bitwarden-collection", self.bitwarden_coll_id])
+        args.extend(["--path-to-name-skip", str(self.path2nameskip)])
         for flag, enabled in (
-            ("path-to-name", self._path2name),
-            ("metadata", self._migrate_metadata),
-            ("folder", self._create_folders),
-            ("skip-expired", self._skip_expired),
-            ("include-recycle-bin", self._include_recyclebin),
-            ("interpret-uri-syntax", self._interpret_uri_syntax),
-            ("totp-pps", self._totp_pps),
+            ("path-to-name", self.path2name),
+            ("metadata", self.migrate_metadata),
+            ("folder", self.create_folders),
+            ("skip-expired", self.skip_expired),
+            ("include-recycle-bin", self.include_recyclebin),
+            ("interpret-uri-syntax", self.interpret_uri_syntax),
+            ("totp-pps", self.totp_pps),
         ):
             args.append(f"--{'' if enabled else 'no-'}{flag}")
-        if self._include_oversize_secrets:
+        if self.include_oversize_secrets:
             args.append("--include-oversize-secrets")
-        if self._import_tags:
-            args.extend(["--import-tags", *self._import_tags])
+        if self.import_tags:
+            args.extend(["--import-tags", *self.import_tags])
         args.extend([
             "--uri-match",
             next(
                 name
                 for name in match_value_names()
-                if parse_match_name(name) == self._uri_match
+                if parse_match_name(name) == self.uri_match
             ),
         ])
-        if self._keepass_keyfile_path:
-            args.extend(["--keepass-keyfile", self._keepass_keyfile_path])
+        if self.keepass_keyfile_path:
+            args.extend(["--keepass-keyfile", self.keepass_keyfile_path])
         args.append("--update")
         if force:
             args.append("--force-update")
@@ -2092,7 +2082,7 @@ class Converter:
             bw.update_dedup_entry(source_id, payload)
         return "collection"
 
-    def _reconcile_existing_item(
+    def reconcile_existing_item(
         self,
         bw: BitwardenServeClient,
         existing: BwItemResponse,
@@ -2123,12 +2113,12 @@ class Converter:
         after a PUT.  *force_update* makes the content PUT fire even when the
         content is unchanged -- used when adopting a legacy item so its missing
         ``KP2BW_ID`` stamp is backfilled.  It still respects ``--no-update`` (the
-        PUT is gated by ``self._update_existing``).
+        PUT is gated by ``self.update_existing``).
 
         When the item was edited in Bitwarden since kp2bw last wrote it (its
         ``KP2BW_SYNC`` signature no longer matches), the overwrite is skipped and
         ``"protected"`` returned so the manual edit survives -- unless
-        ``self._force_update_all`` (``--force-update``) makes KeePass win.  Legacy
+        ``self.force_update_all`` (``--force-update``) makes KeePass win.  Legacy
         adoption (*force_update*) and unstamped items are never protected.
         """
         name = bw_item["name"]
@@ -2146,8 +2136,8 @@ class Converter:
         # Native types are reconciled only when their mapping is enabled.
         # The dedup index never adopts unstamped non-login items by name.
         if existing.get("type") != BW_ITEM_TYPE_LOGIN and (
-            not (existing.get("type") in (2, 3, 4) and self._map_templates)
-            and not (existing.get("type") == 5 and self._ssh_rules)
+            not (existing.get("type") in (2, 3, 4) and self.map_templates)
+            and not (existing.get("type") == 5 and self.ssh_rules)
         ):
             logger.log(
                 VERBOSE,
@@ -2155,7 +2145,7 @@ class Converter:
             )
             return outcome, [], {}
 
-        if not self._update_existing:
+        if not self.update_existing:
             try:
                 return (
                     self.sync_collection_membership(
@@ -2172,12 +2162,12 @@ class Converter:
 
         if any(is_record_field(field) for field in existing.get("fields") or []) and (
             not item_kp2bw_sync(existing)
-            or (self._is_user_modified(existing) and not self._force_update_all)
+            or (self.is_user_modified(existing) and not self.force_update_all)
         ):
             logger.warning(
                 "Item %s has modified content or attachment associations; preserving its files. Retry: %s",
                 item_id,
-                self._retry_item(
+                self.retry_item(
                     kp_uuid, item_id, force=bool(item_kp2bw_sync(existing))
                 ),
             )
@@ -2191,17 +2181,17 @@ class Converter:
             # (keeps re-runs idempotent).
             if (
                 has_managed_history(existing)
-                and self._is_user_modified(existing)
-                and not self._force_update_all
+                and self.is_user_modified(existing)
+                and not self.force_update_all
             ):
                 logger.warning(
                     "Item %s: password history or managed content was edited; preserving your edit",
                     item_id,
                 )
                 return "protected", [], {}
-            update_payload = self._build_update_payload(existing, bw_item)
-            content_differs = self._content_differs(existing, update_payload)
-            sync_stamp_stale = self._is_user_modified(existing)
+            update_payload = self.build_update_payload(existing, bw_item)
+            content_differs = self.content_differs(existing, update_payload)
+            sync_stamp_stale = self.is_user_modified(existing)
             sync_stamp = item_kp2bw_sync(existing)
             stamp_generation = (
                 None
@@ -2218,12 +2208,12 @@ class Converter:
                 and content_differs
                 and legacy_extensions_differ(existing, update_payload, stamp_generation)
             )
-            legacy_ref_status = self._legacy_ref_status(existing, kp_uuid)
+            legacy_ref_status = self.legacy_ref_status(existing, kp_uuid)
             legacy_ref_output = legacy_ref_status == "exact"
             repair_sync_stamp = not content_differs and (
                 legacy_sync_stamp or (sync_stamp_stale and legacy_ref_output)
             )
-            if self._update_existing and (
+            if self.update_existing and (
                 force_update or content_differs or repair_sync_stamp
             ):
                 # Protect a manual Bitwarden edit: when the content genuinely
@@ -2235,7 +2225,7 @@ class Converter:
                 if (
                     content_differs
                     and not force_update
-                    and not self._force_update_all
+                    and not self.force_update_all
                     and (
                         sync_stamp_stale
                         or ambiguous_legacy_edit
@@ -2246,7 +2236,7 @@ class Converter:
                     logger.warning(
                         f"-- Entry {name!r}: modified in Bitwarden since the last "
                         f"sync; preserving your edit. To overwrite this item: "
-                        f"{self._retry_item(kp_uuid, item_id, force=True)}"
+                        f"{self.retry_item(kp_uuid, item_id, force=True)}"
                     )
                     return "protected", [], {}
                 if repair_sync_stamp:
@@ -2254,7 +2244,7 @@ class Converter:
                     payload["fields"] = [
                         copy.copy(field) for field in existing["fields"]
                     ]
-                    self._stamp_content(payload)
+                    self.stamp_content(payload)
                 else:
                     payload = update_payload
                     if legacy_ref_output:
@@ -2268,7 +2258,7 @@ class Converter:
                     fresh = bw.get_item(item_id)
                     if fresh.get("revisionDate") != existing.get(
                         "revisionDate"
-                    ) or self._content_signature(fresh) != self._content_signature(
+                    ) or self.content_signature(fresh) != self.content_signature(
                         existing
                     ):
                         logger.warning(
@@ -2322,7 +2312,7 @@ class Converter:
         except (BitwardenClientError, ConversionError) as exc:
             logger.warning(
                 f"-- Entry {name!r}: update failed; no further changes attempted: {exc}"
-                f". Retry: {self._retry_item(kp_uuid, item_id, legacy=item_kp2bw_id(existing) is None)}"
+                f". Retry: {self.retry_item(kp_uuid, item_id, legacy=item_kp2bw_id(existing) is None)}"
             )
             # The content/collection PUT was rejected, so leave the item wholly
             # untouched: syncing attachments now would half-mutate it (stale
@@ -2335,21 +2325,21 @@ class Converter:
         # same name, never duplicating an identical one already present.
         upload_atts: list[AttachmentItem] = []
         stale_by_name: dict[str, str] = {}
-        if self._update_existing and attachments:
-            earlier_cleanup = self._checkpoint_cleanup
-            self._checkpoint_cleanup = []
+        if self.update_existing and attachments:
+            earlier_cleanup = self.checkpoint_cleanup
+            self.checkpoint_cleanup = []
             try:
                 full = bw.get_item(item_id)
                 records = records_from_fields(full.get("fields") or [])
                 if records and (
-                    not item_kp2bw_sync(full) or self._is_user_modified(full)
+                    not item_kp2bw_sync(full) or self.is_user_modified(full)
                 ):
                     raise ConversionError(
                         "Attachment associations have an invalid sync stamp"
                     )
-                sources = self._attachment_sources(attachments)
+                sources = self.attachment_sources(attachments)
                 previous_records = dict(records)
-                full, records = self._recover_checkpoint_uploads(
+                full, records = self.recover_checkpoint_uploads(
                     bw, full, sources, records
                 )
                 plan = plan_attachments(
@@ -2359,13 +2349,13 @@ class Converter:
                         (att["id"], att["fileName"])
                         for att in full.get("attachments") or []
                     ],
-                    lambda attachment_id: self._read_checkpoint_attachment(
+                    lambda attachment_id: self.read_checkpoint_attachment(
                         bw, full, sources, records, attachment_id
                     ),
                 )
                 plan.previous_records = previous_records
-                self._prepare_checkpoint_uploads(bw, full, plan)
-                self._attachment_plans[item_id] = plan
+                self.prepare_checkpoint_uploads(bw, full, plan)
+                self.attachment_plans[item_id] = plan
                 upload_atts = list(plan.uploads)
                 stale_by_name = {
                     source.filename: plan.stale[source.source_id]
@@ -2384,11 +2374,11 @@ class Converter:
                 )
                 return "failed", [], {}
             finally:
-                recovered_cleanup = self._checkpoint_cleanup
-                self._checkpoint_cleanup = earlier_cleanup
+                recovered_cleanup = self.checkpoint_cleanup
+                self.checkpoint_cleanup = earlier_cleanup
             # Only a fully reconciled plan reaches association persistence.
             # A later source failure must discard all cleanup from this item.
-            self._checkpoint_cleanup.extend(recovered_cleanup)
+            self.checkpoint_cleanup.extend(recovered_cleanup)
 
         if outcome == "skipped" and not upload_atts:
             logger.log(
@@ -2399,7 +2389,7 @@ class Converter:
         return outcome, upload_atts, stale_by_name
 
     @staticmethod
-    def _attachment_metadata_digest(item: BwItemResponse) -> str:
+    def attachment_metadata_digest(item: BwItemResponse) -> str:
         return metadata_digest(
             sorted(
                 [
@@ -2414,10 +2404,10 @@ class Converter:
             )
         )
 
-    def _prepare_checkpoint_uploads(
+    def prepare_checkpoint_uploads(
         self, bw: BitwardenServeClient, item: BwItemResponse, plan: AttachmentPlan
     ) -> None:
-        checkpoint = self._checkpoint
+        checkpoint = self.checkpoint
         if checkpoint is None or not plan.uploads:
             return
         entry_id = item_kp2bw_id(item)
@@ -2425,7 +2415,7 @@ class Converter:
             raise ConversionError(
                 "Cannot checkpoint an upload without its source identity"
             )
-        self._checkpoint_entry_ids[item["id"]] = entry_id.upper()
+        self.checkpoint_entry_ids[item["id"]] = entry_id.upper()
         prepared: dict[str, SourceFile] = {}
         adopted: set[str] = set()
         updates: list[CheckpointRecord] = []
@@ -2468,7 +2458,7 @@ class Converter:
                 )
                 adopted.add(source.source_id)
                 if previous_id:
-                    self._checkpoint_cleanup.append((item["id"], previous_id, filename))
+                    self.checkpoint_cleanup.append((item["id"], previous_id, filename))
             updates.append(
                 CheckpointRecord(
                     entry_id=entry_id,
@@ -2480,7 +2470,7 @@ class Converter:
                     phase="verified" if recovered_id else "pending",
                     attachment_id=recovered_id,
                     remote_revision=item.get("revisionDate") if recovered_id else None,
-                    remote_metadata_digest=self._attachment_metadata_digest(item)
+                    remote_metadata_digest=self.attachment_metadata_digest(item)
                     if recovered_id
                     else None,
                     previous_attachment_id=previous_id,
@@ -2507,14 +2497,14 @@ class Converter:
             if source.source_id not in adopted
         ]
 
-    def _recover_checkpoint_uploads(
+    def recover_checkpoint_uploads(
         self,
         bw: BitwardenServeClient,
         item: BwItemResponse,
         sources: list[SourceFile],
         records: dict[str, FileRecord],
     ) -> tuple[BwItemResponse, dict[str, FileRecord]]:
-        checkpoint = self._checkpoint
+        checkpoint = self.checkpoint
         entry_id = item_kp2bw_id(item)
         if checkpoint is None or not entry_id:
             return item, records
@@ -2541,7 +2531,7 @@ class Converter:
                     source_size=len(source.data),
                     name_digest=pending.name_digest,
                     revision=item.get("revisionDate") or "",
-                    remote_metadata_digest=self._attachment_metadata_digest(item),
+                    remote_metadata_digest=self.attachment_metadata_digest(item),
                 )
             ):
                 continue
@@ -2597,9 +2587,9 @@ class Converter:
                 current = bw.get_item(item["id"])
                 if current.get("revisionDate") != item.get(
                     "revisionDate"
-                ) or self._attachment_metadata_digest(
+                ) or self.attachment_metadata_digest(
                     current
-                ) != self._attachment_metadata_digest(item):
+                ) != self.attachment_metadata_digest(item):
                     raise ConversionError(
                         "Item changed before incomplete upload cleanup"
                     )
@@ -2625,7 +2615,7 @@ class Converter:
                     phase="verified",
                     attachment_id=decision.attachment_id,
                     remote_revision=item.get("revisionDate"),
-                    remote_metadata_digest=self._attachment_metadata_digest(item),
+                    remote_metadata_digest=self.attachment_metadata_digest(item),
                 )
             )
             cleanup_ids = list(decision.duplicate_ids)
@@ -2638,12 +2628,12 @@ class Converter:
                 )
             ):
                 cleanup_ids.append(pending.previous_attachment_id)
-            self._checkpoint_cleanup.extend(
+            self.checkpoint_cleanup.extend(
                 (item["id"], old_id, expected_name) for old_id in cleanup_ids
             )
         return item, effective
 
-    def _read_checkpoint_attachment(
+    def read_checkpoint_attachment(
         self,
         bw: BitwardenServeClient,
         item: BwItemResponse,
@@ -2651,7 +2641,7 @@ class Converter:
         records: dict[str, FileRecord],
         attachment_id: str,
     ) -> bytes:
-        checkpoint = self._checkpoint
+        checkpoint = self.checkpoint
         entry_id = item_kp2bw_id(item)
         if checkpoint is not None and entry_id:
             for source in sources:
@@ -2672,18 +2662,18 @@ class Converter:
                     source_size=len(source.data),
                     name_digest=association.name_digest,
                     revision=item.get("revisionDate") or "",
-                    remote_metadata_digest=self._attachment_metadata_digest(item),
+                    remote_metadata_digest=self.attachment_metadata_digest(item),
                 ):
                     return source.data
         return bw.get_attachment(item["id"], attachment_id)
 
-    def _save_verified_checkpoint(
+    def save_verified_checkpoint(
         self,
         bw: BitwardenServeClient,
         item_id: str,
         plan: AttachmentPlan,
     ) -> None:
-        checkpoint = self._checkpoint
+        checkpoint = self.checkpoint
         if checkpoint is None:
             return
         before = bw.get_item(item_id)
@@ -2694,7 +2684,7 @@ class Converter:
                 "Cannot checkpoint attachments without source identity and revision"
             )
         associations = records_from_fields(before.get("fields") or [])
-        metadata = self._attachment_metadata_digest(before)
+        metadata = self.attachment_metadata_digest(before)
         updates: list[CheckpointRecord] = []
         for source in plan.sources:
             association = associations.get(source.source_id)
@@ -2703,7 +2693,7 @@ class Converter:
                     "Cannot checkpoint an unverified attachment association"
                 )
             if (
-                self._read_checkpoint_attachment(
+                self.read_checkpoint_attachment(
                     bw, before, plan.sources, associations, association.attachment_id
                 )
                 != source.data
@@ -2735,15 +2725,15 @@ class Converter:
         after = bw.get_item(item_id)
         if (
             after.get("revisionDate") != revision
-            or self._attachment_metadata_digest(after) != metadata
+            or self.attachment_metadata_digest(after) != metadata
         ):
             raise ConversionError("Item changed during checkpoint verification")
         checkpoint.save_many(updates)
 
-    def _delete_checkpoint_copy(
+    def delete_checkpoint_copy(
         self, bw: BitwardenServeClient, item_id: str, attachment_id: str, filename: str
     ) -> None:
-        checkpoint = self._checkpoint
+        checkpoint = self.checkpoint
         if checkpoint is None:
             bw.delete_attachment(item_id, attachment_id)
             return
@@ -2797,7 +2787,7 @@ class Converter:
             (item_kp2bw_id(before) or "").upper() != record.entry_id.upper()
             or association != expected_association
             or not item_kp2bw_sync(before)
-            or self._is_user_modified(before)
+            or self.is_user_modified(before)
             or replacement is None
             or hashlib.sha256(replacement["fileName"].encode()).hexdigest()
             != record.name_digest
@@ -2820,15 +2810,15 @@ class Converter:
         after = bw.get_item(item_id)
         if before.get("revisionDate") != after.get(
             "revisionDate"
-        ) or self._attachment_metadata_digest(
-            before
-        ) != self._attachment_metadata_digest(after):
+        ) or self.attachment_metadata_digest(before) != self.attachment_metadata_digest(
+            after
+        ):
             raise ConversionError(
                 "Item changed before checkpoint cleanup; preserving its files"
             )
         bw.delete_attachment(item_id, attachment_id)
 
-    def _persist_attachment_plan(
+    def persist_attachment_plan(
         self,
         bw: BitwardenServeClient,
         item_id: str,
@@ -2837,7 +2827,7 @@ class Converter:
     ) -> None:
         full = bw.get_item(item_id)
         current = records_from_fields(full.get("fields") or [])
-        if current != plan.previous_records or self._is_user_modified(full):
+        if current != plan.previous_records or self.is_user_modified(full):
             raise ConversionError("Item changed while saving attachment associations")
         records = dict(plan.records)
         # Recheck adopted bytes against fresh metadata before persisting an ID.
@@ -2886,20 +2876,20 @@ class Converter:
                 hashlib.sha256(source.filename.encode()).hexdigest(),
                 source.digest,
             )
-            if self._checkpoint is not None:
-                entry_id = self._checkpoint_entry_ids[item_id]
-                pending = self._checkpoint.records[entry_id + ":" + source.source_id]
+            if self.checkpoint is not None:
+                entry_id = self.checkpoint_entry_ids[item_id]
+                pending = self.checkpoint.records[entry_id + ":" + source.source_id]
                 verified.append(
                     replace(
                         pending,
                         phase="verified",
                         attachment_id=candidates[0],
                         remote_revision=full.get("revisionDate"),
-                        remote_metadata_digest=self._attachment_metadata_digest(full),
+                        remote_metadata_digest=self.attachment_metadata_digest(full),
                     )
                 )
-        if self._checkpoint is not None and verified:
-            self._checkpoint.save_many(verified)
+        if self.checkpoint is not None and verified:
+            self.checkpoint.save_many(verified)
         if records == current:
             return
         full["fields"] = [
@@ -2907,7 +2897,7 @@ class Converter:
             for field in full.get("fields") or []
             if not (field.get("name") or "").startswith(ATTACHMENT_FIELD_PREFIX)
         ] + fields_from_records(records)
-        self._stamp_content(full)
+        self.stamp_content(full)
         bw.update_item(item_id, full)
         # The CLI can acknowledge PUT before its local item cache reflects it.
         # Read the server state before authorizing deletion of the old file.
@@ -2916,7 +2906,7 @@ class Converter:
         if records_from_fields(persisted.get("fields") or []) != records:
             raise ConversionError("Attachment associations were not persisted")
 
-    def _create_bitwarden_items_for_entries(
+    def create_bitwarden_items_for_entries(
         self, client: BitwardenServeClient | None = None
     ) -> int:
         """Create entries via ``bw serve`` HTTP API and upload attachments.
@@ -2930,9 +2920,9 @@ class Converter:
         # collection so items that exist in *other* collections are treated as
         # new and are imported into the target collection rather than skipped.
         fixed_coll_id = (
-            self._bitwarden_coll_id
-            if self._bitwarden_coll_id
-            and self._bitwarden_coll_id not in COLLECTION_FOLDER_MODES
+            self.bitwarden_coll_id
+            if self.bitwarden_coll_id
+            and self.bitwarden_coll_id not in COLLECTION_FOLDER_MODES
             else None
         )
 
@@ -2965,29 +2955,29 @@ class Converter:
                 nullcontext(client)
                 if client is not None
                 else BitwardenServeClient(
-                    self._bitwarden_password,
-                    org_id=self._bitwarden_organization_id,
+                    self.bitwarden_password,
+                    org_id=self.bitwarden_organization_id,
                     collection_id=fixed_coll_id,
                 )
             ) as bw,
         ):
             if any(
-                self._unpack_entry(value)[2]["type"] == 5
-                for value in self._entries.values()
+                self.unpack_entry(value)[2]["type"] == 5
+                for value in self.entries.values()
             ):
                 bw.require_ssh_supported()
 
-            if self._checkpoint_path:
+            if self.checkpoint_path:
                 server, account = bw.checkpoint_identity()
-                self._checkpoint = checkpoint_resources.enter_context(
+                self.checkpoint = checkpoint_resources.enter_context(
                     AttachmentCheckpoint(
-                        Path(self._checkpoint_path),
+                        Path(self.checkpoint_path),
                         CheckpointScope(
                             server,
                             account,
-                            self._source_scope_id,
-                            self._bitwarden_organization_id,
-                            self._bitwarden_coll_id,
+                            self.source_scope_id,
+                            self.bitwarden_organization_id,
+                            self.bitwarden_coll_id,
                         ),
                     )
                 )
@@ -3006,16 +2996,16 @@ class Converter:
             # matching (item_id, filename) upload has succeeded.
             pending_deletes: list[tuple[str, str, str]] = []
 
-            task1 = progress.add_task("Processing entries", total=len(self._entries))
-            for key, entry_value in self._entries.items():
-                folder, firstlevel, bw_item, attachments = self._unpack_entry(
+            task1 = progress.add_task("Processing entries", total=len(self.entries))
+            for key, entry_value in self.entries.items():
+                folder, firstlevel, bw_item, attachments = self.unpack_entry(
                     entry_value
                 )
 
                 # Resolve collection (mutates bw_item). A dropped collection
                 # POST is non-fatal: skip just this entry rather than abort the
                 # whole loop and strand every entry after it (issue #24).
-                if not self._resolve_collection_safely(bw, bw_item, folder, firstlevel):
+                if not self.resolve_collection_safely(bw, bw_item, folder, firstlevel):
                     n_create_failed += 1
                     progress.advance(task1)
                     continue
@@ -3027,14 +3017,14 @@ class Converter:
                 # distinct entries that share a title each get their own item
                 # instead of collapsing onto one (the old (folder, title) bug).
                 existing = (
-                    bw.get_item(self._selection.destination_id)
-                    if self._selection is not None and self._selection.destination_id
+                    bw.get_item(self.selection.destination_id)
+                    if self.selection is not None and self.selection.destination_id
                     else None
-                    if self._selection is not None
+                    if self.selection is not None
                     else bw.get_item_by_uuid(key)
                 )
                 adopted = False
-                if existing is None and self._selection is None:
+                if existing is None and self.selection is None:
                     # Fallback for pre-stamp legacy items only. Keyed on the
                     # KeePass (folder, name); under --no-folder those items were
                     # created with folderId=None, so this folder-based claim can
@@ -3045,7 +3035,7 @@ class Converter:
                     adopted = existing is not None
                 if existing is not None:
                     item_id = existing["id"]
-                    outcome, upload_atts, _ = self._reconcile_existing_item(
+                    outcome, upload_atts, _ = self.reconcile_existing_item(
                         bw,
                         existing,
                         folder,
@@ -3058,7 +3048,7 @@ class Converter:
                     if outcome == "updated":
                         n_updated += 1
                         n_history += imported_history_count(
-                            self._build_update_payload(existing, bw_item)
+                            self.build_update_payload(existing, bw_item)
                         )
                     elif outcome == "collection":
                         n_collection_update += 1
@@ -3076,7 +3066,7 @@ class Converter:
                     # alongside the queued replacement upload.
                     unique_atts: list[AttachmentItem] = []
                     for att in upload_atts:
-                        fname = self._attachment_filename(att)
+                        fname = self.attachment_filename(att)
                         pair = (item_id, fname)
                         if pair not in queued_atts:
                             queued_atts.add(pair)
@@ -3095,12 +3085,12 @@ class Converter:
             if import_entries:
                 task2 = progress.add_task("Creating items", total=len(import_entries))
 
-                def _on_created() -> None:
+                def on_created() -> None:
                     nonlocal n_created
                     n_created += 1
                     progress.advance(task2)
 
-                def _on_create_failed(_key: str, _exc: BitwardenClientError) -> None:
+                def on_create_failed(key: str, exc: BitwardenClientError) -> None:
                     # A rejected create is non-fatal (issue #24): tally it and
                     # advance the bar so a partial batch still completes the run.
                     nonlocal n_create_failed
@@ -3109,9 +3099,9 @@ class Converter:
 
                 key_to_id = bw.create_items_batch(
                     import_entries,
-                    on_item_created=_on_created,
-                    on_item_failed=_on_create_failed,
-                    create_folders=self._create_folders,
+                    on_item_created=on_created,
+                    on_item_failed=on_create_failed,
+                    create_folders=self.create_folders,
                 )
             else:
                 key_to_id = {}
@@ -3128,30 +3118,30 @@ class Converter:
             for key, new_atts in attachment_map.items():
                 item_id = key_to_id.get(key)
                 if not item_id:
-                    _folder, miss_item = import_entries[key]
+                    unused_folder, miss_item = import_entries[key]
                     logger.warning(
                         f"Could not find item ID for {miss_item['name']!r} "
-                        f"in folder {_folder!r} for attachment upload"
+                        f"in folder {unused_folder!r} for attachment upload"
                     )
                     continue
                 new_item_uploads = True
-                self._attachment_plans[item_id] = plan_attachments(
-                    self._attachment_sources(new_atts),
+                self.attachment_plans[item_id] = plan_attachments(
+                    self.attachment_sources(new_atts),
                     {},
                     [],
                     lambda _: b"",
                 )
-                plan = self._attachment_plans[item_id]
-                if self._checkpoint is not None:
-                    self._prepare_checkpoint_uploads(bw, bw.get_item(item_id), plan)
+                plan = self.attachment_plans[item_id]
+                if self.checkpoint is not None:
+                    self.prepare_checkpoint_uploads(bw, bw.get_item(item_id), plan)
                 upload_items.append((
                     item_id,
-                    [self._materialise_attachment(a) for a in plan.uploads],
+                    [self.materialise_attachment(a) for a in plan.uploads],
                 ))
             for item_id, existing_atts in existing_uploads:
                 upload_items.append((
                     item_id,
-                    [self._materialise_attachment(a) for a in existing_atts],
+                    [self.materialise_attachment(a) for a in existing_atts],
                 ))
 
             # A just-created item can be momentarily unresolvable by bw serve's
@@ -3159,7 +3149,7 @@ class Converter:
             # cache; sync so freshly created IDs are visible before uploading to
             # them. (upload_attachment also self-heals with a sync-and-retry.)
             if new_item_uploads:
-                self._sync_safely(bw)
+                self.sync_safely(bw)
 
             failed: list[tuple[str, str]] = []
             if upload_items:
@@ -3168,22 +3158,22 @@ class Converter:
                     "Uploading attachments", total=len(upload_items)
                 )
                 failed = bw.upload_attachments(upload_items)
-                if self._checkpoint is not None:
+                if self.checkpoint is not None:
                     completed: list[CheckpointRecord] = []
-                    for item_id, plan in self._attachment_plans.items():
+                    for item_id, plan in self.attachment_plans.items():
                         for source in plan.uploads:
                             if (item_id, source.filename) not in failed:
                                 key = (
-                                    self._checkpoint_entry_ids[item_id]
+                                    self.checkpoint_entry_ids[item_id]
                                     + ":"
                                     + source.source_id
                                 )
                                 completed.append(
                                     replace(
-                                        self._checkpoint.records[key], phase="uploaded"
+                                        self.checkpoint.records[key], phase="uploaded"
                                     )
                                 )
-                    self._checkpoint.save_many(completed)
+                    self.checkpoint.save_many(completed)
                 n_attach_failed = len(failed)
                 n_attachments = total_files - n_attach_failed
                 progress.update(task3, completed=len(upload_items))
@@ -3192,9 +3182,9 @@ class Converter:
             # A failed metadata write leaves both files intact and makes the run
             # fail; acknowledged bytes alone never authorize a stale delete.
             failed_uploads = set(failed)
-            for item_id, plan in self._attachment_plans.items():
+            for item_id, plan in self.attachment_plans.items():
                 try:
-                    self._persist_attachment_plan(bw, item_id, plan, failed_uploads)
+                    self.persist_attachment_plan(bw, item_id, plan, failed_uploads)
                     pending_deletes.extend(
                         (item_id, plan.stale[source.source_id], source.filename)
                         for source in plan.sources
@@ -3217,12 +3207,12 @@ class Converter:
             deleted_files = False
             for item_id, old_id, fname in dict.fromkeys([
                 *pending_deletes,
-                *self._checkpoint_cleanup,
+                *self.checkpoint_cleanup,
             ]):
                 if (item_id, fname) in failed_uploads:
                     continue
                 try:
-                    self._delete_checkpoint_copy(bw, item_id, old_id, fname)
+                    self.delete_checkpoint_copy(bw, item_id, old_id, fname)
                     deleted_files = True
                 except BitwardenClientError, ConversionError:
                     n_attach_failed += 1
@@ -3232,17 +3222,17 @@ class Converter:
                         item_id,
                     )
 
-            if deleted_files and self._checkpoint is not None:
+            if deleted_files and self.checkpoint is not None:
                 bw.sync(force=True)
                 _ = bw.list_items()
-            for item_id, plan in self._attachment_plans.items():
+            for item_id, plan in self.attachment_plans.items():
                 if any(
                     (item_id, source.filename) in failed_uploads
                     for source in plan.sources
                 ):
                     continue
                 try:
-                    self._save_verified_checkpoint(bw, item_id, plan)
+                    self.save_verified_checkpoint(bw, item_id, plan)
                 except (BitwardenClientError, ConversionError) as exc:
                     n_update_failed += 1
                     logger.warning(
@@ -3252,7 +3242,7 @@ class Converter:
                     )
 
         elapsed = time.monotonic() - t_start
-        _print_summary(
+        print_summary(
             elapsed,
             n_created,
             n_updated,
@@ -3269,53 +3259,53 @@ class Converter:
 
     def preview(self, target: BitwardenServeClient | None = None) -> MigrationPreview:
         """Describe source conversion without opening a destination client."""
-        self._selection = None
-        if self._selected_entry_id is not None or self._selected_item_id is not None:
+        self.selection = None
+        if self.selected_entry_id is not None or self.selected_item_id is not None:
             if target is None:
-                if self._selected_item_id is not None:
+                if self.selected_item_id is not None:
                     raise ConversionError("Item selection requires target inspection")
-                assert self._selected_entry_id is not None
-                self._selection = ItemSelection(
-                    source_uuid(self._selected_entry_id), None
+                assert self.selected_entry_id is not None
+                self.selection = ItemSelection(
+                    source_uuid(self.selected_entry_id), None
                 )
             else:
-                fixed_collection = self._bitwarden_coll_id
+                fixed_collection = self.bitwarden_coll_id
                 if fixed_collection in COLLECTION_FOLDER_MODES:
                     fixed_collection = None
                 visible = target.list_items()
                 scoped = target.list_items(
-                    organization_id=self._bitwarden_organization_id,
+                    organization_id=self.bitwarden_organization_id,
                     collection_id=fixed_collection,
                 )
-                self._selection = resolve_selection(
-                    self._selected_entry_id,
-                    self._selected_item_id,
+                self.selection = resolve_selection(
+                    self.selected_entry_id,
+                    self.selected_item_id,
                     visible,
                     {item["id"] for item in scoped},
                 )
-        self._preview_sources = {}
-        self._preview_groups = []
-        self._preview_failures = {}
-        self._previewing = True
+        self.preview_sources = {}
+        self.preview_groups = []
+        self.preview_failures = {}
+        self.previewing = True
         failed = False
         try:
-            self._prepare_entries()
+            self.prepare_entries()
         except ConversionError:
             # Individual diagnostics are added by preparation. Do not copy exception
             # strings: some third-party failures contain source values.
             failed = True
         finally:
-            self._previewing = False
-        result = MigrationPreview([], groups=self._preview_groups)
+            self.previewing = False
+        result = MigrationPreview([], groups=self.preview_groups)
         if failed:
             result.blockers.append(
                 "Source preparation failed; migration cannot execute this plan"
             )
-        for identifier, inventory in self._preview_sources.items():
-            if self._selection is not None and identifier != self._selection.source_id:
+        for identifier, inventory in self.preview_sources.items():
+            if self.selection is not None and identifier != self.selection.source_id:
                 continue
-            value = self._entries.get(identifier)
-            resolved = self._resolved_ref_items.get(identifier)
+            value = self.entries.get(identifier)
+            resolved = self.resolved_ref_items.get(identifier)
             outcome: Literal[
                 "planned", "merged", "excluded", "unresolved", "blocked"
             ] = (
@@ -3326,11 +3316,11 @@ class Converter:
                 else "merged"
                 if resolved is not None
                 else "unresolved"
-                if identifier in self._resolved_ref_items
+                if identifier in self.resolved_ref_items
                 else "excluded"
             )
             entry = PreviewEntry(identifier, outcome, source=inventory)
-            if problems := self._preview_failures.get(identifier):
+            if problems := self.preview_failures.get(identifier):
                 entry.outcome = "blocked"
                 entry.blockers.extend(problems)
             if failed:
@@ -3340,9 +3330,9 @@ class Converter:
                     "Resolve this entry's KeePass references before migration"
                 )
             if value is not None:
-                item = self._unpack_entry(value)[2]
-                describe_payload(entry, item, self._attachment_sources(value[3]))
-                if self._checkpoint_path and target is None:
+                item = self.unpack_entry(value)[2]
+                describe_payload(entry, item, self.attachment_sources(value[3]))
+                if self.checkpoint_path and target is None:
                     entry.attachments = [
                         replace(a, filename_final=False) for a in entry.attachments
                     ]
@@ -3352,13 +3342,13 @@ class Converter:
                     )
                 if (
                     inventory["tags"] or inventory["expiry"]
-                ) and not self._migrate_metadata:
+                ) and not self.migrate_metadata:
                     entry.omissions.append(
                         "Tags and expiry metadata disabled by --no-metadata"
                     )
             elif resolved is not None:
                 entry.destination_source_id = next(
-                    (key for key, value in self._entries.items() if value is resolved),
+                    (key for key, value in self.entries.items() if value is resolved),
                     None,
                 )
             for category in (
@@ -3369,7 +3359,7 @@ class Converter:
             ):
                 if inventory[category]:
                     entry.omissions.append(f"{category}: no destination representation")
-            if inventory["history_records"] and not self._archive_history:
+            if inventory["history_records"] and not self.archive_history:
                 entry.omissions.append(
                     "Full historical records are omitted; use --archive-history to preserve them"
                 )
@@ -3377,25 +3367,25 @@ class Converter:
                 entry.outcome = "blocked"
             result.entries.append(entry)
         if target is not None and not result.blockers:
-            self._compare_preview(result, target)
+            self.compare_preview(result, target)
         return result
 
-    def _compare_preview(
+    def compare_preview(
         self, result: MigrationPreview, target: BitwardenServeClient
     ) -> None:
         """Reuse execution reconciliation with writes confined to local snapshots."""
-        fixed_collection = self._bitwarden_coll_id
+        fixed_collection = self.bitwarden_coll_id
         if fixed_collection in COLLECTION_FOLDER_MODES:
             fixed_collection = None
         remote = target.list_items(
-            organization_id=self._bitwarden_organization_id,
+            organization_id=self.bitwarden_organization_id,
             collection_id=fixed_collection,
         )
         folders = {
             identifier: name for name, identifier in target.list_folders().items()
         }
         collections = (
-            target.list_collections() if self._bitwarden_organization_id else {}
+            target.list_collections() if self.bitwarden_organization_id else {}
         )
         transport = PreviewTransport(
             target.get_item, target.get_attachment, target.validate_item_update
@@ -3410,25 +3400,25 @@ class Converter:
             except BitwardenClientError:
                 ssh_blocker = True
         claimed: set[str] = set()
-        previous_plans = self._attachment_plans
-        self._attachment_plans = {}
-        previous_checkpoint = self._checkpoint
-        previous_cleanup = self._checkpoint_cleanup
-        previous_entry_ids = self._checkpoint_entry_ids
-        self._checkpoint_cleanup = []
-        self._checkpoint_entry_ids = {}
-        self._checkpoint = None
+        previous_plans = self.attachment_plans
+        self.attachment_plans = {}
+        previous_checkpoint = self.checkpoint
+        previous_cleanup = self.checkpoint_cleanup
+        previous_entry_ids = self.checkpoint_entry_ids
+        self.checkpoint_cleanup = []
+        self.checkpoint_entry_ids = {}
+        self.checkpoint = None
         try:
-            if self._checkpoint_path:
+            if self.checkpoint_path:
                 server, account = target.checkpoint_identity()
-                self._checkpoint = PreviewCheckpoint(
-                    Path(self._checkpoint_path),
+                self.checkpoint = PreviewCheckpoint(
+                    Path(self.checkpoint_path),
                     CheckpointScope(
                         server,
                         account,
-                        self._source_scope_id,
-                        self._bitwarden_organization_id,
-                        self._bitwarden_coll_id,
+                        self.source_scope_id,
+                        self.bitwarden_organization_id,
+                        self.bitwarden_coll_id,
                     ),
                 )
             for entry in result.entries:
@@ -3440,17 +3430,17 @@ class Converter:
                         "The destination CLI, server or organization policy does not allow verified native SSH support"
                     )
                     continue
-                folder, firstlevel, source_item, attachments = self._unpack_entry(
-                    self._entries[entry.source_id]
+                folder, firstlevel, source_item, attachments = self.unpack_entry(
+                    self.entries[entry.source_id]
                 )
                 desired = copy.deepcopy(source_item)
                 collection_name = (
                     folder
-                    if self._bitwarden_coll_id == NESTED_COLLECTION_MODE
+                    if self.bitwarden_coll_id == NESTED_COLLECTION_MODE
                     else firstlevel
                 )
                 if (
-                    self._bitwarden_coll_id in COLLECTION_FOLDER_MODES
+                    self.bitwarden_coll_id in COLLECTION_FOLDER_MODES
                     and collection_name
                 ):
                     desired["collectionIds"] = [
@@ -3462,13 +3452,13 @@ class Converter:
                     item for item in remote if item_kp2bw_id(item) == entry.source_id
                 ]
                 adopted = False
-                if self._selection is not None:
+                if self.selection is not None:
                     matches = [
                         item
                         for item in remote
-                        if item["id"] == self._selection.destination_id
+                        if item["id"] == self.selection.destination_id
                     ]
-                if not matches and self._selection is None:
+                if not matches and self.selection is None:
                     matches = [
                         item
                         for item in remote
@@ -3487,14 +3477,14 @@ class Converter:
                     continue
                 if not matches:
                     entry.outcome = "create"
-                    if self._checkpoint is not None:
-                        sources = self._attachment_sources(attachments)
+                    if self.checkpoint is not None:
+                        sources = self.attachment_sources(attachments)
                         entry.attachments = describe_attachments([
                             replace(
                                 source,
                                 filename=transaction_filename(
                                     source,
-                                    self._checkpoint.scope_digest,
+                                    self.checkpoint.scope_digest,
                                     entry.source_id,
                                     None,
                                 ),
@@ -3507,7 +3497,7 @@ class Converter:
                 existing = transport.get_item(matches[0]["id"])
                 claimed.add(existing["id"])
                 entry.target_id = existing["id"]
-                outcome, uploads, _ = self._reconcile_existing_item(
+                outcome, uploads, _ = self.reconcile_existing_item(
                     transport,
                     existing,
                     folder,
@@ -3518,7 +3508,7 @@ class Converter:
                     force_update=adopted,
                 )
                 entry.uploads = len(uploads)
-                plan = self._attachment_plans.get(existing["id"])
+                plan = self.attachment_plans.get(existing["id"])
                 if plan is not None:
                     entry.attachments = describe_attachments(plan.sources)
                 entry.cleanup_attachments = sum(
@@ -3526,7 +3516,7 @@ class Converter:
                     for item_id, _ in transport.deleted_attachments
                 )
                 entry.upload_bytes = sum(
-                    len(self._materialise_attachment(a)[1]) for a in uploads
+                    len(self.materialise_attachment(a)[1]) for a in uploads
                 )
                 if outcome == "failed":
                     entry.outcome = "blocked"
@@ -3545,10 +3535,10 @@ class Converter:
                 else:
                     entry.outcome = "unchanged"
         finally:
-            self._checkpoint = previous_checkpoint
-            self._checkpoint_cleanup = previous_cleanup
-            self._checkpoint_entry_ids = previous_entry_ids
-            self._attachment_plans = previous_plans
+            self.checkpoint = previous_checkpoint
+            self.checkpoint_cleanup = previous_cleanup
+            self.checkpoint_entry_ids = previous_entry_ids
+            self.attachment_plans = previous_plans
         changing = [
             entry for entry in result.entries if entry.outcome in {"create", "update"}
         ]
@@ -3596,29 +3586,29 @@ class Converter:
                     )
         result.target_inspected = True
 
-    def _prepare_entries(self) -> None:
+    def prepare_entries(self) -> None:
         """Build and validate migration payloads without opening a destination."""
         # load keepass data from database
-        self._load_keepass_data()
+        self.load_keepass_data()
 
         # resolve {REF:...} stuff
-        self._resolve_entries_with_references()
+        self.resolve_entries_with_references()
 
-        if self._map_templates:
-            for identifier, entry_value in self._entries.items():
-                if rule := self._entry_templates.get(identifier):
-                    item = self._unpack_entry(entry_value)[2]
+        if self.map_templates:
+            for identifier, entry_value in self.entries.items():
+                if rule := self.entry_templates.get(identifier):
+                    item = self.unpack_entry(entry_value)[2]
                     for warning in apply_template(item, rule):
                         logger.warning("Entry %s: %s", identifier, warning)
-                        if self._previewing:
-                            self._preview_failures.setdefault(identifier, []).append(
+                        if self.previewing:
+                            self.preview_failures.setdefault(identifier, []).append(
                                 warning
                             )
 
-        for identifier, entry_value in self._entries.items():
-            if selected := self._ssh_sources.get(identifier):
+        for identifier, entry_value in self.entries.items():
+            if selected := self.ssh_sources.get(identifier):
                 rule, source_fields = selected
-                folder, firstlevel, item, attachments = self._unpack_entry(entry_value)
+                folder, firstlevel, item, attachments = self.unpack_entry(entry_value)
                 fields = {
                     **source_fields,
                     "UserName": item["login"]["username"],
@@ -3627,11 +3617,9 @@ class Converter:
                 files, warnings = apply_ssh_rule(item, fields, rule)
                 for warning in warnings:
                     logger.warning("Entry %s: %s", identifier, warning)
-                    if self._previewing:
-                        self._preview_failures.setdefault(identifier, []).append(
-                            warning
-                        )
-                self._entries[identifier] = (
+                    if self.previewing:
+                        self.preview_failures.setdefault(identifier, []).append(warning)
+                self.entries[identifier] = (
                     folder,
                     firstlevel,
                     item,
@@ -3640,13 +3628,13 @@ class Converter:
 
         # REF merging may add URIs or TOTP after initial conversion. Validate
         # every final item before opening the destination transport.
-        for identifier, entry in self._entries.items():
+        for identifier, entry in self.entries.items():
             try:
-                validate_item(self._unpack_entry(entry)[2])
+                validate_item(self.unpack_entry(entry)[2])
             except FieldLimitError as exc:
-                if not self._previewing:
+                if not self.previewing:
                     raise
-                self._preview_failures.setdefault(identifier, []).append(str(exc))
+                self.preview_failures.setdefault(identifier, []).append(str(exc))
 
     def convert(self) -> int:
         """Run the full KeePass-to-Bitwarden migration pipeline.
@@ -3654,37 +3642,37 @@ class Converter:
         Returns the number of non-fatal failures (rejected entry creates plus
         updates plus attachment uploads); ``0`` means everything succeeded.
         """
-        self._attachment_plans.clear()
-        if self._selected_entry_id is not None or self._selected_item_id is not None:
-            fixed_collection = self._bitwarden_coll_id
+        self.attachment_plans.clear()
+        if self.selected_entry_id is not None or self.selected_item_id is not None:
+            fixed_collection = self.bitwarden_coll_id
             if fixed_collection in COLLECTION_FOLDER_MODES:
                 fixed_collection = None
             with BitwardenServeClient(
-                self._bitwarden_password,
-                org_id=self._bitwarden_organization_id,
+                self.bitwarden_password,
+                org_id=self.bitwarden_organization_id,
                 collection_id=fixed_collection,
             ) as bw:
                 visible = bw.list_items()
                 scoped = bw.list_items(
-                    organization_id=self._bitwarden_organization_id,
+                    organization_id=self.bitwarden_organization_id,
                     collection_id=fixed_collection,
                 )
-                self._selection = resolve_selection(
-                    self._selected_entry_id,
-                    self._selected_item_id,
+                self.selection = resolve_selection(
+                    self.selected_entry_id,
+                    self.selected_item_id,
                     visible,
                     {item["id"] for item in scoped},
                 )
-                self._prepare_entries()
-                selected = self._entries.get(self._selection.source_id)
+                self.prepare_entries()
+                selected = self.entries.get(self.selection.source_id)
                 if selected is None:
                     raise ConversionError(
                         "Selected entry could not be resolved; no items written"
                     )
-                self._entries = {self._selection.source_id: selected}
-                return self._create_bitwarden_items_for_entries(bw)
+                self.entries = {self.selection.source_id: selected}
+                return self.create_bitwarden_items_for_entries(bw)
 
-        self._prepare_entries()
+        self.prepare_entries()
 
         # store aggregated entries in bw
-        return self._create_bitwarden_items_for_entries()
+        return self.create_bitwarden_items_for_entries()

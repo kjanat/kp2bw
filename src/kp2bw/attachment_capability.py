@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass
 
-from ._cli_policy_state import CliPolicyState
+from .cli_policy_state import CliPolicyState
 
 
 @dataclass(frozen=True)

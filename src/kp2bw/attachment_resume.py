@@ -5,9 +5,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from ._attachments import SourceFile
-from ._checkpoint import CheckpointRecord, metadata_digest
+from .attachments import SourceFile
 from .bw_types import BwAttachment
+from .checkpoint import CheckpointRecord, metadata_digest
 from .exceptions import ConversionError
 
 

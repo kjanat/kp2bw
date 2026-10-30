@@ -25,16 +25,16 @@ class ReferenceEntry(Entry):
     that descriptor and keep the test independent of a ``.kdbx`` store.
     """
 
-    _test_password: str | None
-    _test_notes: str | None
-    _test_otp: str | None
-    _test_expires: bool
-    _test_expiry_time: datetime | None
-    _test_tags: list[str]
-    _test_title: str | None
-    _test_url: str | None
-    _test_username: str | None
-    _test_uuid: UUID
+    test_password: str | None
+    test_notes: str | None
+    test_otp: str | None
+    test_expires: bool
+    test_expiry_time: datetime | None
+    test_tags: list[str]
+    test_title: str | None
+    test_url: str | None
+    test_username: str | None
+    test_uuid: UUID
 
     def __init__(
         self,
@@ -45,67 +45,67 @@ class ReferenceEntry(Entry):
         url: str | None,
     ) -> None:
         """Seed the in-memory field backing store without touching PyKeePass."""
-        self._test_title = title
-        self._test_username = username
-        self._test_password = password
-        self._test_notes = None
-        self._test_otp = None
-        self._test_expires = False
-        self._test_expiry_time = None
-        self._test_tags = []
-        self._test_url = url
-        self._test_uuid = REFERENCE_ENTRY_UUID
+        self.test_title = title
+        self.test_username = username
+        self.test_password = password
+        self.test_notes = None
+        self.test_otp = None
+        self.test_expires = False
+        self.test_expiry_time = None
+        self.test_tags = []
+        self.test_url = url
+        self.test_uuid = REFERENCE_ENTRY_UUID
         self._element = Element("Entry")
 
     @property
     def title(self) -> str | None:
         """Return the entry title."""
-        return self._test_title
+        return self.test_title
 
     @title.setter
     def title(self, value: str | None) -> None:
         """Store the entry title."""
-        self._test_title = value
+        self.test_title = value
 
     @property
     def username(self) -> str | None:
         """Return the username (may be ``None``, the case under test)."""
-        return self._test_username
+        return self.test_username
 
     @username.setter
     def username(self, value: str | None) -> None:
         """Store the username, as REF resolution does via ``setattr``."""
-        self._test_username = value
+        self.test_username = value
 
     @property
     def password(self) -> str | None:
         """Return the password (may be ``None`` or a ``{REF:...}`` string)."""
-        return self._test_password
+        return self.test_password
 
     @password.setter
     def password(self, value: str | None) -> None:
         """Store the password, as REF resolution does via ``setattr``."""
-        self._test_password = value
+        self.test_password = value
 
     @property
     def url(self) -> str | None:
         """Return the URL merged onto the referenced item as a URI."""
-        return self._test_url
+        return self.test_url
 
     @url.setter
     def url(self, value: str | None) -> None:
         """Store the URL."""
-        self._test_url = value
+        self.test_url = value
 
     @property
     def uuid(self) -> UUID:
         """Return the fixed entry UUID used for warning messages."""
-        return self._test_uuid
+        return self.test_uuid
 
     @uuid.setter
     def uuid(self, uuid: UUID) -> None:
         """Store the entry UUID."""
-        self._test_uuid = uuid
+        self.test_uuid = uuid
 
     @property
     def group(self) -> Group | None:
@@ -120,22 +120,22 @@ class ReferenceEntry(Entry):
     @property
     def notes(self) -> str | None:
         """Return no notes."""
-        return self._test_notes
+        return self.test_notes
 
     @notes.setter
     def notes(self, value: str | None) -> None:
         """Store notes."""
-        self._test_notes = value
+        self.test_notes = value
 
     @property
     def otp(self) -> str | None:
         """Return no OTP."""
-        return self._test_otp
+        return self.test_otp
 
     @otp.setter
     def otp(self, value: str | None) -> None:
         """Store OTP."""
-        self._test_otp = value
+        self.test_otp = value
 
     @property
     def attachments(self) -> list[Attachment]:
@@ -150,32 +150,32 @@ class ReferenceEntry(Entry):
     @property
     def expires(self) -> bool | None:
         """Return disabled expiry."""
-        return self._test_expires
+        return self.test_expires
 
     @expires.setter
     def expires(self, value: bool) -> None:
         """Store expiry enablement."""
-        self._test_expires = value
+        self.test_expires = value
 
     @property
     def expiry_time(self) -> datetime | None:
         """Return no expiry time."""
-        return self._test_expiry_time
+        return self.test_expiry_time
 
     @expiry_time.setter
     def expiry_time(self, value: datetime) -> None:
         """Store expiry time."""
-        self._test_expiry_time = value
+        self.test_expiry_time = value
 
     @property
     def tags(self) -> list[str]:
         """Return no tags."""
-        return self._test_tags
+        return self.test_tags
 
     @tags.setter
     def tags(self, value: list[str] | str) -> None:
         """Store tags."""
-        self._test_tags = value if isinstance(value, list) else [value]
+        self.test_tags = value if isinstance(value, list) else [value]
 
 
 class ReferenceResolutionTestConverter(Converter):
@@ -202,13 +202,13 @@ class ReferenceResolutionTestConverter(Converter):
 
     def add_ref_entry(self, entry: Entry) -> None:
         """Register *entry* as the sole REF entry to resolve."""
-        self._kp_ref_entries = [entry]
+        self.kp_ref_entries = [entry]
 
     def resolve_references(self) -> None:
         """Run the method under test."""
-        self._resolve_entries_with_references()
+        self.resolve_entries_with_references()
 
-    def _get_referenced_entry(
+    def get_referenced_entry(
         self, lookup_mode: str, ref_compare_string: str
     ) -> EntryValue:
         """Return the fixed referent, asserting the REF was parsed and dispatched."""
@@ -218,7 +218,7 @@ class ReferenceResolutionTestConverter(Converter):
             raise AssertionError(f"Unexpected REF target: {ref_compare_string}")
         return (None, None, self.referenced_item, [])
 
-    def _find_referenced_value(
+    def find_referenced_value(
         self, ref_entry: BwItemCreate, field_referenced: str
     ) -> str | None:
         """Resolve a ``P`` (password) reference; reject anything else."""
@@ -226,12 +226,12 @@ class ReferenceResolutionTestConverter(Converter):
             return ref_entry["login"]["password"]
         raise AssertionError(f"Unexpected REF field: {field_referenced}")
 
-    def _add_bw_entry_to_entries_dict(self, entry: Entry) -> None:
+    def add_bw_entry_to_entries_dict(self, entry: Entry) -> None:
         """Record each duplicate creation title for diagnostics."""
         self.duplicate_creates.append(entry.title)
 
 
-def _make_referenced_item() -> BwItemCreate:
+def make_referenced_item() -> BwItemCreate:
     """Build a Bitwarden item whose creds match the resolved REF entry."""
     return {
         "organizationId": None,
@@ -257,7 +257,7 @@ def _make_referenced_item() -> BwItemCreate:
 
 def assert_resolves_none_fields_with_references() -> None:
     """Assert a REF entry with a ``None`` username resolves and merges its URI."""
-    referenced_item = _make_referenced_item()
+    referenced_item = make_referenced_item()
     converter = ReferenceResolutionTestConverter(referenced_item)
 
     entry = ReferenceEntry(
@@ -293,7 +293,7 @@ def assert_resolves_none_fields_with_references() -> None:
         )
 
 
-class _WarningCapture(logging.Handler):
+class WarningCapture(logging.Handler):
     """Log handler that records ``WARNING``+ messages for assertions."""
 
     messages: list[str]
@@ -316,21 +316,20 @@ class ChainResolutionTestConverter(Converter):
         self,
     ) -> tuple[dict[str, BwItemCreate], dict[str, set[str]]]:
         """Load and resolve, returning items and attachment filenames by name."""
-        self._load_keepass_data()
-        self._resolve_entries_with_references()
-        items = {item["name"]: item for _, _, item, _ in self._entries.values()}
+        self.load_keepass_data()
+        self.resolve_entries_with_references()
+        items = {item["name"]: item for _, _, item, _ in self.entries.values()}
         attachments = {
             item["name"]: {
-                self._attachment_filename(attachment)
-                for attachment in entry_attachments
+                self.attachment_filename(attachment) for attachment in entry_attachments
             }
-            for _, _, item, entry_attachments in self._entries.values()
+            for _, _, item, entry_attachments in self.entries.values()
         }
         return items, attachments
 
     def legacy_output(self, kp_uuid: str) -> tuple[str, BwItemCreate]:
         """Return the simulated pre-fix REF stamp and item for *kp_uuid*."""
-        state = self._legacy_ref_states.get(kp_uuid)
+        state = self.legacy_ref_states.get(kp_uuid)
         if state is None:
             raise AssertionError(f"No legacy REF state recorded for {kp_uuid!r}")
         return state.initial_sync_stamp, state.item
@@ -344,7 +343,7 @@ class ChainResolutionTestConverter(Converter):
         kp_uuid: str,
     ) -> str:
         """Reconcile one simulated pre-fix item and return its outcome."""
-        outcome, _, _ = self._reconcile_existing_item(
+        outcome, _, _ = self.reconcile_existing_item(
             bw,
             existing,
             None,
@@ -357,10 +356,10 @@ class ChainResolutionTestConverter(Converter):
 
     def restamp(self, item: BwItemCreate) -> None:
         """Refresh a desired item's sync stamp for legacy-repair tests."""
-        self._stamp_content(item)
+        self.stamp_content(item)
 
 
-class _LegacyUpgradeClient(BitwardenServeClient):
+class LegacyUpgradeClient(BitwardenServeClient):
     """Client double recording the safe upgrade PUT for a legacy REF item."""
 
     updated: list[BwItemResponse]
@@ -377,7 +376,7 @@ class _LegacyUpgradeClient(BitwardenServeClient):
         pass
 
 
-def _legacy_response(item: BwItemCreate) -> BwItemResponse:
+def legacy_response(item: BwItemCreate) -> BwItemResponse:
     """Wrap one offline item in the response fields used by reconciliation."""
     return BwItemResponse(
         id="legacy-ref-item",
@@ -398,7 +397,7 @@ def _legacy_response(item: BwItemCreate) -> BwItemResponse:
     )
 
 
-def _run_chain_resolution(
+def run_chain_resolution(
     build: Callable[[PyKeePass, Group], None],
     *,
     include_oversize_secrets: bool = False,
@@ -411,7 +410,7 @@ def _run_chain_resolution(
     reference resolution -- so no Bitwarden connection is needed. Returns the
     surviving items keyed by name plus any warnings the converter logged.
     """
-    capture = _WarningCapture()
+    capture = WarningCapture()
     convert_logger = logging.getLogger("kp2bw.convert")
     previous_level = convert_logger.level
     convert_logger.addHandler(capture)
@@ -443,7 +442,7 @@ def _run_chain_resolution(
         convert_logger.setLevel(previous_level)
 
 
-class _OversizeTestConverter(Converter):
+class OversizeTestConverter(Converter):
     """Converter exposing the offline load with attachments for oversize-field tests."""
 
     def load_with_attachments(
@@ -451,32 +450,32 @@ class _OversizeTestConverter(Converter):
     ) -> dict[str, tuple[BwItemCreate, set[str]]]:
         """Load the KeePass DB offline; return each item with its attachment filenames.
 
-        Resolving filenames here (via the inherited ``_attachment_filename``)
+        Resolving filenames here (via the inherited ``attachment_filename``)
         keeps the protected-member access on ``self``, mirroring how the other
         converter test doubles expose internals.
         """
-        self._load_keepass_data()
+        self.load_keepass_data()
         return {
             item["name"]: (
                 item,
-                {self._attachment_filename(att) for att in attachments},
+                {self.attachment_filename(att) for att in attachments},
             )
-            for _, _, item, attachments in self._entries.values()
+            for _, _, item, attachments in self.entries.values()
         }
 
 
-def _run_oversize(
+def run_oversize(
     build: Callable[[PyKeePass, Group], None],
     *,
     include_oversize_secrets: bool,
 ) -> tuple[dict[str, tuple[BwItemCreate, set[str]]], list[str]]:
     """Build a temp KeePass DB, run the offline load, return items+attachments+warnings.
 
-    Mirrors :func:`_run_chain_resolution` but exposes attachment filenames and
+    Mirrors :func:`run_chain_resolution` but exposes attachment filenames and
     the ``include_oversize_secrets`` toggle, and skips REF resolution (not
     needed for these single-entry cases).
     """
-    capture = _WarningCapture()
+    capture = WarningCapture()
     convert_logger = logging.getLogger("kp2bw.convert")
     previous_level = convert_logger.level
     convert_logger.addHandler(capture)
@@ -489,7 +488,7 @@ def _run_oversize(
             build(kp, kp.root_group)
             kp.save()
 
-            converter = _OversizeTestConverter(
+            converter = OversizeTestConverter(
                 keepass_file_path=db_path,
                 keepass_password="pw",
                 keepass_keyfile_path=None,
@@ -535,7 +534,7 @@ def assert_oversize_secret_field_is_not_lost_silently() -> None:
         entry.set_custom_property("recovery_codes", big)
 
     # Default: secrets dropped-with-warning, non-secret still offloaded.
-    items, warnings = _run_oversize(build, include_oversize_secrets=False)
+    items, warnings = run_oversize(build, include_oversize_secrets=False)
     item, att_names = items["Big Secret"]
     if "recovery_codes.txt" not in att_names:
         raise AssertionError("Non-secret over-limit field should always be offloaded")
@@ -550,7 +549,7 @@ def assert_oversize_secret_field_is_not_lost_silently() -> None:
             )
 
     # Opt-in: each secret is recovered into its attachment, no data lost.
-    items, warnings = _run_oversize(build, include_oversize_secrets=True)
+    items, warnings = run_oversize(build, include_oversize_secrets=True)
     item, att_names = items["Big Secret"]
     for key in secret_keys:
         if f"{key}.txt" not in att_names:
@@ -588,7 +587,7 @@ def assert_resolves_chain_with_merge() -> None:
             root, "Entry A", "shared", f"{{REF:P@I:{b_ref}}}", url="https://a.example"
         )
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if warnings:
         raise AssertionError(f"Chain resolution logged warnings: {warnings}")
@@ -628,7 +627,7 @@ def assert_resolves_chain_into_distinct_items() -> None:
             root, "Entry A", "userA", f"{{REF:P@I:{b_ref}}}", url="https://a.example"
         )
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if warnings:
         raise AssertionError(f"Chain resolution logged warnings: {warnings}")
@@ -657,7 +656,7 @@ def assert_reference_cycle_terminates() -> None:
         entry_b.password = f"{{REF:P@I:{entry_a.uuid.hex.upper()}}}"
         kp.add_entry(root, "Entry C", "userC", "passC")
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if "Entry C" not in items:
         raise AssertionError(
@@ -675,7 +674,7 @@ def assert_reference_cycle_terminates() -> None:
 def assert_malformed_reference_does_not_abort() -> None:
     """A malformed ``{REF:...}`` token is warned-and-skipped, never fatal.
 
-    A token missing the ``@`` separator made ``_parse_kp_ref_string`` raise an
+    A token missing the ``@`` separator made ``parse_kp_ref_string`` raise an
     uncaught ``ValueError`` that aborted the whole migration; it must now be
     reported and skipped while unrelated entries still import.
     """
@@ -685,7 +684,7 @@ def assert_malformed_reference_does_not_abort() -> None:
         kp.add_entry(root, "Broken", "userB", "{REF:UI:DEADBEEF}")
         kp.add_entry(root, "Normal", "userN", "passN")
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if "Normal" not in items:
         raise AssertionError("Normal entry was dropped due to a malformed REF token")
@@ -697,7 +696,7 @@ def assert_malformed_reference_does_not_abort() -> None:
         )
 
 
-def _rename_custom_property_key(entry: Entry, old: str, new: str) -> None:
+def rename_custom_property_key(entry: Entry, old: str, new: str) -> None:
     """Rename a custom key directly so PyKeePass's unsafe setter is not involved."""
     for string_element in entry._element.findall("String"):
         key_element = string_element.find("Key")
@@ -707,7 +706,7 @@ def _rename_custom_property_key(entry: Entry, old: str, new: str) -> None:
     raise AssertionError(f"Custom property {old!r} not found")
 
 
-def _field(item: BwItemCreate, name: str) -> BwField:
+def find_field(item: BwItemCreate, name: str) -> BwField:
     """Return one named custom field from an offline-converted item."""
     matches = [field for field in item["fields"] if field["name"] == name]
     if len(matches) != 1:
@@ -724,19 +723,19 @@ def assert_xpath_like_custom_property_names_are_safe() -> None:
     def build(kp: PyKeePass, root: Group) -> None:
         protected = kp.add_entry(root, "Protected", "user-a", "pass-a")
         protected.set_custom_property("placeholder-a", "secret-a", protect=True)
-        _rename_custom_property_key(protected, "placeholder-a", dangerous_key)
+        rename_custom_property_key(protected, "placeholder-a", dangerous_key)
 
         plain = kp.add_entry(root, "Plain", "user-b", "pass-b")
         plain.set_custom_property("placeholder-b", "plain-b")
-        _rename_custom_property_key(plain, "placeholder-b", dangerous_key)
+        rename_custom_property_key(plain, "placeholder-b", dangerous_key)
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if warnings:
         raise AssertionError(f"Quote-bearing keys logged warnings: {warnings}")
-    if _field(items["Protected"], dangerous_key)["type"] != 1:
+    if find_field(items["Protected"], dangerous_key)["type"] != 1:
         raise AssertionError("Protected quote-bearing key was not kept hidden")
-    if _field(items["Plain"], dangerous_key)["type"] != 0:
+    if find_field(items["Plain"], dangerous_key)["type"] != 0:
         raise AssertionError("Protection state leaked between adjacent entries")
 
 
@@ -753,11 +752,11 @@ def assert_distinct_ref_preserves_protected_properties() -> None:
         )
         alias.set_custom_property("private-code", "sensitive", protect=True)
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if set(items) != {"Target", "Distinct REF"}:
         raise AssertionError(f"Distinct REF item missing: {sorted(items)}")
-    if _field(items["Distinct REF"], "private-code")["type"] != 1:
+    if find_field(items["Distinct REF"], "private-code")["type"] != 1:
         raise AssertionError("Distinct REF protected field became visible text")
     if warnings:
         raise AssertionError(f"Distinct REF unexpectedly logged warnings: {warnings}")
@@ -777,7 +776,7 @@ def assert_distinct_ref_protects_oversize_secrets() -> None:
         )
         alias.set_custom_property("recovery-secret", large_secret, protect=True)
 
-    items, attachments, warnings = _run_chain_resolution(
+    items, attachments, warnings = run_chain_resolution(
         build, include_oversize_secrets=False
     )
     if "recovery-secret.txt" in attachments["Large REF Secret"]:
@@ -793,7 +792,7 @@ def assert_distinct_ref_protects_oversize_secrets() -> None:
     ):
         raise AssertionError("Missing warning for dropped oversized REF secret")
 
-    _, attachments, warnings = _run_chain_resolution(
+    _, attachments, warnings = run_chain_resolution(
         build, include_oversize_secrets=True
     )
     if "recovery-secret.txt" not in attachments["Large REF Secret"]:
@@ -829,7 +828,7 @@ def assert_matching_ref_merges_totp_and_restamps() -> None:
         alias.set_custom_property("TimeOtp-Length", "8")
         alias.set_custom_property("TimeOtp-Period", "45")
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if warnings:
         raise AssertionError(f"Compatible REF TOTP logged warnings: {warnings}")
@@ -846,9 +845,9 @@ def assert_matching_ref_merges_totp_and_restamps() -> None:
         raise AssertionError("REF TOTP lost non-default configuration")
     if any(field["name"].startswith("TimeOtp-") for field in target["fields"]):
         raise AssertionError("Consumed REF TOTP fields leaked into custom fields")
-    if _field(target, KP2BW_SYNC_FIELD_NAME)["value"] != Converter._content_signature(
-        target
-    ):
+    if find_field(target, KP2BW_SYNC_FIELD_NAME)[
+        "value"
+    ] != Converter.content_signature(target):
         raise AssertionError("REF merge left a stale KP2BW_SYNC stamp")
 
 
@@ -876,7 +875,7 @@ def assert_matching_ref_accepts_semantically_equal_totp() -> None:
         )
         add_totp(alias)
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if warnings:
         raise AssertionError(f"Equivalent REF TOTP logged warnings: {warnings}")
@@ -919,14 +918,14 @@ def assert_strict_signature_ignores_fido_key_order() -> None:
         keyType=credential["keyType"],
         credentialId=credential["credentialId"],
     )
-    first_login = _make_referenced_item()["login"]
+    first_login = make_referenced_item()["login"]
     first_login["fido2Credentials"] = [credential]
     reordered_login = copy.deepcopy(first_login)
     reordered_login["fido2Credentials"] = [reordered]
 
-    if Converter._strict_login_signature(
+    if Converter.strict_login_signature(
         first_login
-    ) != Converter._strict_login_signature(reordered_login):
+    ) != Converter.strict_login_signature(reordered_login):
         raise AssertionError("FIDO dictionary order changed the legacy signature")
 
 
@@ -972,23 +971,25 @@ def assert_pre_fix_ref_output_upgrades_without_force(
         items, _ = converter.load_and_resolve()
 
     desired = items["Upgrade Target"]
-    kp_uuid = _field(desired, "KP2BW_ID")["value"]
+    kp_uuid = find_field(desired, "KP2BW_ID")["value"]
     initial_stamp, legacy_item = converter.legacy_output(kp_uuid)
     if with_metadata:
         assert (
-            _field(legacy_item, "KP2BW_META")["value"] == "tags:\n- legacy\n- metadata"
+            find_field(legacy_item, "KP2BW_META")["value"]
+            == "tags:\n- legacy\n- metadata"
         )
         assert (
-            _field(desired, "KP2BW_META")["value"] == '{"tags": ["legacy", "metadata"]}'
+            find_field(desired, "KP2BW_META")["value"]
+            == '{"tags": ["legacy", "metadata"]}'
         )
     else:
-        assert _field(legacy_item, "KP2BW_META")["value"] == "ordinary source text"
+        assert find_field(legacy_item, "KP2BW_META")["value"] == "ordinary source text"
     if legacy_item["login"]["totp"] is not None:
         raise AssertionError("Simulated pre-fix REF output unexpectedly contains TOTP")
-    if _field(legacy_item, KP2BW_SYNC_FIELD_NAME)["value"] != initial_stamp:
+    if find_field(legacy_item, KP2BW_SYNC_FIELD_NAME)["value"] != initial_stamp:
         raise AssertionError("Simulated pre-fix REF output lost its stale stamp")
 
-    existing = _legacy_response(legacy_item)
+    existing = legacy_response(legacy_item)
     existing_login = existing.get("login")
     if existing_login is None:
         raise AssertionError("Legacy REF fixture has no login")
@@ -999,7 +1000,7 @@ def assert_pre_fix_ref_output_upgrades_without_force(
     if edited_login is None:
         raise AssertionError("Legacy REF fixture has no login")
     edited_login["uris"][0]["match"] = 3
-    edited_bw = _LegacyUpgradeClient()
+    edited_bw = LegacyUpgradeClient()
     edited_outcome = converter.reconcile_legacy_output(
         edited_bw, manually_edited, desired, kp_uuid=kp_uuid
     )
@@ -1015,14 +1016,14 @@ def assert_pre_fix_ref_output_upgrades_without_force(
         for uri in removed_login["uris"]
         if uri["uri"] != "https://upgrade-alias.example"
     ]
-    removed_bw = _LegacyUpgradeClient()
+    removed_bw = LegacyUpgradeClient()
     removed_outcome = converter.reconcile_legacy_output(
         removed_bw, removed_uri, desired, kp_uuid=kp_uuid
     )
     if removed_outcome != "protected" or removed_bw.updated:
         raise AssertionError("Legacy recognition restored a manually removed URI")
 
-    bw = _LegacyUpgradeClient()
+    bw = LegacyUpgradeClient()
     outcome = converter.reconcile_legacy_output(bw, existing, desired, kp_uuid=kp_uuid)
 
     if outcome != "updated" or len(bw.updated) != 1:
@@ -1039,7 +1040,7 @@ def assert_pre_fix_ref_output_upgrades_without_force(
     stamp_only_login = stamp_only_existing.get("login")
     if stamp_only_login is None:
         raise AssertionError("Legacy stamp-only fixture has no login")
-    stamp_bw = _LegacyUpgradeClient()
+    stamp_bw = LegacyUpgradeClient()
     stamp_outcome = converter.reconcile_legacy_output(
         stamp_bw, stamp_only_existing, stamp_only_desired, kp_uuid=kp_uuid
     )
@@ -1069,7 +1070,7 @@ def assert_conflicting_ref_totp_creates_separate_item() -> None:
         )
         alias.set_custom_property("TimeOtp-Secret-Base32", alias_secret)
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if set(items) != {"Conflict Target", "Conflict Alias"}:
         raise AssertionError(f"Conflicting TOTP item was lost: {sorted(items)}")
@@ -1121,7 +1122,7 @@ def assert_conflicting_ref_totp_is_order_independent() -> None:
                 alias.uuid = entry_uuid
                 alias.set_custom_property("TimeOtp-Secret-Base32", secret)
 
-        items, _, warnings = _run_chain_resolution(build)
+        items, _, warnings = run_chain_resolution(build)
         return items, warnings
 
     forward_items, forward_warnings = run(reverse=False)
@@ -1187,7 +1188,7 @@ def assert_legacy_ref_shadow_preserves_historical_order() -> None:
         items, _ = converter.load_and_resolve()
 
     desired = items["Legacy Order Target"]
-    kp_uuid = _field(desired, "KP2BW_ID")["value"]
+    kp_uuid = find_field(desired, "KP2BW_ID")["value"]
     _, legacy_item = converter.legacy_output(kp_uuid)
     legacy_uris = [uri["uri"] for uri in legacy_item["login"]["uris"]]
     if legacy_uris != [
@@ -1205,9 +1206,9 @@ def assert_legacy_ref_shadow_preserves_historical_order() -> None:
     ]:
         raise AssertionError("Fresh REF output did not use stable UUID order")
 
-    bw = _LegacyUpgradeClient()
+    bw = LegacyUpgradeClient()
     outcome = converter.reconcile_legacy_output(
-        bw, _legacy_response(legacy_item), desired, kp_uuid=kp_uuid
+        bw, legacy_response(legacy_item), desired, kp_uuid=kp_uuid
     )
     if outcome != "updated" or len(bw.updated) != 1:
         raise AssertionError("Historical REF URI order was not recognized safely")
@@ -1272,7 +1273,7 @@ def assert_legacy_ref_chain_preserves_historical_destination() -> None:
         raise AssertionError("Leaf REF did not merge into the new middle item")
 
     desired_root = items["Legacy Chain Root"]
-    kp_uuid = _field(desired_root, "KP2BW_ID")["value"]
+    kp_uuid = find_field(desired_root, "KP2BW_ID")["value"]
     _, legacy_root = converter.legacy_output(kp_uuid)
     legacy_uris = [uri["uri"] for uri in legacy_root["login"]["uris"]]
     if legacy_uris != [
@@ -1282,9 +1283,9 @@ def assert_legacy_ref_chain_preserves_historical_destination() -> None:
     ]:
         raise AssertionError("Legacy REF chain replay changed canonical destination")
 
-    bw = _LegacyUpgradeClient()
+    bw = LegacyUpgradeClient()
     outcome = converter.reconcile_legacy_output(
-        bw, _legacy_response(legacy_root), desired_root, kp_uuid=kp_uuid
+        bw, legacy_response(legacy_root), desired_root, kp_uuid=kp_uuid
     )
     if outcome != "updated" or len(bw.updated) != 1:
         raise AssertionError("Historical REF chain output was not recognized safely")
@@ -1307,7 +1308,7 @@ def assert_refs_to_different_items_do_not_merge_arbitrarily() -> None:
             f"{{REF:P@I:{password_source.uuid.hex.upper()}}}",
         )
 
-    items, _, warnings = _run_chain_resolution(build)
+    items, _, warnings = run_chain_resolution(build)
 
     if set(items) != {"Username Source", "Password Source", "Mixed REF"}:
         raise AssertionError(f"Mixed REF was merged arbitrarily: {sorted(items)}")
@@ -1360,9 +1361,9 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
     converter.restamp(historical)
     historical["login"]["uris"].append({"uri": alias.url or "", "match": None})
     source_id = target.uuid.hex.upper()
-    existing = _legacy_response(historical)
-    assert converter._legacy_ref_status(existing, source_id) == "exact"
-    client = _LegacyUpgradeClient()
+    existing = legacy_response(historical)
+    assert converter.legacy_ref_status(existing, source_id) == "exact"
+    client = LegacyUpgradeClient()
     assert (
         converter.reconcile_legacy_output(client, existing, desired, kp_uuid=source_id)
         == "updated"
@@ -1373,7 +1374,7 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
     next(field for field in edited["fields"] if field["name"] == "large")["value"] = (
         "manual destination edit"
     )
-    protected = _LegacyUpgradeClient()
+    protected = LegacyUpgradeClient()
     assert (
         converter.reconcile_legacy_output(protected, edited, desired, kp_uuid=source_id)
         == "protected"

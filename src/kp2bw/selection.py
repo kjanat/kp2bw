@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from ._item_sync import KP2BW_ID_FIELD_NAME
 from .bw_types import BwItemResponse
 from .exceptions import ConversionError
+from .item_sync import KP2BW_ID_FIELD_NAME
 
 
 def source_uuid(value: str) -> str:

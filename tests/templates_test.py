@@ -6,26 +6,26 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from convert_update_test import FakeBw, _as_bw, _make_desired, _make_existing
+from convert_update_test import FakeBw, as_bw, make_desired, make_existing
 from pykeepass import create_database
 
-from kp2bw._item_sync import (
+from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw.bw_types import BwItemResponse
+from kp2bw.convert import Converter
+from kp2bw.exceptions import ConversionError
+from kp2bw.item_sync import (
     content_signature,
     pre_fido2_content_signature,
     sync_stamp_matches,
 )
-from kp2bw._source_fields import source_field_name
-from kp2bw._templates import (
+from kp2bw.source_fields import source_field_name
+from kp2bw.templates import (
     TemplateRule,
     apply_template,
     parse_template_overrides,
     plan_template,
     recognize_template,
 )
-from kp2bw.bw_serve import BitwardenServeClient
-from kp2bw.bw_types import BwItemResponse
-from kp2bw.convert import Converter
-from kp2bw.exceptions import ConversionError
 
 
 def main() -> None:
@@ -109,7 +109,7 @@ def main() -> None:
         map_templates=True,
         update_existing=False,
     )
-    passkey_login = _make_existing(collectionIds=["old"])
+    passkey_login = make_existing(collectionIds=["old"])
     login = passkey_login.get("login")
     assert login is not None
     login["fido2Credentials"] = [
@@ -129,12 +129,12 @@ def main() -> None:
             "creationDate": None,
         }
     ]
-    target = _make_desired(
+    target = make_desired(
         type=3, card={"number": "4111111111111111"}, collectionIds=["new"]
     )
     client = FakeBw()
-    outcome, uploads, stale = skip._reconcile_existing_item(
-        _as_bw(client),
+    outcome, uploads, stale = skip.reconcile_existing_item(
+        as_bw(client),
         passkey_login,
         None,
         target,
@@ -145,7 +145,7 @@ def main() -> None:
     assert outcome == "collection" and not uploads and not stale
     assert client.updates[0][1].get("login") == login
     assert client.updates[0][1]["type"] == 1
-    item = conv._create_bw_python_object(
+    item = conv.create_bw_python_object(
         "Card",
         "notes",
         "https://example.test",
@@ -190,7 +190,7 @@ def main() -> None:
     existing = cast(BwItemResponse, copy.deepcopy(item))
     existing.update(id="destination", object="item", revisionDate="revision")
     existing.pop("login", None)
-    assert not conv._content_differs(existing, item), (
+    assert not conv.content_differs(existing, item), (
         "Wire format must retain the same signature"
     )
     assert "login" not in BitwardenServeClient.item_update_body(existing)
@@ -198,7 +198,7 @@ def main() -> None:
     assert sync_stamp_matches(existing, stamp)
     assert existing["card"] is not None
     existing["card"]["number"] = "5555555555554444"
-    assert conv._is_user_modified(existing)
+    assert conv.is_user_modified(existing)
     assert not sync_stamp_matches(existing, pre_fido2_content_signature(existing)), (
         "Old login-only stamps cannot authenticate native fields"
     )
@@ -242,12 +242,12 @@ def main() -> None:
                 map_templates=enabled,
             )
             with patch.object(
-                converter, "_create_bitwarden_items_for_entries", return_value=0
+                converter, "create_bitwarden_items_for_entries", return_value=0
             ):
                 assert converter.convert() == 0
             items = {
-                key: converter._unpack_entry(value)[2]
-                for key, value in converter._entries.items()
+                key: converter.unpack_entry(value)[2]
+                for key, value in converter.entries.items()
             }
             assert items[card.uuid.hex.upper()]["type"] == (3 if enabled else 1)
             assert items[ordinary.uuid.hex.upper()]["type"] == 1

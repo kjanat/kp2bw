@@ -6,9 +6,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from _scope_fixture import create_scope_organization
-from e2e_vaultwarden_test import _login_session, _run
+from e2e_vaultwarden_test import login_session, run
 from pykeepass import create_database
+from scope_fixture import create_scope_organization
 
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.convert import Converter
@@ -33,8 +33,8 @@ def main() -> None:
             NODE_EXTRA_CA_CERTS=str(cert),
             BW_NOINTERACTION="true",
         )
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(env, email, password)
+        run(["bw", "config", "server", server], env=env)
+        login_session(env, email, password)
         with patch.dict(os.environ, env):
             for organization in (None, org_id):
                 source = tmp / f"limits-{organization}.kdbx"
@@ -113,7 +113,7 @@ def main() -> None:
                                 meta.get("revisionDate")
                                 == revisions[metadata_entry.uuid.hex.upper()]
                             )
-                            bw._request("DELETE", f"/object/item/{meta['id']}")
+                            bw.request("DELETE", f"/object/item/{meta['id']}")
                         else:
                             metadata_ids = ids
                             revisions[metadata_entry.uuid.hex.upper()] = meta.get(
@@ -149,7 +149,7 @@ def main() -> None:
                             revision = full.get("revisionDate")
                             if rerun:
                                 assert revision == revisions[source_id]
-                                bw._request("DELETE", f"/object/item/{item['id']}")
+                                bw.request("DELETE", f"/object/item/{item['id']}")
                             else:
                                 revisions[source_id] = revision
     print("personal and organization field boundary round trips passed")

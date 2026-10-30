@@ -4,12 +4,12 @@ import uuid
 from pathlib import Path
 from typing import cast
 
-from e2e_vaultwarden_test import _bw_json, _get_session, _run, _run_migration
+from e2e_vaultwarden_test import bw_json, get_session, run, run_migration
 from pykeepass import create_database
 from reserved_fields_test import append_field
 
-from kp2bw._source_fields import source_field_name
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.source_fields import source_field_name
 
 
 def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> None:
@@ -33,10 +33,10 @@ def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> N
     database.save()
 
     def read_cases() -> dict[str, BwItemResponse]:
-        session = _get_session(env, password)
-        _run(["bw", "sync", "--session", session], env=env)
+        session = get_session(env, password)
+        run(["bw", "sync", "--session", session], env=env)
         result: dict[str, BwItemResponse] = {}
-        for item in _bw_json(env, "list", "items", "--session", session):
+        for item in bw_json(env, "list", "items", "--session", session):
             candidate = cast(BwItemResponse, item)
             name = candidate.get("name")
             if name not in identities:
@@ -54,9 +54,9 @@ def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> N
         return result
 
     try:
-        _run_migration(source, kp_password, password, env, metadata=True)
+        run_migration(source, kp_password, password, env, metadata=True)
         first = read_cases()
-        _run_migration(source, kp_password, password, env, metadata=True)
+        run_migration(source, kp_password, password, env, metadata=True)
         second = read_cases()
         for name in identities:
             assert first[name]["id"] == second[name]["id"]
@@ -64,9 +64,9 @@ def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> N
                 "Unchanged source item rewritten"
             )
     finally:
-        session = _get_session(env, password)
-        _run(["bw", "sync", "--session", session], env=env)
-        for item in _bw_json(env, "list", "items", "--session", session):
+        session = get_session(env, password)
+        run(["bw", "sync", "--session", session], env=env)
+        for item in bw_json(env, "list", "items", "--session", session):
             candidate = cast(BwItemResponse, item)
             if candidate.get("name") not in identities:
                 continue
@@ -74,7 +74,7 @@ def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> N
                 field["name"] == "KP2BW_ID" and field["value"] in identities.values()
                 for field in candidate.get("fields") or []
             ):
-                _run(
+                run(
                     [
                         "bw",
                         "delete",

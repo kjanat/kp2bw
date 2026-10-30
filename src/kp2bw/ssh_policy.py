@@ -9,11 +9,11 @@ from .exceptions import BitwardenClientError
 type PolicyObject = Mapping[str, object]
 
 
-def _identifier(value: object) -> str | None:
+def policy_identifier(value: object) -> str | None:
     return value.lower() if isinstance(value, str) and value else None
 
 
-def _applies(organization: PolicyObject | None) -> bool:
+def applies(organization: PolicyObject | None) -> bool:
     # Match the Bitwarden SDK / vaultwarden library membership exemptions.
     # A policy without its membership context remains enforced.
     if organization is None:
@@ -32,7 +32,7 @@ def _applies(organization: PolicyObject | None) -> bool:
     )
 
 
-def _restricted_types(policy: PolicyObject) -> frozenset[int]:
+def restricted_types(policy: PolicyObject) -> frozenset[int]:
     data = policy.get("data")
     if isinstance(data, str):
         try:
@@ -68,12 +68,12 @@ def require_item_policy_allowed(
     remains allowed, matching both clients' item visibility rules.
     """
     kind = "SSH" if item_type == 5 else f"type-{item_type}"
-    memberships = {_identifier(org.get("id")): org for org in organizations}
+    memberships = {policy_identifier(org.get("id")): org for org in organizations}
     if None in memberships:
         raise BitwardenClientError(
             "Cannot verify item policy: invalid organization identity"
         )
-    target = _identifier(organization_id)
+    target = policy_identifier(organization_id)
     if target is not None and target not in memberships:
         raise BitwardenClientError(
             "Cannot verify item policy: target organization is not in the synced profile"
@@ -88,18 +88,18 @@ def require_item_policy_allowed(
     for policy in policies:
         if policy.get("enabled") is not True or policy.get("type") not in (5, 15):
             continue
-        identifier = _identifier(policy.get("organizationId"))
+        identifier = policy_identifier(policy.get("organizationId"))
         if identifier is None:
             raise BitwardenClientError(
                 "Cannot verify item policy: policy has no organization identity"
             )
-        if not _applies(memberships.get(identifier)):
+        if not applies(memberships.get(identifier)):
             continue
         if policy["type"] == 5 and target is None:
             raise BitwardenClientError(
                 f"Organization policy forbids personal-vault {kind} items"
             )
-        if policy["type"] == 15 and item_type in _restricted_types(policy):
+        if policy["type"] == 15 and item_type in restricted_types(policy):
             restricted.add(identifier)
     if restricted and (target is None or target in restricted):
         raise BitwardenClientError(

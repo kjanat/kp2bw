@@ -4,19 +4,19 @@ import copy
 import json
 from unittest.mock import patch
 
-from migrate_uris_test import _login, _MigrateClient
+from migrate_uris_test import MigrateClient, make_login
 
 from kp2bw import cli
-from kp2bw._fixups import FixupResult, run_fixups
-from kp2bw._item_sync import stamp_content, sync_stamp_matches
 from kp2bw.bw_serve import item_kp2bw_sync
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.fixups import FixupResult, run_fixups
+from kp2bw.item_sync import stamp_content, sync_stamp_matches
 
 YAML = "expires: '2040-01-01T00:00:00+00:00'\ntags:\n- b\n- a\n- 'café'\n"
 
 
 def metadata(item_id: str, value: str = YAML) -> BwItemResponse:
-    item = _login(item_id, [], "https://existing.example")
+    item = make_login(item_id, [], "https://existing.example")
     item["fields"] = [{"name": "KP2BW_META", "value": value, "type": 0}]
     return item
 
@@ -65,10 +65,10 @@ def main() -> None:
         "type": 0,
     })
     bad.append(malformed_and_uri)
-    hidden = _login("hidden", ["KP2A_URL"], "https://existing.example")
+    hidden = make_login("hidden", ["KP2A_URL"], "https://existing.example")
     hidden["fields"][0]["type"] = 1
     bad.append(hidden)
-    collision = _login("uri-collision", [], "https://example.com/app/")
+    collision = make_login("uri-collision", [], "https://example.com/app/")
     collision_login = collision.get("login")
     assert collision_login is not None
     collision_login["uris"] = [{"uri": "https://example.com/app/", "match": 3}]
@@ -90,7 +90,7 @@ def main() -> None:
     bad.append(two_fields)
     items = [stamped, modified, unstamped, canonical, org, outside, *bad]
     original = copy.deepcopy(items)
-    client = _MigrateClient(items)
+    client = MigrateClient(items)
     result = run_fixups(client)
     assert result == FixupResult(
         scanned=4 + len(bad), migrated=2, skipped=2, failed=len(bad)
@@ -122,8 +122,8 @@ def main() -> None:
     edited["notes"] = "concurrent edit"
     edited["revisionDate"] = "2026-09-05T00:00:05.000Z"
     for concurrent in (
-        _MigrateClient([race], item_versions={"race": [race, edited]}),
-        _MigrateClient([race], item_at_update={"race": edited}),
+        MigrateClient([race], item_versions={"race": [race, edited]}),
+        MigrateClient([race], item_at_update={"race": edited}),
     ):
         result = run_fixups(concurrent)
         assert result.migrated == 0 and result.skipped + result.failed == 1
@@ -132,13 +132,13 @@ def main() -> None:
     # The CLI must route fixup without a source database or KeePass prompt.
     with (
         patch.object(cli.sys, "argv", ["kp2bw", "--fixup", "-y"]),
-        patch.object(cli, "_load_dotenv", return_value=None),
-        patch.object(cli, "_configure_logging", return_value=None),
+        patch.object(cli, "load_dotenv", return_value=None),
+        patch.object(cli, "configure_logging", return_value=None),
         patch.object(cli, "ensure_bw_available"),
         patch.object(
-            cli, "_read_password", side_effect=AssertionError("unexpected prompt")
+            cli, "read_password", side_effect=AssertionError("unexpected prompt")
         ),
-        patch.object(cli, "_run_fixup") as runner,
+        patch.object(cli, "run_fixup") as runner,
     ):
         cli.main()
         runner.assert_called_once()

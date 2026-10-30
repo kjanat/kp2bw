@@ -11,12 +11,12 @@ src/kp2bw/
 ├── cli.py              # CLI parsing, prompts, env handling, run mode selection
 ├── convert.py          # Conversion orchestrator and entry transformation pipeline
 ├── bw_serve.py         # bw serve process lifecycle + HTTP CRUD + attachment upload
-├── _item_sync.py        # Content signatures, compatibility, and sync stamps
+├── item_sync.py        # Content signatures, compatibility, and sync stamps
 ├── otp.py              # KeePass/PPS OTP custom fields -> Bitwarden login.totp (pure, no I/O)
 ├── uri_mapping.py      # KeePass URL syntax -> Bitwarden login URIs + match modes
 ├── bw_types.py         # Hand-written TypedDict types (supplements generated types)
-├── _bw_api_types.py    # Auto-generated from specs/vault-management-api.json (DO NOT EDIT)
-├── _console.py         # Shared Rich Console instance (stderr)
+├── bw_api_types.py    # Auto-generated from specs/vault-management-api.json (DO NOT EDIT)
+├── console.py         # Shared Rich Console instance (stderr)
 ├── exceptions.py       # BitwardenClientError, ConversionError
 ├── __main__.py         # python -m kp2bw handoff
 └── __init__.py         # __version__ from installed metadata
@@ -29,7 +29,7 @@ src/kp2bw/
 | Add/adjust CLI flags   | `src/kp2bw/cli.py`             | `main()` and argument parser are here               |
 | Change import behavior | `src/kp2bw/convert.py`         | Top-level `convert()` flow and migration phases     |
 | Tune dedup/idempotency | `src/kp2bw/bw_serve.py`        | Existing item index + batch create behavior         |
-| Change sync signatures | `src/kp2bw/_item_sync.py`      | Signature compatibility and managed stamp helpers   |
+| Change sync signatures | `src/kp2bw/item_sync.py`       | Signature compatibility and managed stamp helpers   |
 | Attachment behavior    | `src/kp2bw/bw_serve.py`        | Async upload path and multipart logic               |
 | Map KeePass fields     | `src/kp2bw/convert.py`         | Entry/custom field/TOTP/passkey mapping             |
 | OTP field resolution   | `src/kp2bw/otp.py`             | Field-name schemes, decoding, `otpauth://` emission |
@@ -53,12 +53,12 @@ src/kp2bw/
   `bw serve` can return a transient empty or partial list after successful sync. CRUD and attachment transport stay HTTP.
 - Logging decrypted vault content or credential-bearing command strings.
 - Breaking idempotency: a re-run with no KeePass changes must issue no `PUT` and upload no attachment
-  (`_content_differs` / upload-if-missing gate this).
+  (`content_differs` / upload-if-missing gate this).
 - Changing conversion behavior without updating e2e expectations in `tests/e2e_vaultwarden_test.py`.
 
 ## NOTES
 
-- `_history.py` extracts distinct previous passwords using the next password-changing version's modification time.
+- `history.py` extracts distinct previous passwords using the next password-changing version's modification time.
   Native history is enabled by default; the hidden `KP2BW_HISTORY` field records hashes of imported records so unrelated destination
   history is retained. Only marked items include native history in content signatures; unmarked existing items retain
   their previous signature semantics. Native updates use conditional revisions and read-back verification. The
@@ -72,8 +72,8 @@ src/kp2bw/
   authenticates a legacy source field named `KP2BW_HISTORY`; it is escaped before adding managed history. Conditional
   updates use the payload's original revision, and `--no-update` bypasses history merging while retaining collection sync.
 
-- `--checkpoint` uses `_checkpoint.py` for atomic, locked metadata bound to server/account/source/scope and
-  `_attachment_resume.py` for transaction filename and recovery decisions. Cached bytes are reusable only when
+- `--checkpoint` uses `checkpoint.py` for atomic, locked metadata bound to server/account/source/scope and
+  `attachment_resume.py` for transaction filename and recovery decisions. Cached bytes are reusable only when
   source hashes, destination associations, item revisions and attachment metadata all match. Pending replacements
   retain the previous file's hashes; cleanup checks those bytes and concurrent revision changes before deletion.
   Checkpoint files contain hashes and IDs, never credentials or decrypted attachment contents.
@@ -85,9 +85,9 @@ src/kp2bw/
   Reports expose IDs, field paths, counts and attachment names/bytes, never payload values. Source-only checkpoint
   names are marked provisional because the target account contributes to transaction filenames.
 - Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on, `Converter(update_existing=...)`):
-  `convert._reconcile_existing_item()` diffs a matched login item via `_content_differs()` and, when changed, `PUT`s a
-  payload built by `_build_update_payload()` (preserves id/favorite/folder/org, unions collectionIds, keeps a
-  Bitwarden-side passkey absent from KeePass). `_attachments.py` allocates unique filenames and binds each source to
+  `convert.reconcile_existing_item()` diffs a matched login item via `content_differs()` and, when changed, `PUT`s a
+  payload built by `build_update_payload()` (preserves id/favorite/folder/org, unions collectionIds, keeps a
+  Bitwarden-side passkey absent from KeePass). `attachments.py` allocates unique filenames and binds each source to
   its destination attachment ID in `KP2BW_FILE_*` fields. Source keys distinguish originals, notes and custom fields;
   duplicate originals use their ordinal among same-named references because KeePass binary indexes are not stable IDs.
   Stored hashes detect destination edits. Legacy matching must be unique; ambiguity fails without changing files.
@@ -97,8 +97,8 @@ src/kp2bw/
   survives normal content updates, and is removed by `--strip-ids`. Removed source files are not automatically deleted.
   Content and attachment failures are non-fatal and counted; `convert()` returns the failure count and the CLI exits
   non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-membership sync still applies).
-- Oversize custom fields (encrypted value exceeds the field-specific budget in `_field_limits.py`) are offloaded to a `<key>.txt` attachment instead of an
-  inline field (mirrors long notes → `notes.txt`), decided in `_add_bw_entry_to_entries_dict()`. Three carve-outs: a
+- Oversize custom fields (encrypted value exceeds the field-specific budget in `field_limits.py`) are offloaded to a `<key>.txt` attachment instead of an
+  inline field (mirrors long notes → `notes.txt`), decided in `add_bw_entry_to_entries_dict()`. Three carve-outs: a
   consumed OTP key is already in `login.totp`, so its raw field is dropped as a dedup (no warning); a hidden OTP secret,
   passkey attribute, or KeePass-protected field (`custom_protected`) survives nowhere else, so it is **not** written to
   a plaintext attachment by default — it is warned-and-dropped to avoid silent data loss. `--include-oversize-secrets`
@@ -106,31 +106,31 @@ src/kp2bw/
   secrets to their attachment too.
 - Dedup keys on a **stable identity**, not `(folder, title)`. Every migrated item carries a plain-text `KP2BW_ID` custom
   field holding the source KeePass entry UUID (an identifier, not a secret — hence text, not hidden; stamped in
-  `_add_bw_entry_to_entries_dict`, read by `bw_serve.item_kp2bw_id`, and excluded from `_fields_signature` so it never
-  triggers a spurious update). `_build_dedup_index()` builds `_by_uuid` (stamped items) plus `_legacy_by_folder_name`
+  `add_bw_entry_to_entries_dict`, read by `bw_serve.item_kp2bw_id`, and excluded from `fields_signature` so it never
+  triggers a spurious update). `build_dedup_index()` builds `by_uuid` (stamped items) plus `legacy_by_folder_name`
   (unstamped **login** items only). Per entry, `convert` matches by UUID (`get_item_by_uuid`); failing that it claims
   one unstamped legacy item by `(folder, name)` (`claim_legacy_item`) and `force_update`s it to backfill the stamp;
   failing that it creates a new item. This stops distinct same-titled entries from collapsing onto one item (data loss)
   and keeps re-runs idempotent across title/folder edits. The legacy adoption is a one-time path for vaults imported
   before stable identity.
 - Manual-edit protection (issue #30, `--force-update` / `KP2BW_FORCE_UPDATE`, `Converter(force_update=...)` →
-  `self._force_update_all`): every written item carries a `KP2BW_SYNC` plain-text field holding
-  `_item_sync.content_signature(item)` — a sha256 over name, notes, custom fields (including `linkedId`), and login
+  `self.force_update_all`): every written item carries a `KP2BW_SYNC` plain-text field holding
+  `item_sync.content_signature(item)` — a sha256 over name, notes, custom fields (including `linkedId`), and login
   credentials/URIs (including URI order and `match`) plus, when present, passkeys (`credentialId` carrying the
   `b64.` marker, `keyValue`, relying party, user handle and names); managed stamps are excluded. Pre-3.8.1 stamps
   remain valid over their original field/URI coverage and 3.8.1 stamps over everything but passkeys
-  (`_item_sync.sync_stamp_generation`); both are upgraded on a safe write, and ambiguous edits to newly covered
+  (`item_sync.sync_stamp_generation`); both are upgraded on a safe write, and ambiguous edits to newly covered
   values fail closed. An item without passkeys hashes identically under the current and 3.8.1 algorithms, so its
   3.8.1 stamp reads as current and a passkey that appears from KeePass syncs; a passkey deleted in Bitwarden under a
   3.8.1 stamp is not detectable and is written again. When content differs **and** the item was user-edited **and** not
-  `force_update`/`_force_update_all`, it returns `"protected"` (no PUT, attachments skipped) instead of clobbering.
+  `force_update`/`force_update_all`, it returns `"protected"` (no PUT, attachments skipped) instead of clobbering.
   kp2bw's own writes restamp, so they never self-trip; an unstamped (legacy/first-run) item returns `False` and updates
   normally to establish the stamp. The signature mechanism is deliberate over comparing Bitwarden's `revisionDate` to a
   client timestamp — the server bumps `revisionDate` *after* kp2bw generates a stamp, so a timestamp compare would
   false-trip every kp2bw-written item. The `protected` count is reported in the summary. Tests: `protect_edits_test.py`.
 - `--strip-ids` (`KP2BW_STRIP_IDS`, default off) is the finalize-mode inverse of the stamps above: it short-circuits
   migration entirely (`main()` returns before any KeePass read or password prompt) and only touches Bitwarden, removing
-  the `KP2BW_ID` **and** `KP2BW_SYNC` fields from every in-scope item via `_run_strip_ids` (`cli.py`) →
+  the `KP2BW_ID` **and** `KP2BW_SYNC` fields from every in-scope item via `run_strip_ids` (`cli.py`) →
   `strip_field_from_items(*field_names)` (`bw_serve.py`, one full `update_item` `PUT` per stamped item). Scope mirrors a
   migration (`-o`/`-c`), so only items kp2bw could have stamped are touched. It is **irreversible** and degrades future
   re-runs (they fall back to `(folder, name)` matching), so an interactive run confirms first (skippable with
@@ -155,21 +155,21 @@ src/kp2bw/
   consumed; otherwise the TOTP fields are read. A default-config Base32 secret is emitted as the bare canonical secret,
   anything else (other encoding, non-default digits/period/algorithm) as a self-describing `otpauth://` URI. HOTP has no
   Bitwarden target: its secret is warned about and kept hidden.
-- Field *names* are a `_TotpScheme` (secret decoders in priority order, the Base32 key, length/period keys, optional
+- Field *names* are a `TotpScheme` (secret decoders in priority order, the Base32 key, length/period keys, optional
   algorithm key), selected per call by `resolve_otp(..., totp_pps=...)`. The KeePass scheme reads
   `TimeOtp-Secret-Base32`/`-Hex`/`-Base64`/`TimeOtp-Secret` plus `TimeOtp-Length`/`-Period`/`-Algorithm`; the Pleasant
   Password Server scheme (`--totp-pps` / `KP2BW_TOTP_PPS` / `Converter(totp_pps=...)`, issue #45) reads `TOTPSecret`
   (always Base32) plus `TOTPDigits`/`TOTPPeriod` and has no algorithm key, so `DEFAULT_ALGORITHM` (SHA-1) applies. The
-  schemes **replace** each other for reading: only the active one is decoded and consumed. Hiding is not scheme-scoped -- `_ALL_SECRET_KEYS` spans **both** schemes plus HOTP, so a `TimeOtp-Secret-*` field under `--totp-pps` (or a
+  schemes **replace** each other for reading: only the active one is decoded and consumed. Hiding is not scheme-scoped -- `ALL_SECRET_KEYS` spans **both** schemes plus HOTP, so a `TimeOtp-Secret-*` field under `--totp-pps` (or a
   `TOTPSecret` field without it) is carried over as a **hidden** field instead of a visible one, upholding the module
   invariant that no OTP secret is ever written in the clear. Config keys (`*-Length`/`Digits`, `*-Period`,
   `TimeOtp-Algorithm`) hold no secret, so the inactive scheme's stay ordinary custom fields. Tests: `tests/otp_test.py`.
 - Source fields named `KP2BW_ID`, `KP2BW_SYNC`, `KP2BW_META`, names beginning `KeePass:`, and duplicate custom
-  names are escaped by `_source_fields.py`. The format is `KeePass:<percent-encoded original>:<occurrence>`, with
+  names are escaped by `source_fields.py`. The format is `KeePass:<percent-encoded original>:<occurrence>`, with
   one-based occurrences in XML order. Only exact metadata names are bookkeeping; escaped fields remain in content
   signatures and survive `--strip-ids`. Existing valid sync stamps allow one repair from the original KeePass source;
   target-side edits remain protected. Historical REF recognition replays the former field behaviour separately.
-- Custom properties are read by `convert._read_entry_custom_properties()` directly from each entry's `<String>`
+- Custom properties are read by `convert.read_entry_custom_properties()` directly from each entry's `<String>`
   children. Do not replace this with `Entry.custom_properties` or dynamic XPath: supported PyKeePass versions
   interpolate custom keys into XPath. The single traversal returns both values and `Protected=True` keys so normal and
   REF-created items share hidden/oversize-secret behavior.
@@ -180,24 +180,24 @@ src/kp2bw/
   matching-content re-run repairs stale sync stamps written before REF restamping existed; the legacy shadow separately
   replays the historical DFS/XML order so deterministic fresh ordering does not reject untouched old output.
 - Dedup is org-scoped when `--bitwarden-org` is set and collection-scoped when a fixed `--bitwarden-collection` is
-  given: `_build_dedup_index()` / `list_items()` pass `organization_id` / `collection_id`. Personal vault (both `None`)
+  given: `build_dedup_index()` / `list_items()` pass `organization_id` / `collection_id`. Personal vault (both `None`)
   indexes all visible items. `list_items()` locally intersects all supplied filters because the official CLI combines
   them as a union; missing membership data is excluded from a constrained scope. All maintenance/reporting callers
   share this boundary. Tests: `bw_serve_scope_test.py`, `e2e_scope_test.py`.
 - `bw serve` teardown is **port-based** on Windows: a shim-launched serve runs as a `node` grandchild that `taskkill /T`
   does not reliably reap, so `terminate_serve(port=)` / `close()` also kill whatever still `LISTEN`s on the serve port
-  (`parse_listening_pids` → `_kill_port_listeners`). Without this, orphaned serves accumulate and deadlock the shared
+  (`parse_listening_pids` → `kill_port_listeners`). Without this, orphaned serves accumulate and deadlock the shared
   `bw` app-data on later runs.
-- A full DEBUG log is always written to a per-user file (`_configure_logging` in `cli.py`; `%LOCALAPPDATA%/kp2bw/logs`,
+- A full DEBUG log is always written to a per-user file (`configure_logging` in `cli.py`; `%LOCALAPPDATA%/kp2bw/logs`,
   override `KP2BW_LOG_FILE` / `KP2BW_LOG_DIR`) independent of console verbosity. `bw serve` HTTP errors carry the
   response body via `format_http_error` (no more opaque `HTTP 400`).
 - Bitwarden rate limits (issue #65): `bw serve` answers the server's 429 with HTTP 400, so `rate_limit_wait_s` reads
   it from the raw body (`status code 429`, `Too many requests`, or the legacy client's `Rate limit exceeded`). It waits
   the named `Try again in <n><s|m|h|d>` window, or backs off from 1s doubling to 60s, for up to 8 retries; a window
-  over 60s fails the request at once. `_request`, `get_attachment` and `upload_attachment` (including its self-heal `/sync`)
-  retry every method, POST included, since the server rejects before acting. Tests override `_sleep` /
-  `_async_sleep`. Upstream permalinks live in the `rate_limit_wait_s` docstring. Tests: `tests/bw_serve_rate_limit_test.py`.
-- `_get_session` retries `bw unlock` once when stderr names `KeyIdBackfillError` (bitwarden/clients#23937): the CLI
+  over 60s fails the request at once. `request`, `get_attachment` and `upload_attachment` (including its self-heal `/sync`)
+  retry every method, POST included, since the server rejects before acting. Tests override `sleep` /
+  `async_sleep`. Upstream permalinks live in the `rate_limit_wait_s` docstring. Tests: `tests/bw_serve_rate_limit_test.py`.
+- `get_session` retries `bw unlock` once when stderr names `KeyIdBackfillError` (bitwarden/clients#23937): the CLI
   starts a 24-hour cooldown on that failure, so the retry passes. Tests: `tests/bw_serve_unlock_test.py`. The e2e login
   tolerates the same error and falls back to unlock.
 - The serve process is checked before requests and after transport disconnects. Confirmed exit raises
@@ -208,7 +208,7 @@ src/kp2bw/
   cross-item concurrency. After all uploads finish, a sync and byte comparison verify acknowledged files. Missing,
   unreadable, or mismatched files count as failures and prevent stale-copy deletion. Tests:
   `tests/bw_serve_upload_batch_test.py`, `tests/e2e_attachment_batch_test.py`.
-- `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
+- `bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.
 
 - `--entry-id` / `--item-id` resolve one stable source/destination association before writes. Selection checks all visible
@@ -220,14 +220,14 @@ src/kp2bw/
 - Attachment association updates force a server sync before their verification read. A successful PUT may precede the
   official CLI's local-cache update; old copies remain until the server-backed read confirms the new associations.
 
-- Opt-in `--map-templates` applies `_templates.py` rules after REF resolution. Only actual `_etm_template_uuid` references
+- Opt-in `--map-templates` applies `templates.py` rules after REF resolution. Only actual `_etm_template_uuid` references
   to marked templates are classified. Native card/identity/secure-note fields enter content signatures; old login-only
   stamp algorithms cannot authenticate them. Internal parsed source login data remains available for provenance but is
   omitted by HTTP create/update for native items. Its nonempty values are retained in a custom field.
-- `--ssh-map` selects native SSH conversion explicitly by group, template UUID or field value. `_ssh_keys.py` validates
-  RSA/Ed25519 material and derives the public key and fingerprint; `_ssh_mapping.py` retains original source fields.
-  `_cli_policy_state.py` reads only fresh account/server-matched policy metadata from the active CLI profile, and
-  `_ssh_policy.py` applies organization membership exemptions and item restrictions. `require_ssh_supported()` checks
+- `--ssh-map` selects native SSH conversion explicitly by group, template UUID or field value. `ssh_keys.py` validates
+  RSA/Ed25519 material and derives the public key and fingerprint; `ssh_mapping.py` retains original source fields.
+  `cli_policy_state.py` reads only fresh account/server-matched policy metadata from the active CLI profile, and
+  `ssh_policy.py` applies organization membership exemptions and item restrictions. `require_ssh_supported()` checks
   these policies and server capability before conversion creates folders, collections or items. Missing metadata fails
   closed. Native SSH fields participate in content signatures, including manual-edit protection.
 
@@ -237,7 +237,7 @@ src/kp2bw/
 - Historical REF recognition reconstructs the former plaintext field/notes cutoff independently of current encrypted budgets.
   Untouched old imports remain eligible for automatic upgrade; edits to their old inline fields stay protected.
 
-- `_fixups.py` registers field-local upgrades for `--fixup`: URI fields and legacy YAML metadata. It validates every
+- `fixups.py` registers field-local upgrades for `--fixup`: URI fields and legacy YAML metadata. It validates every
   transformation on a copy, checks current/legacy sync stamps, rereads the complete update body, then issues one
   revision-conditional PUT. Personal scope explicitly excludes organization items. Unknown/ambiguous data fails per
   item without exposing field values; changed stamps are skipped. The existing URI-only command remains separate.

@@ -5,10 +5,10 @@ from typing import Literal, cast
 
 from pykeepass import Entry, Group
 
-from ._attachment_capability import AttachmentCapability
-from ._attachments import SourceFile
-from ._history import HISTORY_FIELD_NAME
+from .attachment_capability import AttachmentCapability
+from .attachments import SourceFile
 from .bw_types import BwItemCreate
+from .history import HISTORY_FIELD_NAME
 
 
 def source_inventory(entry: Entry) -> dict[str, int]:

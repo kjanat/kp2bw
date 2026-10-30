@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-_TESTS_DIR = Path(__file__).resolve().parent
+TESTS_DIR = Path(__file__).resolve().parent
 
 
-def _run_script_main(script_name: str) -> None:
-    module_globals = runpy.run_path(str(_TESTS_DIR / script_name))
+def run_script_main(script_name: str) -> None:
+    module_globals = runpy.run_path(str(TESTS_DIR / script_name))
     main = module_globals.get("main")
     if not callable(main):
         raise TypeError(f"{script_name} does not expose callable main()")
@@ -16,135 +16,135 @@ def _run_script_main(script_name: str) -> None:
 
 
 def test_bw_serve_sanitization_script() -> None:
-    _run_script_main("bw_serve_sanitization_test.py")
+    run_script_main("bw_serve_sanitization_test.py")
 
 
 def test_history_script() -> None:
-    _run_script_main("history_test.py")
+    run_script_main("history_test.py")
 
 
 def test_preview_script() -> None:
-    _run_script_main("preview_test.py")
+    run_script_main("preview_test.py")
 
 
 def test_bw_serve_attachment_script() -> None:
-    _run_script_main("bw_serve_attachment_test.py")
+    run_script_main("bw_serve_attachment_test.py")
 
 
 def test_bw_serve_upload_batch_script() -> None:
-    _run_script_main("bw_serve_upload_batch_test.py")
+    run_script_main("bw_serve_upload_batch_test.py")
 
 
 def test_bw_serve_bw_missing_script() -> None:
-    _run_script_main("bw_serve_bw_missing_test.py")
+    run_script_main("bw_serve_bw_missing_test.py")
 
 
 def test_bw_serve_command_script() -> None:
-    _run_script_main("bw_serve_command_test.py")
+    run_script_main("bw_serve_command_test.py")
 
 
 def test_bw_serve_exit_script() -> None:
-    _run_script_main("bw_serve_exit_test.py")
+    run_script_main("bw_serve_exit_test.py")
 
 
 def test_bw_serve_batch_script() -> None:
-    _run_script_main("bw_serve_batch_test.py")
+    run_script_main("bw_serve_batch_test.py")
 
 
 def test_bw_serve_unlock_script() -> None:
-    _run_script_main("bw_serve_unlock_test.py")
+    run_script_main("bw_serve_unlock_test.py")
 
 
 def test_bw_serve_rate_limit_script() -> None:
-    _run_script_main("bw_serve_rate_limit_test.py")
+    run_script_main("bw_serve_rate_limit_test.py")
 
 
 def test_bw_serve_org_collection_script() -> None:
-    _run_script_main("bw_serve_org_collection_test.py")
+    run_script_main("bw_serve_org_collection_test.py")
 
 
 def test_bw_serve_scope_script() -> None:
-    _run_script_main("bw_serve_scope_test.py")
+    run_script_main("bw_serve_scope_test.py")
 
 
 def test_bw_serve_timeout_script() -> None:
-    _run_script_main("bw_serve_timeout_test.py")
+    run_script_main("bw_serve_timeout_test.py")
 
 
 def test_bw_serve_teardown_script() -> None:
-    _run_script_main("bw_serve_teardown_test.py")
+    run_script_main("bw_serve_teardown_test.py")
 
 
 def test_strip_ids_script() -> None:
-    _run_script_main("strip_ids_test.py")
+    run_script_main("strip_ids_test.py")
 
 
 def test_uri_mapping_script() -> None:
-    _run_script_main("uri_mapping_test.py")
+    run_script_main("uri_mapping_test.py")
 
 
 def test_migrate_uris_script() -> None:
-    _run_script_main("migrate_uris_test.py")
+    run_script_main("migrate_uris_test.py")
 
 
 def test_protect_edits_script() -> None:
-    _run_script_main("protect_edits_test.py")
+    run_script_main("protect_edits_test.py")
 
 
 def test_otp_script() -> None:
-    _run_script_main("otp_test.py")
+    run_script_main("otp_test.py")
 
 
 def test_cli_env_script() -> None:
-    _run_script_main("cli_env_test.py")
+    run_script_main("cli_env_test.py")
 
 
 def test_cli_help_script() -> None:
-    _run_script_main("cli_help_test.py")
+    run_script_main("cli_help_test.py")
 
 
 def test_cli_logging_script() -> None:
-    _run_script_main("cli_logging_test.py")
+    run_script_main("cli_logging_test.py")
 
 
 def test_cli_version_script() -> None:
-    _run_script_main("cli_version_test.py")
+    run_script_main("cli_version_test.py")
 
 
 def test_convert_ref_resolution_script() -> None:
-    _run_script_main("convert_ref_resolution_test.py")
+    run_script_main("convert_ref_resolution_test.py")
 
 
 def test_convert_update_script() -> None:
-    _run_script_main("convert_update_test.py")
+    run_script_main("convert_update_test.py")
 
 
 def test_convert_resilience_script() -> None:
-    _run_script_main("convert_resilience_test.py")
+    run_script_main("convert_resilience_test.py")
 
 
 def test_convert_keepass_open_script() -> None:
-    _run_script_main("convert_keepass_open_test.py")
+    run_script_main("convert_keepass_open_test.py")
 
 
 def test_passkey_conversion_script() -> None:
-    _run_script_main("passkey_conversion_test.py")
+    run_script_main("passkey_conversion_test.py")
 
 
 def test_doctor_script() -> None:
-    _run_script_main("doctor_test.py")
+    run_script_main("doctor_test.py")
 
 
 def test_bw_serve_inventory_script() -> None:
-    _run_script_main("bw_serve_inventory_test.py")
+    run_script_main("bw_serve_inventory_test.py")
 
 
 def test_attachment_checkpoint_script() -> None:
-    _run_script_main("attachment_checkpoint_test.py")
+    run_script_main("attachment_checkpoint_test.py")
 
 
 def test_attachment_resume_script() -> None:
-    _run_script_main("attachment_resume_test.py")
+    run_script_main("attachment_resume_test.py")
 
 
 def test_windows_bw_cmd_smoke_script() -> None:
@@ -152,62 +152,62 @@ def test_windows_bw_cmd_smoke_script() -> None:
         pytest.skip("windows bw .cmd smoke runs on Windows only")
     if os.environ.get("KP2BW_RUN_WIN_CMD_SMOKE") != "1":
         pytest.skip("set KP2BW_RUN_WIN_CMD_SMOKE=1 to run the Windows bw .cmd smoke")
-    _run_script_main("windows_bw_cmd_smoke.py")
+    run_script_main("windows_bw_cmd_smoke.py")
 
 
 def test_smoke_script() -> None:
     if os.environ.get("KP2BW_RUN_PACKAGING_TESTS") != "1":
         pytest.skip("set KP2BW_RUN_PACKAGING_TESTS=1 to run packaging smoke tests")
-    _run_script_main("smoke_test.py")
+    run_script_main("smoke_test.py")
 
 
 def test_stubs_smoke_script() -> None:
     if os.environ.get("KP2BW_RUN_PACKAGING_TESTS") != "1":
         pytest.skip("set KP2BW_RUN_PACKAGING_TESTS=1 to run packaging smoke tests")
-    _run_script_main("stubs_smoke_test.py")
+    run_script_main("stubs_smoke_test.py")
 
 
 def test_e2e_vaultwarden_script() -> None:
     if os.environ.get("KP2BW_RUN_E2E_TESTS") != "1":
         pytest.skip("set KP2BW_RUN_E2E_TESTS=1 to run vaultwarden e2e")
-    _run_script_main("e2e_vaultwarden_test.py")
+    run_script_main("e2e_vaultwarden_test.py")
 
 
 def test_reserved_fields_script() -> None:
-    _run_script_main("reserved_fields_test.py")
+    run_script_main("reserved_fields_test.py")
 
 
 def test_attachment_identity_script() -> None:
-    _run_script_main("attachment_identity_test.py")
+    run_script_main("attachment_identity_test.py")
 
 
 def test_templates_script() -> None:
-    _run_script_main("templates_test.py")
+    run_script_main("templates_test.py")
 
 
 def test_ssh_keys_script() -> None:
-    _run_script_main("ssh_keys_test.py")
+    run_script_main("ssh_keys_test.py")
 
 
 def test_ssh_policy_script() -> None:
-    _run_script_main("ssh_policy_test.py")
+    run_script_main("ssh_policy_test.py")
 
 
 def test_cli_policy_state_script() -> None:
-    _run_script_main("cli_policy_state_test.py")
+    run_script_main("cli_policy_state_test.py")
 
 
 def test_ssh_mapping_script() -> None:
-    _run_script_main("ssh_mapping_test.py")
+    run_script_main("ssh_mapping_test.py")
 
 
 def test_field_limits_script() -> None:
-    _run_script_main("field_limits_test.py")
+    run_script_main("field_limits_test.py")
 
 
 def test_item_selection_script() -> None:
-    _run_script_main("item_selection_test.py")
+    run_script_main("item_selection_test.py")
 
 
 def test_fixups_script() -> None:
-    _run_script_main("fixups_test.py")
+    run_script_main("fixups_test.py")

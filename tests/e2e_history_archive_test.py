@@ -10,13 +10,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from e2e_vaultwarden_test import _get_session, _login_session, _run, _run_migration
+from e2e_vaultwarden_test import get_session, login_session, run, run_migration
 from pykeepass import create_database
 
-from kp2bw._attachments import records_from_fields, source_file
-from kp2bw._history import history_signature
-from kp2bw._item_sync import content_signature, stamp_content, sync_stamp_matches
+from kp2bw.attachments import records_from_fields, source_file
 from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw.history import history_signature
+from kp2bw.item_sync import content_signature, stamp_content, sync_stamp_matches
 
 
 def main() -> None:
@@ -36,8 +36,8 @@ def main() -> None:
             BW_NOINTERACTION="true",
             KP2BW_ARCHIVE_HISTORY="true",
         )
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(env, email, password)
+        run(["bw", "config", "server", server], env=env)
+        login_session(env, email, password)
         path = tmp / "history.kdbx"
         db = create_database(path, password="test")
         entry = db.add_entry(
@@ -93,7 +93,7 @@ def main() -> None:
                 return state, json.loads(archive), original["id"]
 
         try:
-            _run_migration(path, "test", password, env)
+            run_migration(path, "test", password, env)
             initial, archive, original_id = read()
             assert len(archive["records"]) == 1
             assert "historical notes" in archive["records"][0]["xml"]
@@ -102,25 +102,25 @@ def main() -> None:
                 base64.b64decode(archive["binaries"][str(binary_id)]["base64"])
                 == historical_bytes
             )
-            _run_migration(path, "test", password, env)
+            run_migration(path, "test", password, env)
             assert read()[0] == initial, (
                 "Unchanged history rewrote the item or attachments"
             )
             entry.save_history()
             entry.mtime = datetime(2020, 3, 1, tzinfo=UTC)
             db.save()
-            _run_migration(path, "test", password, env)
+            run_migration(path, "test", password, env)
             updated, archive, retained_id = read()
             assert len(archive["records"]) == 2 and retained_id == original_id
             assert updated != initial, "New historical record was not archived"
-            _run_migration(path, "test", password, env)
+            run_migration(path, "test", password, env)
             assert read()[0] == updated, "Updated archive did not settle into a no-op"
 
             # Check a fresh sync/export, independent of serve's decrypted cache.
-            session = _get_session(env, password)
-            _run(["bw", "sync", "--session", session], env=env)
+            session = get_session(env, password)
+            run(["bw", "sync", "--session", session], env=env)
             exported = json.loads(
-                _run(
+                run(
                     ["bw", "export", "--format", "json", "--raw", "--session", session],
                     env=env,
                 )
@@ -131,7 +131,7 @@ def main() -> None:
             assert history_signature(exported_item) == expected_history
 
             with patch.dict(os.environ, env), BitwardenServeClient(password) as client:
-                supports_updates = client._supports_history_updates()
+                supports_updates = client.supports_history_updates()
             entry.history[0].password = "corrected historical password"
             db.save()
             command_env = {
@@ -155,7 +155,7 @@ def main() -> None:
                     ("corrected historical password", "2020-02-01T00:00:00.000Z")
                 ]
                 updated = read()[0]
-                _run_migration(path, "test", password, env)
+                run_migration(path, "test", password, env)
                 assert read()[0] == updated
                 assert item_id is not None
                 # Seed a verified destination-only record and then change the
@@ -175,13 +175,13 @@ def main() -> None:
                     client.update_item(item_id, item)
                 entry.history[0].password = "second correction"
                 db.save()
-                _run_migration(path, "test", password, env)
+                run_migration(path, "test", password, env)
                 expected_history = [
                     ("second correction", "2020-02-01T00:00:00.000Z"),
                     ("destination-only history", "2019-01-01T00:00:00.000Z"),
                 ]
                 updated = read()[0]
-                _run_migration(path, "test", password, env)
+                run_migration(path, "test", password, env)
                 assert read()[0] == updated
             else:
                 assert "No item update was sent" in " ".join(result.stderr.split())
@@ -206,7 +206,7 @@ def main() -> None:
                 assert not sync_stamp_matches(item, original_stamp)
                 client.update_item(item_id, item)
             protected = read()[0]
-            _run_migration(path, "test", password, env)
+            run_migration(path, "test", password, env)
             assert read()[0] == protected, "A manual edit was overwritten"
         finally:
             if item_id is not None:
@@ -214,7 +214,7 @@ def main() -> None:
                     patch.dict(os.environ, env),
                     BitwardenServeClient(password) as client,
                 ):
-                    client._request("DELETE", f"/object/item/{item_id}")
+                    client.request("DELETE", f"/object/item/{item_id}")
     print("live native history, export, update safety, archive and reruns passed")
 
 

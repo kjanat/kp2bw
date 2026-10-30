@@ -25,11 +25,11 @@ def has_managed_history(item: BwItemCreate | BwItemResponse) -> bool:
     )
 
 
-def _history_time(value: str | None) -> str | None:
+def history_time(value: str | None) -> str | None:
     if value is None:
         return None
     try:
-        return _timestamp(datetime.fromisoformat(value))
+        return timestamp(datetime.fromisoformat(value))
     except (ValueError, TypeError) as exc:
         raise HistoryConversionError(
             "Password history contains an invalid timestamp"
@@ -41,23 +41,23 @@ def history_signature(
 ) -> list[tuple[str, str | None]]:
     """Normalize equivalent UTC timestamp spellings without exposing values."""
     return [
-        (record["password"], _history_time(record["lastUsedDate"]))
+        (record["password"], history_time(record["lastUsedDate"]))
         for record in item.get("passwordHistory") or []
     ]
 
 
-def _record_hash(record: BwPasswordHistory) -> str:
+def record_hash(record: BwPasswordHistory) -> str:
     """Identify an imported record inside the same encrypted vault item.
 
     This is not a password verifier or a credential store. The fingerprint is
     stored only in the encrypted item containing the full historical password;
     neither value is exposed in logs, previews or checkpoints.
     """
-    value = (record["password"], _history_time(record["lastUsedDate"]))
+    value = (record["password"], history_time(record["lastUsedDate"]))
     return hashlib.sha256(json.dumps(value, ensure_ascii=True).encode()).hexdigest()
 
 
-def _managed_records(item: BwItemCreate | BwItemResponse) -> set[str]:
+def managed_records(item: BwItemCreate | BwItemResponse) -> set[str]:
     fields = [
         field
         for field in item.get("fields") or []
@@ -110,14 +110,12 @@ def apply_native_history(
     silently evicting an unrelated destination record. The opt-in archive has
     no such historical-record limit.
     """
-    old_managed: set[str] = (
-        _managed_records(existing) if existing is not None else set()
-    )
+    old_managed: set[str] = managed_records(existing) if existing is not None else set()
     unrelated = (
         [
             copy.copy(record)
             for record in (existing.get("passwordHistory") or [])
-            if _record_hash(record) not in old_managed
+            if record_hash(record) not in old_managed
         ]
         if existing is not None
         else []
@@ -142,7 +140,7 @@ def apply_native_history(
         "name": HISTORY_FIELD_NAME,
         "type": 1,
         "value": json.dumps(
-            {"version": 1, "records": [_record_hash(record) for record in imported]},
+            {"version": 1, "records": [record_hash(record) for record in imported]},
             sort_keys=True,
         ),
     })
@@ -151,10 +149,10 @@ def apply_native_history(
 
 def imported_history_count(item: BwItemCreate | BwItemResponse) -> int:
     """Count source records represented natively, excluding unrelated history."""
-    return len(_managed_records(item))
+    return len(managed_records(item))
 
 
-def _utc(value: datetime | None) -> datetime:
+def utc(value: datetime | None) -> datetime:
     if value is None:
         raise HistoryConversionError("History timestamp is missing")
     if value.tzinfo is None:
@@ -162,8 +160,8 @@ def _utc(value: datetime | None) -> datetime:
     return value.astimezone(UTC)
 
 
-def _timestamp(value: datetime | None) -> str:
-    return _utc(value).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+def timestamp(value: datetime | None) -> str:
+    return utc(value).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def native_password_history(entry: Entry) -> list[BwPasswordHistory]:
@@ -175,11 +173,11 @@ def native_password_history(entry: Entry) -> list[BwPasswordHistory]:
     are excluded, and repeated older values retain their most recent use.
     """
     versions: list[Entry] = sorted(
-        entry.history, key=lambda version: _utc(version.mtime)
+        entry.history, key=lambda version: utc(version.mtime)
     )
     if not versions:
         return []
-    if _utc(versions[-1].mtime) > _utc(entry.mtime):
+    if utc(versions[-1].mtime) > utc(entry.mtime):
         raise HistoryConversionError("Entry history is newer than the current entry")
     versions.append(entry)
     previous: list[BwPasswordHistory] = []
@@ -193,7 +191,7 @@ def native_password_history(entry: Entry) -> list[BwPasswordHistory]:
         if password == (newer.password or "") or password in seen:
             continue
         seen.add(password)
-        previous.append({"password": password, "lastUsedDate": _timestamp(newer.mtime)})
+        previous.append({"password": password, "lastUsedDate": timestamp(newer.mtime)})
         if len(previous) == 5:
             break
     return previous
@@ -231,13 +229,9 @@ def history_archive(entry: Entry, binaries: Sequence[bytes]) -> HistoryArchive |
                 )
             references.add(int(ref))
         records.append({
-            "created": _timestamp(version.ctime) if version.ctime is not None else None,
-            "modified": _timestamp(version.mtime)
-            if version.mtime is not None
-            else None,
-            "accessed": _timestamp(version.atime)
-            if version.atime is not None
-            else None,
+            "created": timestamp(version.ctime) if version.ctime is not None else None,
+            "modified": timestamp(version.mtime) if version.mtime is not None else None,
+            "accessed": timestamp(version.atime) if version.atime is not None else None,
             "xml": etree.tostring(
                 version._element, encoding="unicode", with_tail=False
             ),

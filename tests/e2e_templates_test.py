@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from e2e_vaultwarden_test import _login_session, _run, _run_migration
+from e2e_vaultwarden_test import login_session, run, run_migration
 from pykeepass import Entry, create_database
 
 from kp2bw.bw_serve import BitwardenServeClient
@@ -30,8 +30,8 @@ def main() -> None:
             BW_NOINTERACTION="true",
             KP2BW_MAP_TEMPLATES="true",
         )
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(
+        run(["bw", "config", "server", server], env=env)
+        login_session(
             env, os.environ.get("BW_TEST_EMAIL", "integration@example.com"), password
         )
         source = tmp / "templates.kdbx"
@@ -89,7 +89,7 @@ def main() -> None:
         db.save()
 
         def migrate() -> None:
-            _run_migration(source, "synthetic", password, env)
+            run_migration(source, "synthetic", password, env)
 
         def read() -> dict[str, BwItemResponse]:
             with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:

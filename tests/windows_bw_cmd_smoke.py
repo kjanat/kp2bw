@@ -26,13 +26,13 @@ import time
 from kp2bw.bw_serve import resolve_bw_command, terminate_serve
 
 
-def _free_port() -> int:
+def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
 
 
-def _port_accepting(port: int) -> bool:
+def port_accepting(port: int) -> bool:
     """True if something is listening on *port* (a TCP connect succeeds)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
@@ -43,7 +43,7 @@ def _port_accepting(port: int) -> bool:
         return True
 
 
-def _port_is_free(port: int) -> bool:
+def port_is_free(port: int) -> bool:
     """True if nothing holds *port* (i.e. it can be bound again)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
@@ -85,7 +85,7 @@ def assert_resolves_and_runs() -> None:
 
 
 def assert_wrapped_teardown_frees_port() -> None:
-    port = _free_port()
+    port = free_port()
     comspec = os.environ.get("COMSPEC", "cmd.exe")
     # cmd.exe -> node holding a port mirrors how bw.cmd -> node would behave.
     # A naive terminate() kills only cmd.exe and leaves node holding the port;
@@ -113,7 +113,7 @@ def assert_wrapped_teardown_frees_port() -> None:
                     f"wrapped child exited before binding (code {proc.returncode}): "
                     f"{stderr.decode('utf-8', 'replace').strip()!r}"
                 )
-            if _port_accepting(port):
+            if port_accepting(port):
                 break
             time.sleep(0.25)
         else:
@@ -128,7 +128,7 @@ def assert_wrapped_teardown_frees_port() -> None:
     # orphaned it would still hold the port and a fresh bind would fail.
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
-        if _port_is_free(port):
+        if port_is_free(port):
             return
         time.sleep(0.25)
     raise AssertionError(

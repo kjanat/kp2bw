@@ -23,15 +23,15 @@ from yaml.tokens import (
     Token,
 )
 
-from ._item_sync import (
+from .bw_serve import BitwardenServeClient, item_revision
+from .bw_types import BwItemResponse
+from .exceptions import BitwardenClientError, FixupDataError
+from .item_sync import (
     KP2BW_SYNC_FIELD_NAME,
     legacy_extensions_are_ambiguous,
     stamp_content,
     sync_stamp_generation,
 )
-from .bw_serve import BitwardenServeClient, item_revision
-from .bw_types import BwItemResponse
-from .exceptions import BitwardenClientError, FixupDataError
 from .uri_mapping import UriMatchValue, is_url_attribute_key, remap_item_fields_to_uris
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class FixupResult:
     failed: int = 0
 
 
-def _metadata(item: BwItemResponse, _options: FixupOptions) -> bool:
+def metadata(item: BwItemResponse, options: FixupOptions) -> bool:
     fields = [
         field for field in item.get("fields") or [] if field.get("name") == "KP2BW_META"
     ]
@@ -143,7 +143,7 @@ def _metadata(item: BwItemResponse, _options: FixupOptions) -> bool:
     return False
 
 
-def _uris(item: BwItemResponse, options: FixupOptions) -> bool:
+def uris(item: BwItemResponse, options: FixupOptions) -> bool:
     fields = item.get("fields") or []
     legacy = [
         field for field in fields if is_url_attribute_key(field.get("name") or "")
@@ -195,10 +195,10 @@ def _uris(item: BwItemResponse, options: FixupOptions) -> bool:
     return changed
 
 
-REGISTRY = (Fixup("uris", _uris), Fixup("metadata", _metadata))
+REGISTRY = (Fixup("uris", uris), Fixup("metadata", metadata))
 
 
-def _in_scope(
+def in_scope(
     item: BwItemResponse, org_id: str | None, collection_id: str | None
 ) -> bool:
     return item.get("organizationId") == org_id and (
@@ -219,7 +219,7 @@ def run_fixups(
     for listed in client.list_items(
         organization_id=org_id, collection_id=collection_id
     ):
-        if not _in_scope(listed, org_id, collection_id):
+        if not in_scope(listed, org_id, collection_id):
             continue
         result.scanned += 1
         if not any(
@@ -232,7 +232,7 @@ def run_fixups(
         item_id = listed["id"]
         try:
             fresh = client.get_item(item_id)
-            if not _in_scope(fresh, org_id, collection_id):
+            if not in_scope(fresh, org_id, collection_id):
                 result.skipped += 1
                 logger.warning("Skipping item %s: scope changed", item_id)
                 continue

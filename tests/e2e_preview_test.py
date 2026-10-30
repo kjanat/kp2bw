@@ -9,12 +9,12 @@ from typing import Any
 from unittest.mock import patch
 
 from e2e_checkpoint_test import run_crash
-from e2e_vaultwarden_test import _run
+from e2e_vaultwarden_test import run
 from pykeepass import create_database
 
-from kp2bw._preview import MigrationPreview
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.convert import Converter
+from kp2bw.preview import MigrationPreview
 
 
 def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
@@ -47,7 +47,7 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
             p.name: p.read_bytes() for p in tmp.glob("*checkpoint*") if p.is_file()
         }
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-            original = bw._request
+            original = bw.request
 
             def read_only(
                 method: str,
@@ -69,7 +69,7 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 )
 
             before = {item["id"]: item.get("revisionDate") for item in bw.list_items()}
-            with patch.object(bw, "_request", read_only):
+            with patch.object(bw, "request", read_only):
                 report = converter().preview(bw)
                 assert not report.blockers
                 assert len(report.entries) == 1
@@ -126,7 +126,7 @@ def main() -> None:
     env = os.environ.copy()
     env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
     env["BW_NOINTERACTION"] = "true"
-    status = json.loads(_run(["bw", "status"], env=env))
+    status = json.loads(run(["bw", "status"], env=env))
     assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")
     assert status.get("userEmail", "").casefold() == env["BW_TEST_EMAIL"].casefold()
     with tempfile.TemporaryDirectory() as directory:

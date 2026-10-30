@@ -13,7 +13,7 @@ from kp2bw.bw_types import BwItemCreate
 from kp2bw.exceptions import BitwardenServeExitedError
 
 
-def _process() -> subprocess.Popen[bytes]:
+def serve_process() -> subprocess.Popen[bytes]:
     return subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
         stdin=subprocess.DEVNULL,
@@ -22,19 +22,19 @@ def _process() -> subprocess.Popen[bytes]:
     )
 
 
-def _client(process: subprocess.Popen[bytes]) -> BitwardenServeClient:
+def make_client(process: subprocess.Popen[bytes]) -> BitwardenServeClient:
     client = object.__new__(BitwardenServeClient)
-    client._process = process
-    client._bw_version = "2026.7.0"
-    client._base_url = "http://serve.test"
-    client._http_timeout = 1
-    client._folders = {}
+    client.serve_process = process
+    client.bw_version = "2026.7.0"
+    client.http_base_url = "http://serve.test"
+    client.http_timeout = 1
+    client.folder_cache = {}
     return client
 
 
 def assert_dead_process_aborts_batch() -> None:
-    with _process() as process:
-        client = _client(process)
+    with serve_process() as process:
+        client = make_client(process)
         calls: list[str] = []
         failed: list[str] = []
 
@@ -45,8 +45,8 @@ def assert_dead_process_aborts_batch() -> None:
             raise httpx.RemoteProtocolError("sensitive raw crash output")
 
         with httpx.Client(
-            transport=httpx.MockTransport(crash), base_url=client._base_url
-        ) as client._http:
+            transport=httpx.MockTransport(crash), base_url=client.http_base_url
+        ) as client.http:
             item = cast(BwItemCreate, {"name": "fixture", "type": 1, "fields": []})
             try:
                 client.create_items_batch(
@@ -75,9 +75,9 @@ def assert_dead_process_aborts_batch() -> None:
 
 
 def assert_live_disconnect_retries() -> None:
-    with _process() as process:
+    with serve_process() as process:
         try:
-            client = _client(process)
+            client = make_client(process)
             calls = 0
 
             def intermittent(request: httpx.Request) -> httpx.Response:
@@ -90,8 +90,9 @@ def assert_live_disconnect_retries() -> None:
                 )
 
             with httpx.Client(
-                transport=httpx.MockTransport(intermittent), base_url=client._base_url
-            ) as client._http:
+                transport=httpx.MockTransport(intermittent),
+                base_url=client.http_base_url,
+            ) as client.http:
                 assert client.get_item("item")["id"] == "item"
                 assert calls == 2 and process.poll() is None
         finally:
@@ -100,8 +101,8 @@ def assert_live_disconnect_retries() -> None:
 
 
 def assert_async_death_propagates() -> None:
-    with _process() as process:
-        client = _client(process)
+    with serve_process() as process:
+        client = make_client(process)
 
         async def crash() -> httpx.Response:
             process.terminate()
@@ -110,7 +111,7 @@ def assert_async_death_propagates() -> None:
 
         async def run() -> None:
             try:
-                await client._send_async_with_rate_limit_retry(
+                await client.send_async_with_rate_limit_retry(
                     crash, method="POST", path="/attachment"
                 )
             except BitwardenServeExitedError:
@@ -119,7 +120,7 @@ def assert_async_death_propagates() -> None:
                 raise AssertionError("Async upload transport must detect process death")
 
             async def upload(*args: object) -> None:
-                client._check_serve_process()
+                client.check_serve_process()
 
             with patch.object(client, "upload_attachment", upload):
                 try:

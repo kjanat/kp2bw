@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from _scope_fixture import create_scope_organization
-from e2e_vaultwarden_test import _login_session, _run
+from e2e_vaultwarden_test import login_session, run
+from scope_fixture import create_scope_organization
 
-from kp2bw._item_sync import stamp_content, sync_stamp_matches
 from kp2bw.bw_serve import BitwardenServeClient, item_kp2bw_sync
 from kp2bw.bw_types import BwItemCreate, BwItemResponse
+from kp2bw.item_sync import stamp_content, sync_stamp_matches
 
 LEGACY = "expires: '2040-01-01T00:00:00+00:00'\ntags:\n- café\n- two\n"
 
@@ -40,8 +40,8 @@ def main() -> None:
         )
         env.pop("KP2BW_KEEPASS_FILE", None)
         env.pop("KP2BW_KEEPASS_PASSWORD", None)
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(env, email, password)
+        run(["bw", "config", "server", server], env=env)
+        login_session(env, email, password)
         ids: dict[str, str] = {}
         with (
             patch.dict(os.environ, env),
@@ -168,7 +168,7 @@ def main() -> None:
         finally:
             with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
                 for item_id in ids.values():
-                    bw._request("DELETE", f"/object/item/{item_id}")
+                    bw.request("DELETE", f"/object/item/{item_id}")
     print("live fixup scope, metadata, URI compatibility, protection and reruns passed")
 
 

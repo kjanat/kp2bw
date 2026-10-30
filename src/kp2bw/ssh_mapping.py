@@ -5,13 +5,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from ._attachments import SourceFile, source_file
-from ._item_sync import stamp_content
-from ._source_fields import source_field_name
-from ._ssh_keys import convert_ssh_key
-from ._templates import template_uuid
+from .attachments import SourceFile, source_file
 from .bw_types import BwField, BwItemCreate
 from .exceptions import ConversionError
+from .item_sync import stamp_content
+from .source_fields import source_field_name
+from .ssh_keys import convert_ssh_key
+from .templates import template_uuid
 
 
 @dataclass(frozen=True)

@@ -140,7 +140,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **An empty environment variable no longer shadows the matching `.env` entry.** `KP2BW_KEEPASS_FILE=""` (or any
   empty-string export) used to override the `.env` value -- `load_dotenv(override=False)` treats an empty export as
-  "set" -- producing a baffling "KeePass database path is required" even when `.env` clearly had it. `_load_dotenv` now
+  "set" -- producing a baffling "KeePass database path is required" even when `.env` clearly had it. `load_dotenv` now
   fills any variable that is unset *or empty* from the file, while a real *non-empty* shell variable still wins (the
   documented CLI flag > env var > default precedence is preserved for meaningful values).
 
@@ -342,12 +342,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `bw.exe`/`bw.cmd` shims are found via `PATHEXT`; the `bw` subprocess calls also catch `FileNotFoundError`, so a
   genuinely missing CLI still yields the friendly message. Fixes #5.
 - **Chained `{REF:...}` references** -- a reference whose target was itself another reference entry (a chain
-  `A -> B -> C`) raised `KeyError` in `_resolve_entries_with_references`, logged a `Could not resolve entry` warning,
+  `A -> B -> C`) raised `KeyError` in `resolve_entries_with_references`, logged a `Could not resolve entry` warning,
   and dropped the referencing entry from the import even though KeePass resolves such chains correctly. Unresolved
   targets that are themselves REF entries are now resolved transitively and on demand, with memoization and cycle
   detection, so the chain collapses onto whatever it ultimately maps to. Fixes #6.
 - **Malformed `{REF:...}` tokens no longer abort the run** -- a reference whose field/lookup part lacked the `@`
-  separator (e.g. `{REF:UI:...}`) raised an uncaught `ValueError` in `_parse_kp_ref_string` that stopped the whole
+  separator (e.g. `{REF:UI:...}`) raised an uncaught `ValueError` in `parse_kp_ref_string` that stopped the whole
   migration. Such tokens are now reported and the offending entry is skipped, consistent with other unresolvable
   references.
 
@@ -377,7 +377,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **`None` username/password in REF resolution** -- `_resolve_entries_with_references` raised
+- **`None` username/password in REF resolution** -- `resolve_entries_with_references` raised
   `TypeError: argument of type 'NoneType' is not iterable` when an entry with a `{REF:...}` field also had a `None`
   username or password. The field is now guarded before the `KP_REF_IDENTIFIER` membership test, and `None` values are
   normalized to `""` for the username/password match so a resolved entry merges its URI instead of spawning a duplicate.
@@ -389,8 +389,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Strict TypedDict transport layer** -- `bw_types.py` defines `BwItemCreate`, `BwItemResponse`, `BwItemLogin`,
   `BwUri`, `BwField`, `BwFido2Credential`, `BwFolder`, and `BwCollection`. All `dict[str, Any]` usage is eliminated from
-  `bw_serve.py` and `convert.py`; the generated `_bw_api_types.py` is the canonical source for spec-derived shapes.
-- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when `_bw_api_types.py` drifts from
+  `bw_serve.py` and `convert.py`; the generated `bw_api_types.py` is the canonical source for spec-derived shapes.
+- **Codegen drift CI check** -- New `codegen-check.yml` workflow fails PRs when `bw_api_types.py` drifts from
   `specs/vault-management-api.json`.
 - **Rich progress bars and summary** -- Migration phases (processing, creating, uploading) show live progress bars via
   Rich. Final summary prints counts and elapsed time.
@@ -400,7 +400,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Collection-blind dedup** -- Items already in the org but assigned to a different collection were silently skipped
   even when `--bitwarden-collection` targeted a new collection. The dedup path now detects this case and issues a
   `PUT /object/item/{id}` to add the item to the missing collection instead of skipping it.
-- **Org import dedup matched personal vault** -- `_build_dedup_index()` fetched all vault items regardless of
+- **Org import dedup matched personal vault** -- `build_dedup_index()` fetched all vault items regardless of
   `--bitwarden-org`, causing personal-vault entries to shadow the (empty) org vault and skip every import. Now passes
   `organizationId` to `bw serve`'s `/list/object/items` so only org-scoped items are checked when importing to an
   organization.
@@ -411,11 +411,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   names (`PASSWORD`, `FILE`, `ID`, `TAG`, `N`) to match README and improve `--help` readability.
 - **Dedup cache stale after collection PUT** -- `update_dedup_entry()` keeps the in-memory index fresh after an
   `update_item()` call, preventing redundant PUTs when multiple KeePass entries share the same `(folder, name)` key.
-- **`_request()` type safety** -- `json_body` widened from `dict[str, Any]` to `Mapping[str, Any]` so `BwItemCreate`
+- **`request()` type safety** -- `json_body` widened from `dict[str, Any]` to `Mapping[str, Any]` so `BwItemCreate`
   passes without type suppression.
 - **`BwItemResponse` nullable fields** -- `notes`, `collectionIds`, and `login` now reflect actual `bw serve` response
   shapes (nullable / not-required).
-- **`_unpack_entry` tuple destructuring** -- replaced index-based access with direct unpacking; `EntryValue` is always a
+- **`unpack_entry` tuple destructuring** -- replaced index-based access with direct unpacking; `EntryValue` is always a
   4-tuple.
 
 ## [3.0.0a1] - 2026-02-24
@@ -433,7 +433,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (default 4) for backpressure.
 - **Org collection CRUD with cache** -- `bw serve`-based collection creation/listing with an in-memory name-to-ID cache,
   avoiding repeated API round-trips.
-- **`bw serve` availability guard in e2e test** -- `_assert_bw_serve_available()` pre-flight check before running the
+- **`bw serve` availability guard in e2e test** -- `assert_bw_serve_available()` pre-flight check before running the
   Vaultwarden integration test.
 - **`httpx` runtime dependency** -- Added `httpx>=0.28.0` for the HTTP transport layer.
 - **Docker Compose e2e infrastructure** -- `tests/Dockerfile.vaultwarden`, `tests/Dockerfile.test`,
@@ -450,7 +450,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **3-phase migration architecture** -- `convert.py` `_create_bitwarden_items_for_entries()` rewritten: (1) partition
+- **3-phase migration architecture** -- `convert.py` `create_bitwarden_items_for_entries()` rewritten: (1) partition
   entries and resolve collections, (2) create items via `bw serve` HTTP API, (3) parallel attachment uploads.
 - **Version bump to 3.0.0a1** -- Major version increment reflecting the breaking change from subprocess-per-item to
   `bw serve` transport.
@@ -474,8 +474,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- **Signal handler init race** -- `_previous_sigterm` / `_previous_sigint` are now assigned before `_start_serve()` so
-  that `close()` is safe to call at any point during `__init__` (e.g. when `_wait_for_ready` times out).
+- **Signal handler init race** -- `previous_sigterm` / `previous_sigint` are now assigned before `start_serve()` so
+  that `close()` is safe to call at any point during `__init__` (e.g. when `wait_for_ready` times out).
 - **Duplicate item name ID lookup** -- Post-import ID recovery now collects all IDs per `(folder, name)` pair and pops
   them in order, so entries sharing the same name each get their own server-assigned ID for attachment uploads.
 - **`bw serve` startup diagnostics** -- Captured stderr from the `bw serve` process and included it in timeout/crash
@@ -483,16 +483,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   for CI headroom.
 - **e2e test empty session token** -- `bw login` + separate `bw unlock --raw` returned an empty session on
   `@bitwarden/cli@2026.1.0`. Replaced with `bw login --raw` to capture the session in a single step; added
-  lock-then-unlock retry fallback in `_get_session()`.
+  lock-then-unlock retry fallback in `get_session()`.
 - **`bw import` command injection** -- `run_import` used `shell=True` with a format-string command; replaced with
   list-form `subprocess.check_output` (no shell).
 - **`close()` double-call crash** -- `BitwardenServeClient.close()` was not idempotent; second call could restore stale
-  signal handlers or raise on `_http.close()`. Added `_closed` guard.
+  signal handlers or raise on `http.close()`. Added `closed` guard.
 - **Attachment upload fail-fast** -- `asyncio.gather` abandoned remaining uploads on first error; now uses
   `return_exceptions=True` to collect all failures before raising an aggregate error.
 - **`bw serve` IPv6 binding** -- `--hostname localhost` caused Node.js/Koa to bind to `::1` (IPv6 loopback) while
   `httpx` connected to `127.0.0.1` (IPv4), resulting in a 60 s timeout. Changed to `--hostname 127.0.0.1`.
-- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE` from `_start_serve()`; stderr remains piped for crash
+- **`bw serve` subprocess pipe stall** -- Removed `stdout=PIPE` from `start_serve()`; stderr remains piped for crash
   diagnostics while stdout now inherits parent file descriptors. Removed dead `_read_output()` method that depended on
   piped streams.
 - **Signal handler restore crash** -- `close()` could raise `TypeError` when restoring signal handlers that were `None`
@@ -508,9 +508,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   configured instead of attempting a POST with `organizationId: None`.
 - **Attachment upload JSON parse failures** -- Non-JSON `/attachment` responses now raise `BitwardenClientError` with
   HTTP context instead of leaking decode exceptions.
-- **`bw serve` response parse hardening** -- Core `_request()` now maps non-JSON responses to `BitwardenClientError`;
+- **`bw serve` response parse hardening** -- Core `request()` now maps non-JSON responses to `BitwardenClientError`;
   dedup index also skips malformed item names safely.
-- **Signal-ignore semantics** -- `_signal_handler()` now respects inherited `SIG_IGN` handlers instead of forcing
+- **Signal-ignore semantics** -- `signal_handler()` now respects inherited `SIG_IGN` handlers instead of forcing
   process exit.
 - **Sensitive stderr exposure in diagnostics** -- `bw unlock` and early `bw serve` stderr output is now sanitized
   (secret redaction + truncation) before logs/error messages are emitted.
@@ -650,7 +650,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Tag-based import could add the same entry multiple times when it matched multiple tags (now breaks after first match).
 - `entry.group` could be `None` — added guards for safe attribute access.
 - Dead code: `group.path == "/"` comparisons (path is a list, never a string).
-- Unnecessary `isinstance(self._import_tags, list)` check and dead else branch.
+- Unnecessary `isinstance(self.import_tags, list)` check and dead else branch.
 - Multiple ruff lint violations (35 total): import sorting, f-string conversions, redundant `.keys()`/`.items()` calls,
   nested `if` simplification, unused variables, overly broad exception catches, and more.
 

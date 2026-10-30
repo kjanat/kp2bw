@@ -25,25 +25,25 @@ from kp2bw.bw_serve import (
 from kp2bw.bw_types import BwItemCreate, BwItemLogin
 from kp2bw.exceptions import BitwardenClientError, BitwardenHttpError
 
-_SERVER_BODY = (
+SERVER_BODY = (
     '{{"message":"Slow down! Too many requests. Try again in {period}.",'
     '"validationErrors":null,"exceptionMessage":null,"exceptionStackTrace":null,'
     '"innerExceptionMessage":null,"object":"error"}}'
 )
 
 
-def _sdk_message(period: str) -> str:
+def sdk_message(period: str) -> str:
     """The message ``bw serve`` returns for an SDK create rejected with 429."""
     return (
         "CreateCipherError: error in response: status code 429 Too Many Requests: "
-        + _SERVER_BODY.format(period=period)
+        + SERVER_BODY.format(period=period)
     )
 
 
-_LEGACY_MESSAGE = "Rate limit exceeded. Try again later."
+LEGACY_MESSAGE = "Rate limit exceeded. Try again later."
 
 
-def _item(name: str) -> BwItemCreate:
+def unused_item(name: str) -> BwItemCreate:
     return BwItemCreate(
         organizationId=None,
         collectionIds=None,
@@ -62,41 +62,41 @@ def _item(name: str) -> BwItemCreate:
     )
 
 
-def _serve_error(message: str) -> httpx.Response:
+def serve_error(message: str) -> httpx.Response:
     return httpx.Response(400, json={"success": False, "message": message})
 
 
-def _serve_ok(data: dict[str, Any]) -> httpx.Response:
+def serve_ok(data: dict[str, Any]) -> httpx.Response:
     return httpx.Response(200, json={"success": True, "data": data})
 
 
-class _Script:
+class Script:
     """Hands out queued responses in order and records each request."""
 
     def __init__(self, responses: list[httpx.Response]) -> None:
-        self._responses = list(responses)
+        self.responses = list(responses)
         self.requests: list[tuple[str, str]] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append((request.method, request.url.path))
-        if not self._responses:
+        if not self.responses:
             raise AssertionError(f"unexpected request {request.method} {request.url}")
-        return self._responses.pop(0)
+        return self.responses.pop(0)
 
 
-def _client(script: _Script) -> tuple[BitwardenServeClient, list[float]]:
+def make_client(script: Script) -> tuple[BitwardenServeClient, list[float]]:
     """A client bound to *script* whose sleeps are recorded, not slept."""
     inst = object.__new__(BitwardenServeClient)
-    inst._http = httpx.Client(
+    inst.http = httpx.Client(
         transport=httpx.MockTransport(script), base_url="http://bw.test"
     )
-    inst._folders = {}
+    inst.folder_cache = {}
     sleeps: list[float] = []
-    inst._sleep = sleeps.append
+    inst.sleep = sleeps.append
     return inst, sleeps
 
 
-class _Warnings(logging.Handler):
+class Warnings(logging.Handler):
     def __init__(self) -> None:
         super().__init__(logging.WARNING)
         self.messages: list[str] = []
@@ -105,8 +105,8 @@ class _Warnings(logging.Handler):
         self.messages.append(record.getMessage())
 
 
-def _capture_warnings(run: Callable[[], object]) -> list[str]:
-    handler = _Warnings()
+def capture_warnings(run: Callable[[], object]) -> list[str]:
+    handler = Warnings()
     log = logging.getLogger("kp2bw.bw_serve")
     log.addHandler(handler)
     try:
@@ -116,14 +116,14 @@ def _capture_warnings(run: Callable[[], object]) -> list[str]:
     return handler.messages
 
 
-def _body(message: str) -> str:
+def response_body(message: str) -> str:
     return json.dumps({"success": False, "message": message})
 
 
 def assert_wait_honours_named_period() -> None:
     cases = {"1s": 1.0, "1m": 60.0, "0.5s": 0.5, "2S": 2.0}
     for period, expected in cases.items():
-        got = rate_limit_wait_s(400, _body(_sdk_message(period)), attempt=1)
+        got = rate_limit_wait_s(400, response_body(sdk_message(period)), attempt=1)
         if got != expected:
             raise AssertionError(
                 f"'Try again in {period}' must wait {expected}s, got {got}"
@@ -132,7 +132,8 @@ def assert_wait_honours_named_period() -> None:
 
 def assert_wait_backs_off_without_named_period() -> None:
     got = [
-        rate_limit_wait_s(400, _body(_LEGACY_MESSAGE), attempt=n) for n in range(1, 9)
+        rate_limit_wait_s(400, response_body(LEGACY_MESSAGE), attempt=n)
+        for n in range(1, 9)
     ]
     if got != [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]:
         raise AssertionError(f"legacy rate limit must back off to the cap, got {got}")
@@ -143,8 +144,8 @@ def assert_wait_backs_off_without_named_period() -> None:
 
 def assert_wait_declines_non_rate_limits() -> None:
     cases: list[tuple[int, str]] = [
-        (400, _body("Premium status is required to use this feature.")),
-        (400, _body("Not found.")),
+        (400, response_body("Premium status is required to use this feature.")),
+        (400, response_body("Not found.")),
         (200, json.dumps({"success": True, "data": {"name": "Too many requests"}})),
     ]
     for status, body in cases:
@@ -156,19 +157,19 @@ def assert_wait_declines_non_rate_limits() -> None:
 
 
 def assert_wait_declines_past_budget_or_cap() -> None:
-    spent = rate_limit_wait_s(400, _body(_sdk_message("1s")), attempt=9)
+    spent = rate_limit_wait_s(400, response_body(sdk_message("1s")), attempt=9)
     if spent is not None:
         raise AssertionError(f"retry 9 exceeds the budget of 8, got {spent}")
-    hour = rate_limit_wait_s(400, _body(_sdk_message("60m")), attempt=1)
+    hour = rate_limit_wait_s(400, response_body(sdk_message("60m")), attempt=1)
     if hour is not None:
         raise AssertionError(f"an hour-long window must not be waited out, got {hour}")
 
 
 def assert_send_returns_first_non_rate_limited_response() -> None:
     responses = [
-        _serve_error(_sdk_message("1s")),
-        _serve_error(_sdk_message("1m")),
-        _serve_ok({"id": "x"}),
+        serve_error(sdk_message("1s")),
+        serve_error(sdk_message("1m")),
+        serve_ok({"id": "x"}),
     ]
     sleeps: list[float] = []
     got = send_with_rate_limit_retry(
@@ -184,15 +185,15 @@ def assert_send_returns_first_non_rate_limited_response() -> None:
 
 
 def assert_create_item_retries_rate_limited_post() -> None:
-    script = _Script([
-        _serve_error(_sdk_message("1s")),
-        _serve_error(_sdk_message("1m")),
-        _serve_ok({"id": "item-1"}),
+    script = Script([
+        serve_error(sdk_message("1s")),
+        serve_error(sdk_message("1m")),
+        serve_ok({"id": "item-1"}),
     ])
-    bw, sleeps = _client(script)
+    bw, sleeps = make_client(script)
     created: list[str] = []
-    warnings = _capture_warnings(
-        lambda: created.append(bw.create_item(_item("Working Spirit")))
+    warnings = capture_warnings(
+        lambda: created.append(bw.create_item(unused_item("Working Spirit")))
     )
     if created != ["item-1"]:
         raise AssertionError(f"the retried create must return its id, got {created}")
@@ -209,8 +210,8 @@ def assert_create_item_retries_rate_limited_post() -> None:
 
 
 def assert_exhausted_budget_raises_the_rate_limit_error() -> None:
-    script = _Script([_serve_error(_LEGACY_MESSAGE) for _ in range(9)])
-    bw, sleeps = _client(script)
+    script = Script([serve_error(LEGACY_MESSAGE) for _ in range(9)])
+    bw, sleeps = make_client(script)
     try:
         bw.create_folder("Work")
     except BitwardenHttpError as exc:
@@ -227,8 +228,8 @@ def assert_exhausted_budget_raises_the_rate_limit_error() -> None:
 
 
 def assert_other_errors_are_not_retried() -> None:
-    script = _Script([_serve_error("Premium status is required to use this feature.")])
-    bw, sleeps = _client(script)
+    script = Script([serve_error("Premium status is required to use this feature.")])
+    bw, sleeps = make_client(script)
     try:
         bw.create_folder("Work")
     except BitwardenHttpError:
@@ -243,20 +244,20 @@ def assert_other_errors_are_not_retried() -> None:
 
 def assert_batch_import_survives_rate_limits() -> None:
     """The #65 scenario: no item is skipped when Bitwarden throttles mid-batch."""
-    script = _Script([
-        _serve_ok({"id": "folder-1"}),
-        _serve_ok({"id": "item-a"}),
-        _serve_error(_sdk_message("1s")),
-        _serve_ok({"id": "item-b"}),
-        _serve_error(_sdk_message("1m")),
-        _serve_ok({"id": "item-c"}),
+    script = Script([
+        serve_ok({"id": "folder-1"}),
+        serve_ok({"id": "item-a"}),
+        serve_error(sdk_message("1s")),
+        serve_ok({"id": "item-b"}),
+        serve_error(sdk_message("1m")),
+        serve_ok({"id": "item-c"}),
     ])
-    bw, sleeps = _client(script)
+    bw, sleeps = make_client(script)
     failed: list[str] = []
     entries: dict[str, tuple[str | None, BwItemCreate]] = {
-        "a": ("Work", _item("a")),
-        "b": ("Work", _item("b")),
-        "c": (None, _item("c")),
+        "a": ("Work", unused_item("a")),
+        "b": ("Work", unused_item("b")),
+        "c": (None, unused_item("c")),
     }
     key_to_id = bw.create_items_batch(
         entries, on_item_failed=lambda key, _: failed.append(key)
@@ -270,11 +271,11 @@ def assert_batch_import_survives_rate_limits() -> None:
 
 
 def assert_get_attachment_retries_rate_limit() -> None:
-    script = _Script([
-        _serve_error(_LEGACY_MESSAGE),
+    script = Script([
+        serve_error(LEGACY_MESSAGE),
         httpx.Response(200, content=b"file bytes"),
     ])
-    bw, sleeps = _client(script)
+    bw, sleeps = make_client(script)
     got = bw.get_attachment("item-1", "att-1")
     if got != b"file bytes" or sleeps != [1.0]:
         raise AssertionError(f"expected bytes after one wait, got {got!r} {sleeps}")
@@ -282,13 +283,13 @@ def assert_get_attachment_retries_rate_limit() -> None:
         raise AssertionError(f"expected two GETs, got {script.requests}")
 
 
-def _upload(script: _Script) -> list[float]:
-    inst, sleeps = _client(script)
+def upload(script: Script) -> list[float]:
+    inst, sleeps = make_client(script)
 
     async def record(seconds: float) -> None:
         sleeps.append(seconds)
 
-    inst._async_sleep = record
+    inst.async_sleep = record
 
     async def run() -> None:
         async with httpx.AsyncClient(
@@ -299,13 +300,13 @@ def _upload(script: _Script) -> list[float]:
     try:
         asyncio.run(run())
     finally:
-        inst._http.close()
+        inst.http.close()
     return sleeps
 
 
 def assert_upload_attachment_retries_rate_limit() -> None:
-    script = _Script([_serve_error(_LEGACY_MESSAGE), _serve_ok({"id": "item-1"})])
-    sleeps = _upload(script)
+    script = Script([serve_error(LEGACY_MESSAGE), serve_ok({"id": "item-1"})])
+    sleeps = upload(script)
     if script.requests != [("POST", "/attachment")] * 2 or sleeps != [1.0]:
         raise AssertionError(
             f"expected one wait then a retry, got {script.requests} {sleeps}"
@@ -313,15 +314,15 @@ def assert_upload_attachment_retries_rate_limit() -> None:
 
 
 def assert_upload_sync_retries_rate_limit() -> None:
-    script = _Script([
-        _serve_error("Not found."),
-        _serve_error("Not found."),
-        _serve_error(_LEGACY_MESSAGE),
-        _serve_ok({}),
-        _serve_ok({"id": "item-1"}),
-        _serve_ok({"id": "attachment-1"}),
+    script = Script([
+        serve_error("Not found."),
+        serve_error("Not found."),
+        serve_error(LEGACY_MESSAGE),
+        serve_ok({}),
+        serve_ok({"id": "item-1"}),
+        serve_ok({"id": "attachment-1"}),
     ])
-    sleeps = _upload(script)
+    sleeps = upload(script)
     paths = [path for _, path in script.requests]
     if paths != [
         "/attachment",
@@ -337,9 +338,9 @@ def assert_upload_sync_retries_rate_limit() -> None:
 
 
 def assert_upload_exhausted_budget_raises() -> None:
-    script = _Script([_serve_error(_sdk_message("1s")) for _ in range(9)])
+    script = Script([serve_error(sdk_message("1s")) for _ in range(9)])
     try:
-        _upload(script)
+        upload(script)
     except BitwardenClientError as exc:
         if "429" not in str(exc):
             raise AssertionError(
@@ -350,14 +351,14 @@ def assert_upload_exhausted_budget_raises() -> None:
 
 
 def assert_default_sleepers_wait_for_real() -> None:
-    script = _Script([
-        _serve_error(_sdk_message("0.01s")),
-        _serve_ok({"id": "folder-1"}),
-        _serve_error(_sdk_message("0.01s")),
-        _serve_ok({"id": "item-1"}),
+    script = Script([
+        serve_error(sdk_message("0.01s")),
+        serve_ok({"id": "folder-1"}),
+        serve_error(sdk_message("0.01s")),
+        serve_ok({"id": "item-1"}),
     ])
     inst = object.__new__(BitwardenServeClient)
-    inst._folders = {}
+    inst.folder_cache = {}
 
     async def upload() -> None:
         async with httpx.AsyncClient(
@@ -368,7 +369,7 @@ def assert_default_sleepers_wait_for_real() -> None:
     with httpx.Client(
         transport=httpx.MockTransport(script), base_url="http://bw.test"
     ) as http:
-        inst._http = http
+        inst.http = http
         started = time.monotonic()
         folder_id = inst.create_folder("Work")
         asyncio.run(upload())

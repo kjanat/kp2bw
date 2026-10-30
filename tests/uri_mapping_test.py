@@ -22,7 +22,7 @@ from kp2bw.uri_mapping import (
 )
 
 
-def _uris(
+def uris(
     *,
     primary_url: str,
     additional_urls: list[str],
@@ -95,7 +95,7 @@ def assert_url_attribute_keys() -> None:
 
 def assert_plain_urls_default_to_account_default_and_dedup() -> None:
     """Plain primary + additional URLs default to match=None (account default), deduped."""
-    got = _uris(
+    got = uris(
         primary_url="thuisbezorgd.nl",
         additional_urls=[
             "https://takeaway.com",
@@ -116,7 +116,7 @@ def assert_plain_urls_default_to_account_default_and_dedup() -> None:
 
 def assert_uri_match_domain_forces_base_domain() -> None:
     """``plain_match=0`` forces base-domain on plain URLs (the KeePassXC-faithful opt-in)."""
-    got = _uris(
+    got = uris(
         primary_url="example.com",
         additional_urls=["https://alt.example"],
         android_packages=[],
@@ -130,7 +130,7 @@ def assert_uri_match_domain_forces_base_domain() -> None:
 def assert_special_syntaxes_map_when_interpreting() -> None:
     """Quoted -> exact(3); trailing wildcard -> starts-with(2); host wildcard -> regex(4)."""
     got = dict(
-        _uris(
+        uris(
             primary_url="",
             additional_urls=[
                 '"https://exact.example/login"',
@@ -151,7 +151,7 @@ def assert_special_syntaxes_map_when_interpreting() -> None:
 
 def assert_drops() -> None:
     """Non-web schemes, references, illegal chars, and invalid wildcards are dropped."""
-    got = _uris(
+    got = uris(
         primary_url="",
         additional_urls=[
             "keepassxc://by-uuid/abc",
@@ -171,7 +171,7 @@ def assert_drops() -> None:
 
 def assert_literal_mode_skips_interpretation() -> None:
     """interpret_syntax=False keeps quote/wildcard strings as plain URIs verbatim."""
-    got = _uris(
+    got = uris(
         primary_url="",
         additional_urls=['"https://x/login"', "https://host/*"],
         android_packages=[],
@@ -184,7 +184,7 @@ def assert_literal_mode_skips_interpretation() -> None:
 
 def assert_plain_match_override() -> None:
     """plain_match tunes the plain tier (e.g. None defers to the account default)."""
-    got = _uris(
+    got = uris(
         primary_url="example.com",
         additional_urls=['"https://x/login"'],
         android_packages=[],

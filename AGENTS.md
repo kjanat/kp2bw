@@ -36,7 +36,7 @@ kp2bw/
 | Release version gating   | `.github/actions/version-check/`      | Normalizes release/tag prefixes; drives workflow gates             |
 | Main package publishing  | `.github/workflows/publish.yml`       | Triggered by GitHub Release events, not tag push                   |
 | Stubs publishing         | `.github/workflows/publish-stubs.yml` | Triggered by `stubs-v*` tags                                       |
-| Codegen drift check      | `.github/workflows/codegen-check.yml` | Fails PRs when `_bw_api_types.py` drifts from spec                 |
+| Codegen drift check      | `.github/workflows/codegen-check.yml` | Fails PRs when `bw_api_types.py` drifts from spec                  |
 | Regenerate API types     | `scripts/generate-bw-types.sh`        | Run after editing `specs/vault-management-api.json`                |
 | E2E migration behavior   | `tests/e2e_vaultwarden_test.py`       | Seeded Vaultwarden fixture + idempotency assertions                |
 
@@ -47,6 +47,8 @@ kp2bw/
   TOML. After dependency edits run `uv lock`; type-stub packages go in the `stubs` dependency-group, not loose in `dev`.
 - Ruff runs in preview mode, target `py314`; stubs package has separate Ruff/Pyright config.
 - Intra-package imports are relative (`from .module import X`).
+- Use names without a leading underscore for project modules, helpers and attributes. Preserve Python special methods
+  and names required by external APIs, such as argparse hooks and PyKeePass accessors.
 - `bw serve` is localhost-only and password is passed via env var, not CLI arg.
 - Tests are executable scripts (`main()` + assertions), not pytest collection.
 - `tests/test_script_adapters.py` provides pytest wrappers so `pytest` collects tests; script files remain the

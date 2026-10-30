@@ -27,16 +27,16 @@ from kp2bw.otp import (
 
 # A fixed 10-byte secret with an externally verified Base32 form (Google
 # Authenticator KeyUriFormat example vector).
-_RAW = b"Hello!\xde\xad\xbe\xef"
-_B32 = "JBSWY3DPEHPK3PXP"
+RAW = b"Hello!\xde\xad\xbe\xef"
+B32 = "JBSWY3DPEHPK3PXP"
 
 
-def _decode_b32(secret: str) -> bytes:
+def decode_b32(secret: str) -> bytes:
     padded = secret.upper() + "=" * (-len(secret) % 8)
     return base64.b32decode(padded)
 
 
-def _otpauth_params(uri: str) -> dict[str, str]:
+def otpauth_params(uri: str) -> dict[str, str]:
     parts = urlsplit(uri)
     if parts.scheme != "otpauth" or parts.netloc != "totp":
         raise AssertionError(f"not a totp otpauth URI: {uri!r}")
@@ -45,13 +45,13 @@ def _otpauth_params(uri: str) -> dict[str, str]:
 
 def assert_b32_anchor() -> None:
     """Sanity-check the test vector against the known Base32 encoding."""
-    if base64.b32encode(_RAW).rstrip(b"=").decode() != _B32:
-        raise AssertionError("test vector drift: _RAW does not encode to _B32")
+    if base64.b32encode(RAW).rstrip(b"=").decode() != B32:
+        raise AssertionError("test vector drift: RAW does not encode to B32")
 
 
 def assert_fallback_base32_default() -> None:
-    result = resolve_otp(None, {KP_TOTP_SECRET_BASE32_KEY: _B32}, entry_label="Acme")
-    if result.totp != _B32:
+    result = resolve_otp(None, {KP_TOTP_SECRET_BASE32_KEY: B32}, entry_label="Acme")
+    if result.totp != B32:
         raise AssertionError(f"expected bare secret, got {result.totp!r}")
     if result.consumed_keys != frozenset({KP_TOTP_SECRET_BASE32_KEY}):
         raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
@@ -65,7 +65,7 @@ def assert_entry_otp_precedence() -> None:
     uri = "otpauth://totp/Acme:bob?secret=GEZDGNBVGY3TQOJQ&issuer=Acme"
     # A *different* TimeOtp secret also present: it must not be consumed, but it
     # is sensitive, so it must be preserved as a hidden field (not dropped).
-    result = resolve_otp(uri, {KP_TOTP_SECRET_BASE32_KEY: _B32}, entry_label="Acme")
+    result = resolve_otp(uri, {KP_TOTP_SECRET_BASE32_KEY: B32}, entry_label="Acme")
     if result.totp != uri:
         raise AssertionError(f"entry.otp must win, got {result.totp!r}")
     if result.consumed_keys:
@@ -86,7 +86,7 @@ def assert_no_otp() -> None:
 
 def assert_nondefault_config_builds_otpauth() -> None:
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_SECRET_BASE32_KEY: B32,
         KP_TOTP_LENGTH_KEY: "8",
         KP_TOTP_PERIOD_KEY: "60",
         KP_TOTP_ALGORITHM_KEY: "HMAC-SHA-256",
@@ -94,8 +94,8 @@ def assert_nondefault_config_builds_otpauth() -> None:
     result = resolve_otp(None, props, entry_label="Acme Corp")
     if result.totp is None or not result.totp.startswith("otpauth://totp/"):
         raise AssertionError(f"expected otpauth URI, got {result.totp!r}")
-    params = _otpauth_params(result.totp)
-    if _decode_b32(params["secret"]) != _RAW:
+    params = otpauth_params(result.totp)
+    if decode_b32(params["secret"]) != RAW:
         raise AssertionError("otpauth secret does not round-trip to the raw key")
     if params.get("digits") != "8":
         raise AssertionError(f"expected digits=8, got {params.get('digits')}")
@@ -123,36 +123,36 @@ def assert_default_config_keys_consumed() -> None:
     # Even when explicit config equals the defaults, the bare-secret path is used
     # and the redundant config keys are consumed (not left as custom fields).
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_SECRET_BASE32_KEY: B32,
         KP_TOTP_LENGTH_KEY: "6",
         KP_TOTP_PERIOD_KEY: "30",
         KP_TOTP_ALGORITHM_KEY: "HMAC-SHA-1",
     }
     result = resolve_otp(None, props, entry_label="x")
-    if result.totp != _B32:
+    if result.totp != B32:
         raise AssertionError(f"expected bare secret, got {result.totp!r}")
     if KP_TOTP_LENGTH_KEY not in result.consumed_keys:
         raise AssertionError(f"default config not consumed: {result.consumed_keys}")
 
 
-def _assert_encoding_round_trips(key: str, encoded: str) -> None:
+def assert_encoding_round_trips(key: str, encoded: str) -> None:
     result = resolve_otp(None, {key: encoded}, entry_label="x")
     if result.totp is None or not result.totp.startswith("otpauth://totp/"):
         raise AssertionError(f"{key}: expected otpauth URI, got {result.totp!r}")
-    params = _otpauth_params(result.totp)
-    if _decode_b32(params["secret"]) != _RAW:
+    params = otpauth_params(result.totp)
+    if decode_b32(params["secret"]) != RAW:
         raise AssertionError(f"{key}: secret did not round-trip to raw key")
     if result.consumed_keys != frozenset({key}):
         raise AssertionError(f"{key}: unexpected consumed_keys {result.consumed_keys}")
 
 
 def assert_hex_encoding() -> None:
-    _assert_encoding_round_trips(KP_TOTP_SECRET_HEX_KEY, _RAW.hex())
+    assert_encoding_round_trips(KP_TOTP_SECRET_HEX_KEY, RAW.hex())
 
 
 def assert_base64_encoding() -> None:
-    _assert_encoding_round_trips(
-        KP_TOTP_SECRET_BASE64_KEY, base64.b64encode(_RAW).decode()
+    assert_encoding_round_trips(
+        KP_TOTP_SECRET_BASE64_KEY, base64.b64encode(RAW).decode()
     )
 
 
@@ -161,14 +161,14 @@ def assert_utf8_encoding() -> None:
     result = resolve_otp(None, {KP_TOTP_SECRET_UTF8_KEY: text}, entry_label="x")
     if result.totp is None:
         raise AssertionError("expected otpauth URI for UTF-8 secret")
-    params = _otpauth_params(result.totp)
-    if _decode_b32(params["secret"]) != text.encode("utf-8"):
+    params = otpauth_params(result.totp)
+    if decode_b32(params["secret"]) != text.encode("utf-8"):
         raise AssertionError("UTF-8 secret bytes must be used verbatim as the key")
 
 
 def assert_hotp_warned_not_dropped() -> None:
     props: Mapping[str, str | None] = {
-        KP_HOTP_SECRET_BASE32_KEY: _B32,
+        KP_HOTP_SECRET_BASE32_KEY: B32,
         "HmacOtp-Counter": "5",
     }
     result = resolve_otp(None, props, entry_label="x")
@@ -184,11 +184,11 @@ def assert_hotp_warned_not_dropped() -> None:
 
 def assert_hotp_alongside_totp() -> None:
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_SECRET_BASE32_KEY: B32,
         KP_HOTP_SECRET_BASE32_KEY: "GEZDGNBVGY3TQOJQ",
     }
     result = resolve_otp(None, props, entry_label="x")
-    if result.totp != _B32:
+    if result.totp != B32:
         raise AssertionError(f"TOTP must still migrate, got {result.totp!r}")
     if result.consumed_keys != frozenset({KP_TOTP_SECRET_BASE32_KEY}):
         raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
@@ -244,8 +244,8 @@ def assert_messy_base32_nondefault() -> None:
     result = resolve_otp(None, props, entry_label="x")
     if result.totp is None:
         raise AssertionError("expected otpauth URI")
-    params = _otpauth_params(result.totp)
-    if _decode_b32(params["secret"]) != _RAW:
+    params = otpauth_params(result.totp)
+    if decode_b32(params["secret"]) != RAW:
         raise AssertionError("messy Base32 secret did not decode correctly")
     if params.get("period") != "15":
         raise AssertionError(f"expected period=15, got {params.get('period')}")
@@ -260,13 +260,13 @@ def assert_none_value_is_absent() -> None:
 
 def assert_unknown_algorithm_defaults_with_warning() -> None:
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_HEX_KEY: _RAW.hex(),
+        KP_TOTP_SECRET_HEX_KEY: RAW.hex(),
         KP_TOTP_ALGORITHM_KEY: "HMAC-MD5",
     }
     result = resolve_otp(None, props, entry_label="x")
     if result.totp is None:
         raise AssertionError("expected otpauth URI")
-    params = _otpauth_params(result.totp)
+    params = otpauth_params(result.totp)
     if params.get("algorithm") != "SHA1":
         raise AssertionError(f"unknown algorithm must default to SHA1, got {params}")
     if not any("algorithm" in w.lower() for w in result.warnings):
@@ -275,13 +275,13 @@ def assert_unknown_algorithm_defaults_with_warning() -> None:
 
 def assert_oversized_digits_clamped() -> None:
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_HEX_KEY: _RAW.hex(),
+        KP_TOTP_SECRET_HEX_KEY: RAW.hex(),
         KP_TOTP_LENGTH_KEY: "12",
     }
     result = resolve_otp(None, props, entry_label="x")
     if result.totp is None:
         raise AssertionError("expected otpauth URI")
-    params = _otpauth_params(result.totp)
+    params = otpauth_params(result.totp)
     if params.get("digits") != "8":
         raise AssertionError(f"digits >8 must clamp to 8, got {params.get('digits')}")
     if not any(
@@ -297,8 +297,8 @@ def assert_blank_otp_falls_back() -> None:
     # The PR's literal subject: "when entry.otp is empty".  A blank or
     # whitespace-only otp field must not shadow the TimeOtp fallback.
     for blank in ("", "   ", "\t\n"):
-        result = resolve_otp(blank, {KP_TOTP_SECRET_BASE32_KEY: _B32}, entry_label="x")
-        if result.totp != _B32:
+        result = resolve_otp(blank, {KP_TOTP_SECRET_BASE32_KEY: B32}, entry_label="x")
+        if result.totp != B32:
             raise AssertionError(
                 f"blank otp {blank!r} must fall back to the secret, got {result.totp!r}"
             )
@@ -325,8 +325,8 @@ def assert_bare_base32_canonical() -> None:
     result = resolve_otp(
         None, {KP_TOTP_SECRET_BASE32_KEY: "jbsw\ty3dp ehpk3pxp"}, entry_label="x"
     )
-    if result.totp != _B32:
-        raise AssertionError(f"expected canonical {_B32!r}, got {result.totp!r}")
+    if result.totp != B32:
+        raise AssertionError(f"expected canonical {B32!r}, got {result.totp!r}")
 
 
 def assert_padded_base32_decodes() -> None:
@@ -342,20 +342,20 @@ def assert_padded_base32_decodes() -> None:
     )
     if result.totp is None:
         raise AssertionError("padded Base32 secret must decode, not be dropped")
-    params = _otpauth_params(result.totp)
-    if _decode_b32(params["secret"]) != raw:
+    params = otpauth_params(result.totp)
+    if decode_b32(params["secret"]) != raw:
         raise AssertionError("padded Base32 secret did not round-trip")
 
 
 def assert_sha512_maps() -> None:
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_HEX_KEY: _RAW.hex(),
+        KP_TOTP_SECRET_HEX_KEY: RAW.hex(),
         KP_TOTP_ALGORITHM_KEY: "HMAC-SHA-512",
     }
     result = resolve_otp(None, props, entry_label="x")
     if result.totp is None:
         raise AssertionError("expected otpauth URI")
-    params = _otpauth_params(result.totp)
+    params = otpauth_params(result.totp)
     if params.get("algorithm") != "SHA512":
         raise AssertionError(
             f"HMAC-SHA-512 must map to SHA512, got {params.get('algorithm')}"
@@ -365,13 +365,13 @@ def assert_sha512_maps() -> None:
 def assert_invalid_period_defaults() -> None:
     for bad in ("0", "abc"):
         props: Mapping[str, str | None] = {
-            KP_TOTP_SECRET_HEX_KEY: _RAW.hex(),
+            KP_TOTP_SECRET_HEX_KEY: RAW.hex(),
             KP_TOTP_PERIOD_KEY: bad,
         }
         result = resolve_otp(None, props, entry_label="x")
         if result.totp is None:
             raise AssertionError("expected otpauth URI")
-        params = _otpauth_params(result.totp)
+        params = otpauth_params(result.totp)
         if params.get("period") != "30":
             raise AssertionError(
                 f"invalid period {bad!r} must default to 30, got {params.get('period')}"
@@ -384,13 +384,13 @@ def assert_below_min_length_passthrough() -> None:
     # Below the usual minimum is passed through (Bitwarden accepts >=1), distinct
     # from the oversize path which clamps.
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_HEX_KEY: _RAW.hex(),
+        KP_TOTP_SECRET_HEX_KEY: RAW.hex(),
         KP_TOTP_LENGTH_KEY: "4",
     }
     result = resolve_otp(None, props, entry_label="x")
     if result.totp is None:
         raise AssertionError("expected otpauth URI")
-    params = _otpauth_params(result.totp)
+    params = otpauth_params(result.totp)
     if params.get("digits") != "4":
         raise AssertionError(
             f"below-min digits must pass through, got {params.get('digits')}"
@@ -403,7 +403,7 @@ def assert_entry_otp_precedence_with_hotp() -> None:
     # entry.otp wins AND a HOTP secret exists: URI migrates, HOTP warned + hidden.
     uri = "otpauth://totp/Acme:bob?secret=GEZDGNBVGY3TQOJQ"
     props: Mapping[str, str | None] = {
-        KP_HOTP_SECRET_BASE32_KEY: _B32,
+        KP_HOTP_SECRET_BASE32_KEY: B32,
         "HmacOtp-Counter": "9",
     }
     result = resolve_otp(uri, props, entry_label="x")
@@ -421,11 +421,11 @@ def assert_decoder_priority() -> None:
     # Malformed entry with two encodings: Base32 wins; the other is hidden.
     other = bytes.fromhex("0011223344")
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_SECRET_BASE32_KEY: B32,
         KP_TOTP_SECRET_HEX_KEY: other.hex(),
     }
     result = resolve_otp(None, props, entry_label="x")
-    if result.totp != _B32:
+    if result.totp != B32:
         raise AssertionError(f"Base32 must win priority, got {result.totp!r}")
     if KP_TOTP_SECRET_HEX_KEY not in result.hidden_keys:
         raise AssertionError(
@@ -436,7 +436,7 @@ def assert_decoder_priority() -> None:
 def assert_label_encoded() -> None:
     result = resolve_otp(
         None,
-        {KP_TOTP_SECRET_HEX_KEY: _RAW.hex(), KP_TOTP_PERIOD_KEY: "45"},
+        {KP_TOTP_SECRET_HEX_KEY: RAW.hex(), KP_TOTP_PERIOD_KEY: "45"},
         entry_label="Acme: bob/work?x=1",
     )
     if result.totp is None:
@@ -452,7 +452,7 @@ def assert_label_encoded() -> None:
 def assert_empty_label_fallback() -> None:
     result = resolve_otp(
         None,
-        {KP_TOTP_SECRET_HEX_KEY: _RAW.hex(), KP_TOTP_PERIOD_KEY: "45"},
+        {KP_TOTP_SECRET_HEX_KEY: RAW.hex(), KP_TOTP_PERIOD_KEY: "45"},
         entry_label="",
     )
     if result.totp is None:
@@ -467,12 +467,12 @@ def assert_pps_short_lowercase_secret() -> None:
     # secret must migrate as the canonical bare secret.
     result = resolve_otp(
         None,
-        {PPS_TOTP_SECRET_KEY: _B32.lower()},
+        {PPS_TOTP_SECRET_KEY: B32.lower()},
         entry_label="Acme",
         totp_pps=True,
     )
-    if result.totp != _B32:
-        raise AssertionError(f"expected bare secret {_B32!r}, got {result.totp!r}")
+    if result.totp != B32:
+        raise AssertionError(f"expected bare secret {B32!r}, got {result.totp!r}")
     if result.consumed_keys != frozenset({PPS_TOTP_SECRET_KEY}):
         raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
     if result.hidden_keys:
@@ -491,7 +491,7 @@ def assert_pps_long_uppercase_secret() -> None:
     )
     if result.totp is None or result.totp != secret:
         raise AssertionError(f"expected bare secret {secret!r}, got {result.totp!r}")
-    if _decode_b32(result.totp) != raw:
+    if decode_b32(result.totp) != raw:
         raise AssertionError("PPS secret did not round-trip to the raw key")
     if result.consumed_keys != frozenset({PPS_TOTP_SECRET_KEY}):
         raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
@@ -499,15 +499,15 @@ def assert_pps_long_uppercase_secret() -> None:
 
 def assert_pps_config_overrides_build_otpauth() -> None:
     props: Mapping[str, str | None] = {
-        PPS_TOTP_SECRET_KEY: _B32,
+        PPS_TOTP_SECRET_KEY: B32,
         PPS_TOTP_DIGITS_KEY: "8",
         PPS_TOTP_PERIOD_KEY: "60",
     }
     result = resolve_otp(None, props, entry_label="Acme Corp", totp_pps=True)
     if result.totp is None or not result.totp.startswith("otpauth://totp/"):
         raise AssertionError(f"expected otpauth URI, got {result.totp!r}")
-    params = _otpauth_params(result.totp)
-    if _decode_b32(params["secret"]) != _RAW:
+    params = otpauth_params(result.totp)
+    if decode_b32(params["secret"]) != RAW:
         raise AssertionError("otpauth secret does not round-trip to the raw key")
     if params.get("digits") != "8":
         raise AssertionError(f"expected digits=8, got {params.get('digits')}")
@@ -530,11 +530,11 @@ def assert_pps_config_overrides_build_otpauth() -> None:
 
 def assert_pps_hotp_still_hidden() -> None:
     props: Mapping[str, str | None] = {
-        PPS_TOTP_SECRET_KEY: _B32,
+        PPS_TOTP_SECRET_KEY: B32,
         KP_HOTP_SECRET_BASE32_KEY: "GEZDGNBVGY3TQOJQ",
     }
     result = resolve_otp(None, props, entry_label="x", totp_pps=True)
-    if result.totp != _B32:
+    if result.totp != B32:
         raise AssertionError(f"TOTP must still migrate, got {result.totp!r}")
     if result.consumed_keys != frozenset({PPS_TOTP_SECRET_KEY}):
         raise AssertionError(f"unexpected consumed_keys: {result.consumed_keys}")
@@ -561,7 +561,7 @@ def assert_pps_undecodable_secret_hidden() -> None:
 def assert_pps_entry_otp_precedence() -> None:
     uri = "otpauth://totp/Acme:bob?secret=GEZDGNBVGY3TQOJQ&issuer=Acme"
     result = resolve_otp(
-        uri, {PPS_TOTP_SECRET_KEY: _B32}, entry_label="Acme", totp_pps=True
+        uri, {PPS_TOTP_SECRET_KEY: B32}, entry_label="Acme", totp_pps=True
     )
     if result.totp != uri:
         raise AssertionError(f"entry.otp must win, got {result.totp!r}")
@@ -578,7 +578,7 @@ def assert_default_ignores_pps_fields() -> None:
     # secret is still a secret: it must be hidden, not left visible. The config
     # fields are not secret and stay ordinary custom fields.
     props: Mapping[str, str | None] = {
-        PPS_TOTP_SECRET_KEY: _B32,
+        PPS_TOTP_SECRET_KEY: B32,
         PPS_TOTP_DIGITS_KEY: "8",
         PPS_TOTP_PERIOD_KEY: "60",
     }
@@ -597,7 +597,7 @@ def assert_pps_ignores_keepass_fields() -> None:
     # Under the flag the TimeOtp-* fields are never read for migration, but the
     # secret is still hidden; only its config fields stay ordinary.
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_SECRET_BASE32_KEY: B32,
         KP_TOTP_LENGTH_KEY: "8",
         KP_TOTP_PERIOD_KEY: "60",
         KP_TOTP_ALGORITHM_KEY: "HMAC-SHA-256",
@@ -620,7 +620,7 @@ def assert_mixed_database_hides_every_secret() -> None:
     # other one's secret keys are hidden and never migrated. Config fields of the
     # inactive scheme carry no secret and stay visible custom fields.
     props: Mapping[str, str | None] = {
-        KP_TOTP_SECRET_BASE32_KEY: _B32,
+        KP_TOTP_SECRET_BASE32_KEY: B32,
         KP_TOTP_LENGTH_KEY: "8",
         PPS_TOTP_SECRET_KEY: "GEZDGNBVGY3TQOJQ",
         PPS_TOTP_DIGITS_KEY: "8",
@@ -661,10 +661,10 @@ def assert_mixed_database_hides_every_secret() -> None:
 
 
 def assert_totp_equivalence_uses_code_parameters_only() -> None:
-    left = f"otpauth://totp/First?secret={_B32}&algorithm=SHA256&digits=8&period=45"
+    left = f"otpauth://totp/First?secret={B32}&algorithm=SHA256&digits=8&period=45"
     right = (
         f"otpauth://totp/Second?period=45&issuer=Other&digits=8&"
-        f"algorithm=sha256&secret={_B32.lower()}"
+        f"algorithm=sha256&secret={B32.lower()}"
     )
     if not totp_values_equivalent(left, right):
         raise AssertionError(
@@ -673,28 +673,28 @@ def assert_totp_equivalence_uses_code_parameters_only() -> None:
 
 
 def assert_totp_equivalence_rejects_noncanonical_algorithm() -> None:
-    canonical = f"otpauth://totp/A?secret={_B32}&algorithm=SHA256"
-    fallback = f"otpauth://totp/B?secret={_B32}&algorithm=SHA-256"
+    canonical = f"otpauth://totp/A?secret={B32}&algorithm=SHA256"
+    fallback = f"otpauth://totp/B?secret={B32}&algorithm=SHA-256"
     if totp_values_equivalent(canonical, fallback):
         raise AssertionError("Unsupported algorithm alias was treated as SHA256")
 
 
 def assert_totp_equivalence_rejects_duplicate_parameters() -> None:
-    ambiguous = f"otpauth://totp/A?secret={_B32}&secret=GEZDGNBVGY3TQOJQ"
-    if totp_values_equivalent(_B32, ambiguous):
+    ambiguous = f"otpauth://totp/A?secret={B32}&secret=GEZDGNBVGY3TQOJQ"
+    if totp_values_equivalent(B32, ambiguous):
         raise AssertionError(
             "Ambiguous duplicate TOTP secret was treated as equivalent"
         )
 
 
 def assert_totp_equivalence_rejects_non_ascii_decimal_syntax() -> None:
-    canonical = f"otpauth://totp/A?secret={_B32}&period=60&algorithm=SHA1"
+    canonical = f"otpauth://totp/A?secret={B32}&period=60&algorithm=SHA1"
     malformed = (
-        f"otpauth://totp/B?secret={_B32}&period=6_0&algorithm=SHA1",
-        f"otpauth://totp/B?secret={_B32}&period=%2060&algorithm=SHA1",
-        f"otpauth://totp/B?secret={_B32}&period=%2B60&algorithm=SHA1",
-        f"otpauth://totp/B?secret={_B32}&period=\uff16\uff10&algorithm=SHA1",
-        f"otpauth://totp/B?secret={_B32}&period=60&algorithm=\u017fHA1",
+        f"otpauth://totp/B?secret={B32}&period=6_0&algorithm=SHA1",
+        f"otpauth://totp/B?secret={B32}&period=%2060&algorithm=SHA1",
+        f"otpauth://totp/B?secret={B32}&period=%2B60&algorithm=SHA1",
+        f"otpauth://totp/B?secret={B32}&period=\uff16\uff10&algorithm=SHA1",
+        f"otpauth://totp/B?secret={B32}&period=60&algorithm=\u017fHA1",
     )
     for candidate in malformed:
         if totp_values_equivalent(canonical, candidate):

@@ -6,7 +6,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kp2bw._cli_policy_state import parse_policy_state, read_policy_state
+from kp2bw.cli_policy_state import parse_policy_state, read_policy_state
 from kp2bw.exceptions import BitwardenClientError
 
 

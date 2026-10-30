@@ -10,22 +10,11 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-from convert_update_test import UpdateTestConverter, _make_desired, _make_existing
+from convert_update_test import UpdateTestConverter, make_desired, make_existing
 from lxml import etree
 from pykeepass import PyKeePass, create_database
 
-from kp2bw._attachments import SourceFile
-from kp2bw._history import (
-    apply_native_history,
-    history_archive,
-    native_password_history,
-)
-from kp2bw._item_sync import (
-    content_signature,
-    pre_fido2_content_signature,
-    stamp_content,
-    sync_stamp_matches,
-)
+from kp2bw.attachments import SourceFile
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse, BwPasswordHistory
 from kp2bw.convert import Converter
@@ -34,6 +23,17 @@ from kp2bw.exceptions import (
     BitwardenServeExitedError,
     ConversionError,
     HistoryConversionError,
+)
+from kp2bw.history import (
+    apply_native_history,
+    history_archive,
+    native_password_history,
+)
+from kp2bw.item_sync import (
+    content_signature,
+    pre_fido2_content_signature,
+    stamp_content,
+    sync_stamp_matches,
 )
 
 
@@ -111,10 +111,10 @@ def check_native_updates() -> None:
     assert full == before
 
     client = object.__new__(BitwardenServeClient)
-    client._history_updates_supported = False
+    client.history_updates_supported = False
     with (
         patch.object(BitwardenServeClient, "get_item", return_value=item),
-        patch.object(BitwardenServeClient, "_request") as request,
+        patch.object(BitwardenServeClient, "request") as request,
     ):
         try:
             client.update_item("item", desired)
@@ -123,16 +123,16 @@ def check_native_updates() -> None:
         else:
             raise AssertionError("Unsupported native history update was sent")
         request.assert_not_called()
-    client._history_updates_supported = True
+    client.history_updates_supported = True
     with (
         patch.object(BitwardenServeClient, "get_item", return_value=desired),
-        patch.object(BitwardenServeClient, "_request") as request,
+        patch.object(BitwardenServeClient, "request") as request,
     ):
         client.update_item("item", desired)
         assert [call.args[0] for call in request.call_args_list] == ["PUT", "POST"]
     with (
         patch.object(BitwardenServeClient, "get_item", return_value=item),
-        patch.object(BitwardenServeClient, "_request") as request,
+        patch.object(BitwardenServeClient, "request") as request,
     ):
         try:
             client.update_item("item", desired)
@@ -142,10 +142,10 @@ def check_native_updates() -> None:
             raise AssertionError("Lost native history update was accepted")
         assert sum(call.args[0] == "PUT" for call in request.call_args_list) == 1
 
-    existing = _make_existing(revisionDate="revision-1")
+    existing = make_existing(revisionDate="revision-1")
     apply_native_history(existing, source)
     stamp_content(existing)
-    desired_item = _make_desired()
+    desired_item = make_desired()
     apply_native_history(desired_item, newer)
     converter = UpdateTestConverter()
     bw = MagicMock(spec=BitwardenServeClient)
@@ -201,11 +201,11 @@ def check_legacy_ref_history() -> None:
             str(path), "test", None, "unused", None, None, False, 0, None
         )
         with patch.object(
-            converter, "_create_bitwarden_items_for_entries", return_value=0
+            converter, "create_bitwarden_items_for_entries", return_value=0
         ):
             assert converter.convert() == 0
         identifier = entry.uuid.hex.upper()
-        desired = converter._unpack_entry(converter._entries[identifier])[2]
+        desired = converter.unpack_entry(converter.entries[identifier])[2]
         assert desired.get("passwordHistory")
         old = cast(BwItemResponse, copy.deepcopy(desired))
         old.update(id="existing", object="item", revisionDate="old")
@@ -225,9 +225,9 @@ def check_legacy_ref_history() -> None:
             if field["name"] == "KP2BW_SYNC":
                 field["value"] = original_stamp
         old_login["uris"] = [{"uri": alias_url, "match": None}]
-        assert converter._legacy_ref_status(old, identifier) == "exact"
+        assert converter.legacy_ref_status(old, identifier) == "exact"
         old["notes"] = "destination edit"
-        assert converter._legacy_ref_status(old, identifier) == "diverged"
+        assert converter.legacy_ref_status(old, identifier) == "diverged"
 
 
 def main() -> None:
@@ -379,9 +379,9 @@ def main() -> None:
             None,
             archive_history=True,
         )
-        converter._load_keepass_data()
+        converter.load_keepass_data()
         key = str(entry.uuid).replace("-", "").upper()
-        converted = converter._unpack_entry(converter._entries[key])[2]
+        converted = converter.unpack_entry(converter.entries[key])[2]
         assert (
             next(
                 field["value"]
@@ -390,7 +390,7 @@ def main() -> None:
             )
             == "source data"
         )
-        sources = converter._unpack_entry(converter._entries[key])[3]
+        sources = converter.unpack_entry(converter.entries[key])[3]
         files = [source for source in sources if isinstance(source, SourceFile)]
         assert len(files) == 2
         assert len({source.filename for source in files}) == 2
@@ -401,11 +401,11 @@ def main() -> None:
             and original.data == b"original user file"
         )
         assert json.loads(generated.data)["entry_uuid"] == str(entry.uuid)
-        converter._load_keepass_data()
-        assert converter._unpack_entry(converter._entries[key])[3] == sources
+        converter.load_keepass_data()
+        assert converter.unpack_entry(converter.entries[key])[3] == sources
         normal = Converter(str(path), "test", None, "test", None, None, False, 0, None)
-        normal._load_keepass_data()
-        normal_sources = normal._unpack_entry(normal._entries[key])[3]
+        normal.load_keepass_data()
+        normal_sources = normal.unpack_entry(normal.entries[key])[3]
         assert len(normal_sources) == 1
 
         small.history[0].password = f"{{REF:P@I:{entry.uuid.hex}}}"
@@ -429,9 +429,9 @@ def main() -> None:
             archive_history=True,
             migrate_password_history=False,
         )
-        archive_only._load_keepass_data()
-        for value in archive_only._entries.values():
-            assert "passwordHistory" not in archive_only._unpack_entry(value)[2]
+        archive_only.load_keepass_data()
+        for value in archive_only.entries.values():
+            assert "passwordHistory" not in archive_only.unpack_entry(value)[2]
     print("password history extraction and archive round trips passed")
 
 
@@ -439,8 +439,8 @@ def check_review_regressions() -> None:
     source: list[BwPasswordHistory] = [
         {"password": "previous", "lastUsedDate": "2020-01-01T00:00:00Z"}
     ]
-    existing = _make_existing(revisionDate="before")
-    desired = _make_desired()
+    existing = make_existing(revisionDate="before")
+    desired = make_desired()
     apply_native_history(desired, source)
     bw = MagicMock(spec=BitwardenServeClient)
     for field in ("favorite", "folderId"):
@@ -493,7 +493,7 @@ def check_review_regressions() -> None:
     )
     bw.update_item_if_revision.assert_not_called()
     for native in (False, True):
-        legacy = _make_existing()
+        legacy = make_existing()
         legacy["fields"].append({
             "name": "KP2BW_HISTORY",
             "value": "ordinary source value",
@@ -504,7 +504,7 @@ def check_review_regressions() -> None:
             "value": pre_fido2_content_signature(legacy),
             "type": 0,
         })
-        requested = _make_desired()
+        requested = make_desired()
         requested["fields"].append({
             "name": "KeePass:KP2BW_HISTORY:1",
             "value": "ordinary source value",
@@ -560,7 +560,7 @@ def check_review_regressions() -> None:
         converter = Converter(
             str(path), "synthetic", None, "", None, None, False, 999, None
         )
-        with patch.object(converter, "_create_bitwarden_items_for_entries") as writes:
+        with patch.object(converter, "create_bitwarden_items_for_entries") as writes:
             try:
                 converter.convert()
             except HistoryConversionError as exc:

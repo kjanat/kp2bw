@@ -12,25 +12,25 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-from convert_update_test import UpdateTestConverter, _make_desired, _make_existing
+from convert_update_test import UpdateTestConverter, make_desired, make_existing
 
-from kp2bw._attachment_resume import transaction_filename
-from kp2bw._attachments import (
+from kp2bw.attachment_resume import transaction_filename
+from kp2bw.attachments import (
     FileRecord,
     fields_from_records,
     plan_attachments,
     source_file,
 )
-from kp2bw._checkpoint import (
+from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw.bw_types import BwItemResponse
+from kp2bw.checkpoint import (
     AttachmentCheckpoint,
     CheckpointRecord,
     CheckpointScope,
     metadata_digest,
 )
-from kp2bw._item_sync import stamp_content
-from kp2bw.bw_serve import BitwardenServeClient
-from kp2bw.bw_types import BwItemResponse
 from kp2bw.exceptions import ConversionError
+from kp2bw.item_sync import stamp_content
 
 
 def scope() -> CheckpointScope:
@@ -66,7 +66,7 @@ def child(mode: str, path: Path) -> None:
                     original_replace(source, destination)
                 os._exit(91)
 
-            with patch("kp2bw._checkpoint.os.replace", side_effect=crash):
+            with patch("kp2bw.checkpoint.os.replace", side_effect=crash):
                 checkpoint.save(replace(record(), source_size=43))
     except ConversionError:
         if mode == "locked":
@@ -135,7 +135,7 @@ def main() -> None:
             prior = path.read_bytes()
             assert subprocess_case("locked", path) == 23
             with patch(
-                "kp2bw._checkpoint.os.replace",
+                "kp2bw.checkpoint.os.replace",
                 side_effect=OSError("synthetic write failure"),
             ):
                 try:
@@ -210,7 +210,7 @@ def check_planner_cache() -> None:
             "file", hashlib.sha256(b"file.txt").hexdigest(), source.digest
         )
     }
-    item = _make_existing(
+    item = make_existing(
         revisionDate="revision",
         fields=[
             {"name": "KP2BW_ID", "value": "a" * 32, "type": 0},
@@ -223,7 +223,7 @@ def check_planner_cache() -> None:
     stamp_content(item)
     client = MagicMock(spec=BitwardenServeClient)
 
-    def get_item(_item_id: str) -> BwItemResponse:
+    def get_item(item_id: str) -> BwItemResponse:
         return copy.deepcopy(item)
 
     client.get_item.side_effect = get_item
@@ -234,25 +234,25 @@ def check_planner_cache() -> None:
         tempfile.TemporaryDirectory() as directory,
         AttachmentCheckpoint(Path(directory) / "cache.json", scope()) as checkpoint,
     ):
-        converter._checkpoint = checkpoint
+        converter.checkpoint = checkpoint
 
         def plan():
             return plan_attachments(
                 [source],
                 associations,
                 [("file", "file.txt")],
-                lambda attachment_id: converter._read_checkpoint_attachment(
+                lambda attachment_id: converter.read_checkpoint_attachment(
                     bw, item, [source], associations, attachment_id
                 ),
             )
 
         initial = plan()
         assert not initial.uploads
-        converter._save_verified_checkpoint(bw, item["id"], initial)
+        converter.save_verified_checkpoint(bw, item["id"], initial)
         client.get_attachment.reset_mock()
         repeated = plan()
         assert not repeated.uploads
-        converter._save_verified_checkpoint(bw, item["id"], repeated)
+        converter.save_verified_checkpoint(bw, item["id"], repeated)
         client.get_attachment.assert_not_called()
         item["revisionDate"] = "remote-edit"
         assert not plan().uploads
@@ -290,7 +290,7 @@ def check_failed_recovery_preserves_old_copy() -> None:
         {"name": "KP2BW_ID", "value": "a" * 32, "type": 0},
         *fields_from_records(records),
     ]
-    item = _make_existing(
+    item = make_existing(
         fields=fields,
         attachments=[
             {"id": "old", "fileName": "first.txt"},
@@ -299,7 +299,7 @@ def check_failed_recovery_preserves_old_copy() -> None:
         ],
     )
     stamp_content(item)
-    desired = _make_desired(fields=[{"name": "KP2BW_ID", "value": "a" * 32, "type": 0}])
+    desired = make_desired(fields=[{"name": "KP2BW_ID", "value": "a" * 32, "type": 0}])
     bodies = {"old": b"original", "new": first.data, "second": b"destination edit"}
     client = MagicMock(spec=BitwardenServeClient)
 
@@ -326,7 +326,7 @@ def check_failed_recovery_preserves_old_copy() -> None:
             Path(directory) / "checkpoint.json", scope()
         ) as checkpoint,
     ):
-        converter._checkpoint = checkpoint
+        converter.checkpoint = checkpoint
         checkpoint.save(
             CheckpointRecord(
                 entry_id="a" * 32,
@@ -347,10 +347,10 @@ def check_failed_recovery_preserves_old_copy() -> None:
             bw, item, None, desired, [first, second], fixed_coll_id=None
         )
         assert outcome == "failed" and not uploads
-        assert not converter._checkpoint_cleanup
-        assert item["id"] not in converter._attachment_plans
+        assert not converter.checkpoint_cleanup
+        assert item["id"] not in converter.attachment_plans
         try:
-            converter._delete_checkpoint_copy(bw, item["id"], "old", filename)
+            converter.delete_checkpoint_copy(bw, item["id"], "old", filename)
         except ConversionError:
             pass
         else:
@@ -363,10 +363,10 @@ def check_failed_recovery_preserves_old_copy() -> None:
             bw, item, None, desired, [first, second], fixed_coll_id=None
         )
         assert outcome != "failed" and not uploads
-        assert converter._checkpoint_cleanup == [(item["id"], "old", filename)]
-        plan = converter._attachment_plans[item["id"]]
-        converter._persist_attachment_plan(bw, item["id"], plan, set())
-        converter._delete_checkpoint_copy(bw, item["id"], "old", filename)
+        assert converter.checkpoint_cleanup == [(item["id"], "old", filename)]
+        plan = converter.attachment_plans[item["id"]]
+        converter.persist_attachment_plan(bw, item["id"], plan, set())
+        converter.delete_checkpoint_copy(bw, item["id"], "old", filename)
         client.delete_attachment.assert_called_once_with(item["id"], "old")
     print(
         "recovered attachments retain old copies until all associations are persisted"

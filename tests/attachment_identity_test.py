@@ -9,20 +9,18 @@ from unittest.mock import MagicMock
 from convert_update_test import (
     FakeBw,
     UpdateTestConverter,
-    _as_bw,
-    _make_desired,
-    _make_existing,
+    as_bw,
+    make_desired,
+    make_existing,
 )
 
-from kp2bw._attachments import (
+from kp2bw.attachments import (
     FileRecord,
     fields_from_records,
     plan_attachments,
     records_from_fields,
     source_file,
 )
-from kp2bw._item_sync import stamp_content
-from kp2bw._source_fields import source_field_name, source_field_origin
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
 from kp2bw.exceptions import (
@@ -30,6 +28,8 @@ from kp2bw.exceptions import (
     BitwardenServeExitedError,
     ConversionError,
 )
+from kp2bw.item_sync import stamp_content
+from kp2bw.source_fields import source_field_name, source_field_origin
 
 
 def check_persisted_mapping(failure: str | None) -> None:
@@ -43,7 +43,7 @@ def check_persisted_mapping(failure: str | None) -> None:
     plan = plan_attachments(
         [replacement], records, [("old-id", "file.txt")], lambda _: b"old"
     )
-    cached = _make_existing(
+    cached = make_existing(
         fields=fields_from_records(records),
         attachments=[
             {"id": "old-id", "fileName": "file.txt"},
@@ -54,7 +54,7 @@ def check_persisted_mapping(failure: str | None) -> None:
     remote = copy.deepcopy(cached)
     client = MagicMock(spec=BitwardenServeClient)
 
-    def update(_item_id: str, item: BwItemResponse) -> None:
+    def update(item_id: str, item: BwItemResponse) -> None:
         nonlocal remote
         if failure != "lost-write":
             remote = copy.deepcopy(item)
@@ -66,7 +66,7 @@ def check_persisted_mapping(failure: str | None) -> None:
             raise BitwardenClientError("synthetic sync failure")
         cached = copy.deepcopy(remote)
 
-    def get_item(_item_id: str) -> BwItemResponse:
+    def get_item(item_id: str) -> BwItemResponse:
         return copy.deepcopy(cached)
 
     client.get_item.side_effect = get_item
@@ -75,7 +75,7 @@ def check_persisted_mapping(failure: str | None) -> None:
     client.sync.side_effect = sync
     converter = UpdateTestConverter()
     try:
-        converter._persist_attachment_plan(
+        converter.persist_attachment_plan(
             cast(BitwardenServeClient, client), "item", plan, set()
         )
     except (BitwardenClientError, ConversionError):
@@ -94,7 +94,7 @@ def check_persisted_mapping(failure: str | None) -> None:
 def check_fatal_attachment_read() -> None:
     source = source_file("original", "file.txt", 1, "file.txt", b"data")
     for operation in ("get_item", "get_attachment"):
-        existing = _make_existing(attachments=[{"id": "file", "fileName": "file.txt"}])
+        existing = make_existing(attachments=[{"id": "file", "fileName": "file.txt"}])
         client = MagicMock(spec=BitwardenServeClient)
         client.get_item.return_value = existing
         getattr(client, operation).side_effect = BitwardenServeExitedError(
@@ -105,7 +105,7 @@ def check_fatal_attachment_read() -> None:
                 cast(BitwardenServeClient, client),
                 existing,
                 None,
-                _make_desired(),
+                make_desired(),
                 [source],
                 fixed_coll_id=None,
             )
@@ -119,7 +119,7 @@ def check_fatal_attachment_read() -> None:
 
 def main() -> None:
     check_fatal_attachment_read()
-    existing = _make_existing(
+    existing = make_existing(
         collectionIds=["old"],
         fields=fields_from_records({
             "a" * 64: FileRecord("attachment", "b" * 64, "c" * 64)
@@ -129,10 +129,10 @@ def main() -> None:
     existing["notes"] = "preserve destination edit"
     client = FakeBw(fail_get_attachment=True)
     outcome, uploads, stale = UpdateTestConverter(update_existing=False).reconcile(
-        _as_bw(client),
+        as_bw(client),
         existing,
         None,
-        _make_desired(collectionIds=["new"]),
+        make_desired(collectionIds=["new"]),
         [],
         fixed_coll_id=None,
     )

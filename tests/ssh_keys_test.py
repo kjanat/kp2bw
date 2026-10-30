@@ -3,7 +3,7 @@
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 
-from kp2bw._ssh_keys import convert_ssh_key
+from kp2bw.ssh_keys import convert_ssh_key
 
 
 def main() -> None:

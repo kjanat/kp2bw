@@ -7,9 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from _scope_fixture import create_scope_organization
-from e2e_vaultwarden_test import _login_session, _run
+from e2e_vaultwarden_test import login_session, run
 from pykeepass import create_database
+from scope_fixture import create_scope_organization
 
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
@@ -35,8 +35,8 @@ def main() -> None:
             NODE_EXTRA_CA_CERTS=str(cert),
             BW_NOINTERACTION="true",
         )
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(env, email, password)
+        run(["bw", "config", "server", server], env=env)
+        login_session(env, email, password)
         source = tmp / "selection.kdbx"
         db = create_database(source, password="synthetic")
         name = f"Selected item {uuid4()}"
@@ -160,7 +160,7 @@ def main() -> None:
             assert snapshot() == forced, "Rejected selection changed vault state"
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
             for item in forced.values():
-                bw._request("DELETE", f"/object/item/{item['id']}")
+                bw.request("DELETE", f"/object/item/{item['id']}")
     print("selected sync, force, scope and attachment round trips passed")
 
 

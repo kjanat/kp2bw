@@ -8,11 +8,11 @@ from typing import cast
 from lxml.etree import SubElement
 from pykeepass import Entry, create_database
 
-from kp2bw._item_sync import content_signature, stamp_content
-from kp2bw._source_fields import source_field_name, source_field_origin
 from kp2bw.bw_serve import BitwardenServeClient, item_kp2bw_id, item_kp2bw_sync
 from kp2bw.bw_types import BwField, BwItemCreate, BwItemResponse
 from kp2bw.convert import Converter
+from kp2bw.item_sync import content_signature, stamp_content
+from kp2bw.source_fields import source_field_name, source_field_origin
 
 
 def append_field(entry: Entry, name: str, value: str, protected: bool) -> None:
@@ -39,8 +39,8 @@ class Client(BitwardenServeClient):
     def __init__(self, item: BwItemResponse) -> None:
         self.item = item
         self.updates: list[BwItemResponse] = []
-        self._org_id = None
-        self._collection_id = None
+        self.organization_id = None
+        self.collection_id = None
 
     def list_items(
         self,
@@ -62,7 +62,7 @@ class Client(BitwardenServeClient):
 def reconcile(
     conv: Converter, client: Client, desired: BwItemCreate, identity: str
 ) -> str:
-    outcome, _, _ = conv._reconcile_existing_item(
+    outcome, _, _ = conv.reconcile_existing_item(
         client,
         client.item,
         None,
@@ -100,8 +100,8 @@ def main() -> None:
                     append_field(entry, name, value, protected)
             append_field(entry, "KP2BW_ID_extra", "ordinary prefix", False)
             conv = converter()
-            conv._add_bw_entry_to_entries_dict(entry)
-            desired = next(iter(conv._entries.values()))[2]
+            conv.add_bw_entry_to_entries_dict(entry)
+            desired = next(iter(conv.entries.values()))[2]
             identity = entry.uuid.hex.upper()
             existing = cast(
                 BwItemResponse,
@@ -167,8 +167,8 @@ def main() -> None:
         append_field(entry, "TimeOtp-Secret-Base32", "JBSWY3DPEHPK3PXP", False)
         append_field(entry, "TimeOtp-Secret-Base32", "GEZDGNBVGY3TQOJQ", False)
         conv = converter()
-        conv._add_bw_entry_to_entries_dict(entry)
-        item = next(iter(conv._entries.values()))[2]
+        conv.add_bw_entry_to_entries_dict(entry)
+        item = next(iter(conv.entries.values()))[2]
         retained = next(
             field
             for field in item["fields"]

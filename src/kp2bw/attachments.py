@@ -13,7 +13,7 @@ from .bw_types import BwField
 from .exceptions import ConversionError
 
 ATTACHMENT_FIELD_PREFIX = "KP2BW_FILE_"
-_HEX_ID = re.compile(r"^[0-9a-f]{64}$")
+HEX_ID = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -69,15 +69,15 @@ def records_from_fields(fields: Sequence[BwField]) -> dict[str, FileRecord]:
             values.get(key) for key in ("id", "name", "sha256")
         )
         if (
-            not _HEX_ID.fullmatch(source_id)
+            not HEX_ID.fullmatch(source_id)
             or source_id in records
             or set(values) != {"id", "name", "sha256"}
             or not isinstance(attachment_id, str)
             or not attachment_id
             or not isinstance(name_digest, str)
-            or not _HEX_ID.fullmatch(name_digest)
+            or not HEX_ID.fullmatch(name_digest)
             or not isinstance(digest, str)
-            or not _HEX_ID.fullmatch(digest)
+            or not HEX_ID.fullmatch(digest)
             or attachment_id in used_ids
         ):
             raise ConversionError(

@@ -4,7 +4,7 @@ import tempfile
 from importlib.metadata import PackagePath, files
 
 
-def _distribution_files() -> list[PackagePath]:
+def distribution_files() -> list[PackagePath]:
     dist_files = files("pykeepass-stubs")
     if dist_files is None:
         raise AssertionError(
@@ -14,7 +14,7 @@ def _distribution_files() -> list[PackagePath]:
     return list(dist_files)
 
 
-def _editable_source_roots(dist_files: list[PackagePath]) -> list[pathlib.Path]:
+def editable_source_roots(dist_files: list[PackagePath]) -> list[pathlib.Path]:
     source_roots: list[pathlib.Path] = []
 
     for dist_file in dist_files:
@@ -36,10 +36,10 @@ def _editable_source_roots(dist_files: list[PackagePath]) -> list[pathlib.Path]:
     return source_roots
 
 
-def _available_files(dist_files: list[PackagePath]) -> set[str]:
+def available_files(dist_files: list[PackagePath]) -> set[str]:
     available = {str(path) for path in dist_files}
 
-    for source_root in _editable_source_roots(dist_files):
+    for source_root in editable_source_roots(dist_files):
         available.update(
             path.relative_to(source_root).as_posix()
             for path in source_root.rglob("*")
@@ -49,8 +49,8 @@ def _available_files(dist_files: list[PackagePath]) -> set[str]:
     return available
 
 
-def _locate_distribution_file(file_name: str) -> pathlib.Path | None:
-    dist_files = _distribution_files()
+def locate_distribution_file(file_name: str) -> pathlib.Path | None:
+    dist_files = distribution_files()
 
     for dist_file in dist_files:
         if str(dist_file) == file_name:
@@ -58,7 +58,7 @@ def _locate_distribution_file(file_name: str) -> pathlib.Path | None:
             if located_file.is_file():
                 return located_file
 
-    for source_root in _editable_source_roots(dist_files):
+    for source_root in editable_source_roots(dist_files):
         located_file = source_root / file_name
         if located_file.is_file():
             return located_file
@@ -67,7 +67,7 @@ def _locate_distribution_file(file_name: str) -> pathlib.Path | None:
 
 
 def assert_distribution_files() -> None:
-    available = _available_files(_distribution_files())
+    available = available_files(distribution_files())
     required = {
         "pykeepass-stubs/__init__.pyi",
         "pykeepass-stubs/attachment.pyi",
@@ -83,7 +83,7 @@ def assert_distribution_files() -> None:
 
 
 def assert_partial_marker() -> None:
-    marker_path = _locate_distribution_file("pykeepass-stubs/py.typed")
+    marker_path = locate_distribution_file("pykeepass-stubs/py.typed")
     if marker_path is None:
         raise AssertionError("Could not locate pykeepass-stubs/py.typed")
 

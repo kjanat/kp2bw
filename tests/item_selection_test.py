@@ -9,15 +9,15 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-from convert_update_test import FakeBw, _as_bw, _make_desired, _make_existing
+from convert_update_test import FakeBw, as_bw, make_desired, make_existing
 from pykeepass import create_database
 
-from kp2bw._item_sync import stamp_content
-from kp2bw._selection import resolve_selection
 from kp2bw.bw_types import BwItemResponse
-from kp2bw.cli import _argparser
+from kp2bw.cli import argparser
 from kp2bw.convert import Converter
 from kp2bw.exceptions import ConversionError
+from kp2bw.item_sync import stamp_content
+from kp2bw.selection import resolve_selection
 
 
 def converter(
@@ -85,12 +85,12 @@ def main() -> None:
             raise AssertionError("Non-unique association accepted")
 
     conv = converter(Path("synthetic.kdbx"), source)
-    existing = _make_existing(id=destination)
+    existing = make_existing(id=destination)
     existing["fields"].append({"name": "KP2BW_ID", "value": source, "type": 0})
-    desired = _make_desired(notes="source change")
+    desired = make_desired(notes="source change")
     with TestCase().assertLogs("kp2bw.convert", level="WARNING") as logs:
-        outcome, _, _ = conv._reconcile_existing_item(
-            _as_bw(FakeBw(fail_update=True)),
+        outcome, _, _ = conv.reconcile_existing_item(
+            as_bw(FakeBw(fail_update=True)),
             existing,
             None,
             desired,
@@ -102,10 +102,10 @@ def main() -> None:
     diagnostic = " ".join(logs.output)
     assert source in diagnostic and destination in diagnostic
     assert "--force-update" not in diagnostic and "never-log-this" not in diagnostic
-    legacy = _make_existing(id=destination)
+    legacy = make_existing(id=destination)
     with TestCase().assertLogs("kp2bw.convert", level="WARNING") as logs:
-        outcome, _, _ = conv._reconcile_existing_item(
-            _as_bw(FakeBw(fail_update=True)),
+        outcome, _, _ = conv.reconcile_existing_item(
+            as_bw(FakeBw(fail_update=True)),
             legacy,
             None,
             desired,
@@ -121,8 +121,8 @@ def main() -> None:
     stamp_content(existing)
     existing["notes"] = "destination edit"
     with TestCase().assertLogs("kp2bw.convert", level="WARNING") as logs:
-        outcome, _, _ = conv._reconcile_existing_item(
-            _as_bw(FakeBw()),
+        outcome, _, _ = conv.reconcile_existing_item(
+            as_bw(FakeBw()),
             existing,
             None,
             desired,
@@ -166,39 +166,39 @@ def main() -> None:
         with (
             patch("kp2bw.convert.BitwardenServeClient", return_value=client),
             patch.object(
-                conv, "_create_bitwarden_items_for_entries", return_value=0
+                conv, "create_bitwarden_items_for_entries", return_value=0
             ) as write,
         ):
             assert conv.convert() == 0
             write.assert_called_once_with(client)
-            assert set(conv._entries) == {alias.uuid.hex.upper()}
-            result = next(iter(conv._entries.values()))[2]
+            assert set(conv.entries) == {alias.uuid.hex.upper()}
+            result = next(iter(conv.entries.values()))[2]
             assert result["login"]["password"] == "password"
             assert result["name"] == "Same title"
         full = converter(path, None)
-        full._import_tags = ["selected"]
-        full._load_keepass_data()
-        full._resolve_entries_with_references()
-        full_target = full._unpack_entry(full._entries[target.uuid.hex.upper()])[2]
+        full.import_tags = ["selected"]
+        full.load_keepass_data()
+        full.resolve_entries_with_references()
+        full_target = full.unpack_entry(full.entries[target.uuid.hex.upper()])[2]
         conv = converter(path, str(target.uuid))
-        conv._import_tags = ["selected"]
+        conv.import_tags = ["selected"]
         with (
             patch("kp2bw.convert.BitwardenServeClient", return_value=client),
-            patch.object(conv, "_create_bitwarden_items_for_entries", return_value=0),
+            patch.object(conv, "create_bitwarden_items_for_entries", return_value=0),
         ):
             assert conv.convert() == 0
-        assert set(conv._entries) == {target.uuid.hex.upper()}
-        selected_target = conv._unpack_entry(conv._entries[target.uuid.hex.upper()])[2]
+        assert set(conv.entries) == {target.uuid.hex.upper()}
+        selected_target = conv.unpack_entry(conv.entries[target.uuid.hex.upper()])[2]
         assert selected_target["login"] == full_target["login"]
         assert selected_target["login"]["totp"]
         assert {uri["uri"] for uri in selected_target["login"]["uris"]} >= {
             "https://alias.example.test",
             "https://chain.example.test",
         }
-        existing_target = _make_existing(**copy.deepcopy(full_target))
+        existing_target = make_existing(**copy.deepcopy(full_target))
         client_double = FakeBw()
-        outcome, uploads, stale = conv._reconcile_existing_item(
-            _as_bw(client_double),
+        outcome, uploads, stale = conv.reconcile_existing_item(
+            as_bw(client_double),
             existing_target,
             None,
             selected_target,
@@ -210,10 +210,10 @@ def main() -> None:
         assert not client_double.updates, "Selected rerun removed merged REF data"
         for source_id, tags in ((str(uuid4()), None), (str(alias.uuid), ["elsewhere"])):
             conv = converter(path, source_id)
-            conv._import_tags = tags
+            conv.import_tags = tags
             with (
                 patch("kp2bw.convert.BitwardenServeClient", return_value=client),
-                patch.object(conv, "_create_bitwarden_items_for_entries") as write,
+                patch.object(conv, "create_bitwarden_items_for_entries") as write,
             ):
                 try:
                     conv.convert()
@@ -223,15 +223,15 @@ def main() -> None:
                     raise AssertionError("Unknown/filtered source accepted")
                 write.assert_not_called()
         conv = converter(path, str(alias.uuid))
-        command = conv._retry_item(str(alias.uuid), destination, force=True)
+        command = conv.retry_item(str(alias.uuid), destination, force=True)
         assert "never-log-this" not in command and "synthetic" not in command
-        args = _argparser().parse_args(shlex.split(command)[1:])
+        args = argparser().parse_args(shlex.split(command)[1:])
         assert args.entry_id == str(alias.uuid) and args.item_id == destination
         assert args.force_update and args.path_to_name is False
-        assert "--force-update" not in conv._retry_item(str(alias.uuid), destination)
-        conv._keepass_file_path = "someone's vault.kdbx"
+        assert "--force-update" not in conv.retry_item(str(alias.uuid), destination)
+        conv.keepass_file_path = "someone's vault.kdbx"
         with patch("kp2bw.convert.os.name", "nt"):
-            command = conv._retry_item(str(alias.uuid), destination)
+            command = conv.retry_item(str(alias.uuid), destination)
         assert command.startswith("& 'kp2bw'")
         assert "'someone''s vault.kdbx'" in command
     print("item selection and preflight tests passed")

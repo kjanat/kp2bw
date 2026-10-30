@@ -12,7 +12,7 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 | Stubs release flow              | `.github/workflows/publish-stubs.yml`      | Triggered by `stubs-v*` tag pushes                       |
 | Docker integration gate         | `.github/workflows/integration-docker.yml` | Reusable workflow; required before main publish          |
 | Windows npm bw.cmd smoke        | `.github/workflows/windows-bw-cmd.yml`     | windows-latest; npm-installs bw and exercises the shim   |
-| Codegen drift check             | `.github/workflows/codegen-check.yml`      | Fails when `_bw_api_types.py` drifts from spec           |
+| Codegen drift check             | `.github/workflows/codegen-check.yml`      | Fails when `bw_api_types.py` drifts from spec            |
 | PR uvx helper comment lifecycle | `.github/actions/pr-test-comment/`         | Composite action; `pr-comment-bot.yml` calls it via `$/` |
 | Version gate logic              | `.github/actions/version-check/`           | Produces `name`, `version`, `pypi_url` output contract   |
 

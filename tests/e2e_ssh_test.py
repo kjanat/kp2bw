@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from e2e_vaultwarden_test import _run, _run_migration
+from e2e_vaultwarden_test import run, run_migration
 from pykeepass import create_database
 
 from kp2bw.bw_serve import BitwardenServeClient
@@ -55,7 +55,7 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     db.save()
 
     def migrate() -> None:
-        _run_migration(source, "synthetic", password, env)
+        run_migration(source, "synthetic", password, env)
 
     alias_revision: str | None = None
 
@@ -118,7 +118,7 @@ def main() -> None:
     env = os.environ.copy()
     env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
     env["BW_NOINTERACTION"] = "true"
-    status = json.loads(_run(["bw", "status"], env=env))
+    status = json.loads(run(["bw", "status"], env=env))
     assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")
     assert status.get("userEmail", "").casefold() == env["BW_TEST_EMAIL"].casefold()
     with tempfile.TemporaryDirectory() as directory:

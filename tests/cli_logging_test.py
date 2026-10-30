@@ -1,6 +1,6 @@
 """Logging-behaviour contract for kp2bw.
 
-``cli._configure_logging`` pins ``httpx``/``httpcore`` to DEBUG so the always-on
+``cli.configure_logging`` pins ``httpx``/``httpcore`` to DEBUG so the always-on
 file captures full transport traces (the data that explains timeouts/#24), and
 quiets the console with :class:`~kp2bw.cli.ConsoleNoiseFilter` rather than by
 lowering the loggers (which would also starve the file). This guards the two
@@ -25,30 +25,30 @@ import httpx
 from kp2bw.cli import ConsoleNoiseFilter
 
 
-def _record(name: str, level: int) -> logging.LogRecord:
+def record(name: str, level: int) -> logging.LogRecord:
     return logging.LogRecord(name, level, __file__, 0, "msg", args=None, exc_info=None)
 
 
 def assert_console_filter_mutes_per_mode() -> None:
     """Default filter mutes both noisy loggers; the --debug variant keeps httpx."""
     default = ConsoleNoiseFilter()
-    if default.filter(_record("httpx", logging.DEBUG)):
+    if default.filter(record("httpx", logging.DEBUG)):
         raise AssertionError("plain console must drop httpx DEBUG")
-    if default.filter(_record("httpcore", logging.INFO)):
+    if default.filter(record("httpcore", logging.INFO)):
         raise AssertionError("plain console must drop httpcore INFO")
-    if not default.filter(_record("httpx", logging.WARNING)):
+    if not default.filter(record("httpx", logging.WARNING)):
         raise AssertionError("plain console must keep httpx WARNING+")
-    if not default.filter(_record("kp2bw.convert", logging.DEBUG)):
+    if not default.filter(record("kp2bw.convert", logging.DEBUG)):
         raise AssertionError("filter must never touch kp2bw records")
 
     debug = ConsoleNoiseFilter(frozenset({"httpcore"}))
-    if not debug.filter(_record("httpx", logging.DEBUG)):
+    if not debug.filter(record("httpx", logging.DEBUG)):
         raise AssertionError("--debug console must keep httpx DEBUG")
-    if debug.filter(_record("httpcore", logging.DEBUG)):
+    if debug.filter(record("httpcore", logging.DEBUG)):
         raise AssertionError("--debug console must still drop httpcore DEBUG")
 
 
-class _LogCapture(logging.Handler):
+class LogCapture(logging.Handler):
     """Collect every record reaching the root logger as ``name: message``."""
 
     def __init__(self) -> None:
@@ -60,7 +60,7 @@ class _LogCapture(logging.Handler):
 
 
 # Sentinel shaped like a secret body value -- not a real credential.
-_SECRET = "p@ss-not-real-DO-NOT-LOG-7f3a91"
+SECRET = "p@ss-not-real-DO-NOT-LOG-7f3a91"
 
 
 def assert_transport_debug_excludes_request_body() -> None:
@@ -73,7 +73,7 @@ def assert_transport_debug_excludes_request_body() -> None:
         return httpx.Response(200, json={"ok": True})
 
     root = logging.getLogger()
-    capture = _LogCapture()
+    capture = LogCapture()
     saved_httpx = logging.getLogger("httpx").level
     saved_root = root.level
     root.addHandler(capture)
@@ -83,7 +83,7 @@ def assert_transport_debug_excludes_request_body() -> None:
         with httpx.Client(
             transport=httpx.MockTransport(handler), base_url="http://bw.local"
         ) as client:
-            response = client.post("/unlock", json={"password": _SECRET})
+            response = client.post("/unlock", json={"password": SECRET})
             _ = response.read()
     finally:
         root.removeHandler(capture)
@@ -101,7 +101,7 @@ def assert_transport_debug_excludes_request_body() -> None:
             raise AssertionError(f"request carried a secret-bearing {forbidden} header")
 
     blob = "\n".join(capture.lines)
-    if _SECRET in blob:
+    if SECRET in blob:
         raise AssertionError("master-password body leaked into httpx logs:\n" + blob)
     if not any("/unlock" in line for line in capture.lines if line.startswith("httpx")):
         raise AssertionError("expected httpx request-line for /unlock not captured")

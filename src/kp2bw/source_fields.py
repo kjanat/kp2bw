@@ -2,7 +2,7 @@
 
 from urllib.parse import quote, unquote
 
-from ._attachments import ATTACHMENT_FIELD_PREFIX
+from .attachments import ATTACHMENT_FIELD_PREFIX
 
 SOURCE_FIELD_PREFIX = "KeePass:"
 RESERVED_FIELD_NAMES = frozenset({

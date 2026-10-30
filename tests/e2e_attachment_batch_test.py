@@ -13,16 +13,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
-from _snapshot import as_object
 from e2e_vaultwarden_test import (
-    _bw_json,
-    _get_attachment_text,
-    _get_session,
-    _login_session,
-    _run,
-    _run_migration,
+    bw_json,
+    get_attachment_text,
+    get_session,
+    login_session,
+    run,
+    run_migration,
 )
 from pykeepass import create_database
+from snapshot import as_object
 
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.convert import Converter
@@ -52,17 +52,17 @@ def main() -> None:
         if profile:
             # Reuse an authenticated test account without registering another
             # device or triggering Cloud email verification on every run.
-            status = json.loads(_run(["bw", "status"], env=env))
+            status = json.loads(run(["bw", "status"], env=env))
             assert status.get("serverUrl", "").rstrip("/") == server.rstrip("/"), (
                 "Saved CLI profile targets a different server"
             )
             assert status.get("userEmail", "").casefold() == email.casefold(), (
                 "Saved CLI profile belongs to a different test account"
             )
-            _get_session(env, password)
+            get_session(env, password)
         else:
-            _run(["bw", "config", "server", server], env=env)
-            _login_session(env, email, password)
+            run(["bw", "config", "server", server], env=env)
+            login_session(env, email, password)
         source = tmp / "attachments.kdbx"
         db = create_database(source, password=kp_password)
         expected: dict[str, dict[str, str]] = {}
@@ -80,9 +80,9 @@ def main() -> None:
         db.save()
 
         def verify() -> dict[str, tuple[str, tuple[str, ...]]]:
-            session = _get_session(env, password)
-            _run(["bw", "sync", "--session", session], env=env)
-            items = _bw_json(env, "list", "items", "--session", session)
+            session = get_session(env, password)
+            run(["bw", "sync", "--session", session], env=env)
+            items = bw_json(env, "list", "items", "--session", session)
             state: dict[str, tuple[str, tuple[str, ...]]] = {}
             for name, files in expected.items():
                 matches = [item for item in items if item.get("name") == name]
@@ -95,7 +95,7 @@ def main() -> None:
                 } == set(files)
                 for filename, contents in files.items():
                     assert (
-                        _get_attachment_text(env, session, str(item["id"]), filename)
+                        get_attachment_text(env, session, str(item["id"]), filename)
                         == contents
                     )
                 state[name] = (
@@ -106,9 +106,9 @@ def main() -> None:
 
         try:
             logger.info("Testing eight files across two items")
-            _run_migration(source, kp_password, password, env)
+            run_migration(source, kp_password, password, env)
             initial = verify()
-            _run_migration(source, kp_password, password, env)
+            run_migration(source, kp_password, password, env)
             assert verify() == initial, (
                 "Unchanged import rewrote or duplicated attachments"
             )
@@ -120,9 +120,9 @@ def main() -> None:
             expected[entry.title or ""][first.filename] = "verified replacement"
             db.save()
             logger.info("Testing verified attachment replacement")
-            _run_migration(source, kp_password, password, env)
+            run_migration(source, kp_password, password, env)
             replaced = verify()
-            _run_migration(source, kp_password, password, env)
+            run_migration(source, kp_password, password, env)
             assert verify() == replaced, "Replacement rerun changed attachments"
 
             first.id = db.add_binary(b"acknowledged but never stored")
@@ -167,9 +167,9 @@ def main() -> None:
                 # Only delete this run's synthetic items, matching both the
                 # random name and the source UUID; never purge the test vault.
                 source_ids = {entry.uuid.hex.upper() for entry in db.entries}
-                session = _get_session(env, password)
-                _run(["bw", "sync", "--session", session], env=env)
-                for item in _bw_json(env, "list", "items", "--session", session):
+                session = get_session(env, password)
+                run(["bw", "sync", "--session", session], env=env)
+                for item in bw_json(env, "list", "items", "--session", session):
                     if str(item.get("name")) not in expected:
                         continue
                     fields = item.get("fields")
@@ -180,7 +180,7 @@ def main() -> None:
                         and str(as_object(field).get("value")) in source_ids
                         for field in fields
                     ):
-                        _run(
+                        run(
                             [
                                 "bw",
                                 "delete",

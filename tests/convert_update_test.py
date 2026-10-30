@@ -13,11 +13,11 @@ import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from kp2bw._item_sync import stamp_content
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemCreate, BwItemResponse, BwUri
 from kp2bw.convert import AttachmentItem, Converter, FieldSpec
 from kp2bw.exceptions import BitwardenClientError
+from kp2bw.item_sync import stamp_content
 
 
 class UpdateTestConverter(Converter):
@@ -40,17 +40,17 @@ class UpdateTestConverter(Converter):
 
     def diff(self, existing: BwItemResponse, desired: BwItemCreate) -> bool:
         """Public shim for the content-diff check."""
-        return self._content_differs(existing, desired)
+        return self.content_differs(existing, desired)
 
     def payload(
         self, existing: BwItemResponse, desired: BwItemCreate
     ) -> BwItemResponse:
         """Public shim for building the update payload."""
-        return self._build_update_payload(existing, desired)
+        return self.build_update_payload(existing, desired)
 
     def fields_sig(self, fields: list[Any]) -> list[tuple[str, str, int, int | None]]:
         """Public shim for the field signature."""
-        return self._fields_signature(fields)
+        return self.fields_signature(fields)
 
     def reconcile(
         self,
@@ -65,7 +65,7 @@ class UpdateTestConverter(Converter):
         force_update: bool = False,
     ) -> tuple[str, list[AttachmentItem], dict[str, str]]:
         """Public shim for existing-item reconciliation."""
-        return self._reconcile_existing_item(
+        return self.reconcile_existing_item(
             bw,
             existing,
             folder,
@@ -78,10 +78,10 @@ class UpdateTestConverter(Converter):
 
     def meta_field(self, entry: object) -> FieldSpec | None:
         """Public shim for the KP2BW_META metadata-field builder."""
-        return self._build_metadata_field(cast(Any, entry))
+        return self.build_metadata_field(cast(Any, entry))
 
 
-def _make_existing(**over: Any) -> BwItemResponse:
+def make_existing(**over: Any) -> BwItemResponse:
     """Build an existing vault item (as returned by the dedup index)."""
     item: dict[str, Any] = {
         "object": "item",
@@ -110,7 +110,7 @@ def _make_existing(**over: Any) -> BwItemResponse:
     return cast(BwItemResponse, item)
 
 
-def _make_desired(**over: Any) -> BwItemCreate:
+def make_desired(**over: Any) -> BwItemCreate:
     """Build a KeePass-derived item to migrate."""
     item: dict[str, Any] = {
         "organizationId": None,
@@ -151,14 +151,14 @@ class FakeBw:
         self.updates: list[tuple[str, BwItemResponse]] = []
         self.dedup_updates: list[str] = []
         self.deletes: list[tuple[str, str]] = []
-        self._attachments = existing_attachments or []
-        self._attachment_bytes = attachment_bytes or {}
-        self._fail_get = fail_get
-        self._fail_update = fail_update
-        self._fail_get_attachment = fail_get_attachment
+        self.attachments = existing_attachments or []
+        self.attachment_bytes = attachment_bytes or {}
+        self.fail_get = fail_get
+        self.fail_update = fail_update
+        self.fail_get_attachment = fail_get_attachment
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
-        if self._fail_update:
+        if self.fail_update:
             raise BitwardenClientError("simulated update rejection")
         self.updates.append((item_id, item))
 
@@ -166,19 +166,19 @@ class FakeBw:
         self.dedup_updates.append(kp_uuid)
 
     def get_item(self, item_id: str) -> BwItemResponse:
-        if self._fail_get:
+        if self.fail_get:
             raise BitwardenClientError("simulated GET failure")
-        return cast(BwItemResponse, {"id": item_id, "attachments": self._attachments})
+        return cast(BwItemResponse, {"id": item_id, "attachments": self.attachments})
 
     def get_attachment(self, item_id: str, attachment_id: str) -> bytes:
-        if self._fail_get_attachment:
+        if self.fail_get_attachment:
             raise BitwardenClientError("simulated attachment download failure")
         # Fail loudly on an unexpected id: returning b"" would make a wrong-id
         # fetch look like "stale content" and let a refresh-path test pass even
         # if the converter asked for the wrong attachment. AssertionError (not
         # BitwardenClientError) so it isn't swallowed by the differ's guard.
         try:
-            return self._attachment_bytes[attachment_id]
+            return self.attachment_bytes[attachment_id]
         except KeyError as exc:
             raise AssertionError(
                 f"Fixture contract broken: unexpected attachment id {attachment_id!r}"
@@ -188,7 +188,7 @@ class FakeBw:
         self.deletes.append((item_id, attachment_id))
 
 
-def _as_bw(fake: FakeBw) -> BitwardenServeClient:
+def as_bw(fake: FakeBw) -> BitwardenServeClient:
     """Treat the structural double as a client for the methods under test."""
     return cast(BitwardenServeClient, fake)
 
@@ -202,14 +202,14 @@ def assert_identical_content_is_idempotent() -> None:
     conv = UpdateTestConverter()
     # favorite differs (True vs False) but kp2bw does not manage favorite, so
     # identical synced content must NOT be treated as a change.
-    if conv.diff(_make_existing(), _make_desired()):
+    if conv.diff(make_existing(), make_desired()):
         raise AssertionError("identical content should not be flagged as changed")
 
 
 def assert_notes_change_detected() -> None:
     conv = UpdateTestConverter()
     if not conv.diff(
-        _make_existing(notes="old note"), _make_desired(notes="new recovery keys")
+        make_existing(notes="old note"), make_desired(notes="new recovery keys")
     ):
         raise AssertionError("changed notes were not detected")
 
@@ -217,40 +217,40 @@ def assert_notes_change_detected() -> None:
 def assert_none_vs_empty_notes_idempotent() -> None:
     conv = UpdateTestConverter()
     # bw serve returns notes=None for empty notes; desired uses "".
-    if conv.diff(_make_existing(notes=None), _make_desired(notes="")):
+    if conv.diff(make_existing(notes=None), make_desired(notes="")):
         raise AssertionError("None vs empty notes should be treated as equal")
 
 
 def assert_password_change_detected() -> None:
     conv = UpdateTestConverter()
-    desired = _make_desired()
+    desired = make_desired()
     desired["login"]["password"] = "new-pass"
-    if not conv.diff(_make_existing(), desired):
+    if not conv.diff(make_existing(), desired):
         raise AssertionError("changed password was not detected")
 
 
 def assert_field_change_detected() -> None:
     conv = UpdateTestConverter()
     if not conv.diff(
-        _make_existing(),
-        _make_desired(fields=[{"name": "api", "value": "v2", "type": 0}]),
+        make_existing(),
+        make_desired(fields=[{"name": "api", "value": "v2", "type": 0}]),
     ):
         raise AssertionError("changed custom field was not detected")
 
 
 def assert_uri_change_detected() -> None:
     conv = UpdateTestConverter()
-    desired = _make_desired()
+    desired = make_desired()
     new_uris: list[BwUri] = [{"uri": "https://b", "match": None}]
     desired["login"]["uris"] = new_uris
-    if not conv.diff(_make_existing(), desired):
+    if not conv.diff(make_existing(), desired):
         raise AssertionError("changed URI was not detected")
 
 
 def assert_uri_order_change_detected() -> None:
     conv = UpdateTestConverter()
-    existing = _make_existing()
-    desired = _make_desired()
+    existing = make_existing()
+    desired = make_desired()
     uris = [
         cast(BwUri, {"uri": "https://a", "match": 0}),
         cast(BwUri, {"uri": "https://b", "match": 1}),
@@ -282,8 +282,8 @@ def assert_fields_signature_order_independent() -> None:
 
 def assert_update_payload_preserves_and_overwrites() -> None:
     conv = UpdateTestConverter()
-    existing = _make_existing(collectionIds=["c1"])
-    desired = _make_desired(notes="new note", collectionIds=["c2"])
+    existing = make_existing(collectionIds=["c1"])
+    desired = make_desired(notes="new note", collectionIds=["c2"])
     payload = conv.payload(existing, desired)
 
     if payload["id"] != "item-1":
@@ -308,12 +308,12 @@ def assert_update_payload_preserves_existing_passkey() -> None:
             "keyType": "public-key",
         }
     ]
-    existing = _make_existing()
+    existing = make_existing()
     ex_login = existing.get("login")
     if ex_login is None:
         raise AssertionError("fixture is missing its login object")
     ex_login["fido2Credentials"] = cast(Any, fido2)
-    desired = _make_desired(notes="changed")
+    desired = make_desired(notes="changed")
     payload = conv.payload(existing, desired)
     payload_login = payload.get("login")
     got = payload_login.get("fido2Credentials") if payload_login else None
@@ -332,10 +332,10 @@ def assert_unchanged_entry_is_skipped() -> None:
     conv = UpdateTestConverter()
     bw = FakeBw()
     outcome, missing, _ = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         [],
         fixed_coll_id=None,
     )
@@ -349,10 +349,10 @@ def assert_changed_notes_trigger_update() -> None:
     conv = UpdateTestConverter()
     bw = FakeBw()
     outcome, _, _ = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(notes="old"),
+        as_bw(bw),
+        make_existing(notes="old"),
         "folder-1",
-        _make_desired(notes="new recovery keys"),
+        make_desired(notes="new recovery keys"),
         [],
         fixed_coll_id=None,
     )
@@ -369,14 +369,14 @@ def assert_missing_attachment_is_uploaded() -> None:
     bw = FakeBw(existing_attachments=[])  # item has no attachments yet
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     outcome, missing, stale = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         atts,
         fixed_coll_id=None,
     )
-    if [conv._attachment_filename(a) for a in missing] != ["notes.txt"]:
+    if [conv.attachment_filename(a) for a in missing] != ["notes.txt"]:
         raise AssertionError(
             f"missing notes attachment should be queued, got {missing!r}"
         )
@@ -397,10 +397,10 @@ def assert_identical_attachment_not_reuploaded() -> None:
     )
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     _, missing, stale = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         atts,
         fixed_coll_id=None,
     )
@@ -421,14 +421,14 @@ def assert_changed_attachment_is_refreshed() -> None:
     )
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     _, missing, stale = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         atts,
         fixed_coll_id=None,
     )
-    names = [conv._attachment_filename(a) for a in missing]
+    names = [conv.attachment_filename(a) for a in missing]
     if names != ["notes.txt"]:
         raise AssertionError(
             f"changed attachment should be re-uploaded, got {missing!r}"
@@ -449,10 +449,10 @@ def assert_changed_attachment_safe_on_download_failure() -> None:
     )
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     _, missing, stale = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         atts,
         fixed_coll_id=None,
     )
@@ -467,10 +467,10 @@ def assert_attachment_sync_safe_on_get_failure() -> None:
     bw = FakeBw(fail_get=True)
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     _, missing, stale = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         atts,
         fixed_coll_id=None,
     )
@@ -485,10 +485,10 @@ def assert_rejected_update_is_non_fatal() -> None:
     bw = FakeBw(fail_update=True, existing_attachments=[])
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     outcome, upload, stale = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(notes="old"),
+        as_bw(bw),
+        make_existing(notes="old"),
         "folder-1",
-        _make_desired(notes="new recovery keys"),
+        make_desired(notes="new recovery keys"),
         atts,
         fixed_coll_id=None,
     )
@@ -507,10 +507,10 @@ def assert_no_update_flag_restores_skip() -> None:
     bw = FakeBw(existing_attachments=[])
     atts: list[AttachmentItem] = [("notes", "y" * 20000)]
     outcome, missing, _ = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(notes="old"),
+        as_bw(bw),
+        make_existing(notes="old"),
         "folder-1",
-        _make_desired(notes="new"),
+        make_desired(notes="new"),
         atts,
         fixed_coll_id=None,
     )
@@ -527,10 +527,10 @@ def assert_non_login_collision_is_not_mutated() -> None:
     # A secure note (type 2) sharing the (folder, name) must not receive the
     # KeePass login's content or attachments.
     outcome, missing, stale = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(type=2, notes="old"),
+        as_bw(bw),
+        make_existing(type=2, notes="old"),
         "folder-1",
-        _make_desired(notes="new recovery keys"),
+        make_desired(notes="new recovery keys"),
         atts,
         fixed_coll_id=None,
     )
@@ -546,10 +546,10 @@ def assert_adoption_forces_stamp_put() -> None:
     # Content is identical (no diff), but adopting a legacy item must still PUT
     # to backfill the KP2BW_ID stamp -- force_update bypasses the diff gate.
     outcome, _, _ = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         [],
         fixed_coll_id=None,
         kp_uuid="kp-uuid-9",
@@ -572,10 +572,10 @@ def assert_no_update_skips_forced_stamp() -> None:
     bw = FakeBw(existing_attachments=[])
     # Even adoption's forced stamp must respect --no-update: no PUT at all.
     outcome, _, _ = conv.reconcile(
-        _as_bw(bw),
-        _make_existing(),
+        as_bw(bw),
+        make_existing(),
         "folder-1",
-        _make_desired(),
+        make_desired(),
         [],
         fixed_coll_id=None,
         kp_uuid="kp-uuid-9",
@@ -585,8 +585,8 @@ def assert_no_update_skips_forced_stamp() -> None:
         raise AssertionError("--no-update must not PUT even when adoption forces it")
 
 
-class _FakeEntry:
-    """Minimal stand-in exposing the attributes _build_metadata_field reads."""
+class FakeEntry:
+    """Minimal stand-in exposing the attributes build_metadata_field reads."""
 
     def __init__(
         self,
@@ -603,7 +603,7 @@ class _FakeEntry:
 def assert_metadata_field_folds_tags_and_expiry() -> None:
     conv = UpdateTestConverter()
     spec = conv.meta_field(
-        _FakeEntry(
+        FakeEntry(
             tags=["b", "a"],
             expires=True,
             expiry_time=datetime(2025, 1, 1, tzinfo=UTC),
@@ -622,36 +622,36 @@ def assert_metadata_field_folds_tags_and_expiry() -> None:
 
 def assert_yaml_metadata_upgrades_safely() -> None:
     conv = UpdateTestConverter()
-    desired = _make_desired(
+    desired = make_desired(
         fields=[{"name": "KP2BW_META", "value": '{"tags": ["b", "a"]}', "type": 0}]
     )
     for stamped in (False, True):
-        existing = _make_existing(
+        existing = make_existing(
             fields=[{"name": "KP2BW_META", "value": "tags:\n- b\n- a", "type": 0}]
         )
         if stamped:
             stamp_content(existing)
         bw = FakeBw()
         outcome, _, _ = conv.reconcile(
-            _as_bw(bw), existing, None, desired, [], fixed_coll_id=None
+            as_bw(bw), existing, None, desired, [], fixed_coll_id=None
         )
         assert outcome == "updated" and len(bw.updates) == 1
         updated = bw.updates[0][1]
         assert updated["fields"][0]["value"] == desired["fields"][0]["value"]
         rerun, _, _ = conv.reconcile(
-            _as_bw(bw), updated, None, desired, [], fixed_coll_id=None
+            as_bw(bw), updated, None, desired, [], fixed_coll_id=None
         )
         assert rerun == "skipped" and len(bw.updates) == 1
         if stamped:
             edited = copy.deepcopy(existing)
             edited["fields"][0]["value"] = "tags:\n- manually-edited"
             outcome, _, _ = conv.reconcile(
-                _as_bw(bw), edited, None, desired, [], fixed_coll_id=None
+                as_bw(bw), edited, None, desired, [], fixed_coll_id=None
             )
             assert outcome == "protected" and len(bw.updates) == 1
         disabled = UpdateTestConverter(update_existing=False)
         outcome, _, _ = disabled.reconcile(
-            _as_bw(bw), existing, None, desired, [], fixed_coll_id=None
+            as_bw(bw), existing, None, desired, [], fixed_coll_id=None
         )
         assert outcome == "skipped" and len(bw.updates) == 1
 
@@ -666,7 +666,7 @@ def assert_metadata_json_preserves_strings() -> None:
         "true",
         "2026-01-01",
     ]
-    result = UpdateTestConverter().meta_field(_FakeEntry(tags=tags))
+    result = UpdateTestConverter().meta_field(FakeEntry(tags=tags))
     assert result is not None
     assert result[0] is not None
     assert json.loads(result[0]) == {"tags": tags}
@@ -674,7 +674,7 @@ def assert_metadata_json_preserves_strings() -> None:
 
 def assert_metadata_field_none_without_tags_or_expiry() -> None:
     conv = UpdateTestConverter()
-    if conv.meta_field(_FakeEntry()) is not None:
+    if conv.meta_field(FakeEntry()) is not None:
         raise AssertionError("entry with no tags/expiry must yield no metadata field")
 
 

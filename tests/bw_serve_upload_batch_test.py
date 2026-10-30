@@ -13,10 +13,10 @@ from kp2bw.bw_types import BwItemResponse
 from kp2bw.exceptions import BitwardenClientError, BitwardenHttpError
 
 
-class _UploadClient(BitwardenServeClient):
+class UploadClient(BitwardenServeClient):
     def __init__(self, *, failure: str = "") -> None:
-        self._base_url = "http://localhost"
-        self._http_timeout = 1.0
+        self.http_base_url = "http://localhost"
+        self.http_timeout = 1.0
         self.failure = failure
         self.active: set[str] = set()
         self.overlap = False
@@ -83,8 +83,8 @@ class _UploadClient(BitwardenServeClient):
         return self.files[item_id][attachment_id]
 
 
-async def _check_batch(failure: str = "") -> None:
-    client = _UploadClient(failure=failure)
+async def check_batch(failure: str = "") -> None:
+    client = UploadClient(failure=failure)
     # Repeated item IDs must share a lock even across separate input records.
     failed = await client.upload_attachments_parallel(
         [
@@ -115,7 +115,7 @@ async def _check_batch(failure: str = "") -> None:
     )
 
 
-def _check_missing_item_recovery() -> None:
+def check_missing_item_recovery() -> None:
     for initial_status, message, recover_after in (
         (400, "Not found.", 3),
         (400, "Not found.", 7),
@@ -152,7 +152,7 @@ def _check_missing_item_recovery() -> None:
             ) as http,
             patch("kp2bw.bw_serve.time.sleep") as sleep,
         ):
-            client._http = http
+            client.http = http
             try:
                 item = client.get_item("item")
             except BitwardenHttpError:
@@ -171,20 +171,20 @@ def _check_missing_item_recovery() -> None:
 
 
 def main() -> None:
-    _check_missing_item_recovery()
+    check_missing_item_recovery()
     for failure in ("", "missing", "corrupt", "download", "metadata", "sync"):
-        asyncio.run(_check_batch(failure))
+        asyncio.run(check_batch(failure))
     output = io.StringIO()
     handler = logging.StreamHandler(output)
     logger = logging.getLogger("kp2bw.bw_serve")
     logger.addHandler(handler)
     try:
-        asyncio.run(_check_batch("http-metadata"))
+        asyncio.run(check_batch("http-metadata"))
     finally:
         logger.removeHandler(handler)
     assert "HTTP 400 (item not found)" in output.getvalue()
     assert "synthetic-private-value" not in output.getvalue()
-    client = _UploadClient()
+    client = UploadClient()
     assert asyncio.run(client.upload_attachments_parallel([])) == []
     try:
         asyncio.run(client.upload_attachments_parallel([], max_concurrency=0))

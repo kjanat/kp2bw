@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import httpx
 
-from kp2bw._inventory import inventory_signature
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.exceptions import BitwardenClientError
+from kp2bw.inventory import inventory_signature
 
 
 def main() -> None:
@@ -64,15 +64,15 @@ def main() -> None:
     for stale in stale_cases:
         for recovers in (True, False):
             client = object.__new__(BitwardenServeClient)
-            client._org_id = None
-            client._collection_id = None
-            client._folders = {}
-            client._bw_cmd = ["synthetic-bw"]
-            client._bw_cwd = None
-            client._http_timeout = 30
-            client._inventory_session = "synthetic-session"
-            client._inventory_needs_check = True
-            client._sleep = lambda _: None
+            client.organization_id = None
+            client.collection_id = None
+            client.folder_cache = {}
+            client.bw_cmd = ["synthetic-bw"]
+            client.bw_cwd = None
+            client.http_timeout = 30
+            client.inventory_session = "synthetic-session"
+            client.inventory_needs_check = True
+            client.sleep = lambda _: None
             reads = 0
             commands = 0
 
@@ -111,13 +111,13 @@ def main() -> None:
                     "",
                 )
 
-            client._http = httpx.Client(
+            client.http = httpx.Client(
                 base_url="http://localhost", transport=httpx.MockTransport(respond)
             )
             try:
                 with patch("kp2bw.bw_serve.subprocess.run", side_effect=run):
                     if recovers:
-                        client._build_dedup_index()
+                        client.build_dedup_index()
                         assert client.get_item_by_uuid("source") is not None
                         client.list_items()
                         assert commands == 2, (
@@ -130,7 +130,7 @@ def main() -> None:
                         )
                     else:
                         try:
-                            client._build_dedup_index()
+                            client.build_dedup_index()
                         except BitwardenClientError as exc:
                             assert "incomplete inventory" in str(exc)
                         else:
@@ -138,7 +138,7 @@ def main() -> None:
                                 "Stale inventory must not become a dedup index"
                             )
             finally:
-                client._http.close()
+                client.http.close()
     print("post-sync inventory verification tests passed")
 
 

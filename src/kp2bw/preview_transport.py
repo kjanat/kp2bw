@@ -9,9 +9,9 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ._checkpoint import AttachmentCheckpoint, CheckpointRecord, CheckpointScope
 from .bw_serve import BitwardenServeClient
 from .bw_types import BwItemResponse
+from .checkpoint import AttachmentCheckpoint, CheckpointRecord, CheckpointScope
 from .exceptions import BitwardenClientError, ConversionError
 
 
@@ -21,13 +21,13 @@ class PreviewCheckpoint(AttachmentCheckpoint):
     def __init__(self, path: Path, scope: CheckpointScope) -> None:
         super().__init__(path, scope)
         try:
-            self._load()
+            self.load()
         except OSError:
             raise ConversionError("Cannot read the attachment checkpoint") from None
 
     def save_many(self, updates: Sequence[CheckpointRecord]) -> None:
         records = {**self.records, **{record.key: record for record in updates}}
-        self._check_destinations(records)
+        self.check_destinations(records)
         self.records = records
 
 
@@ -38,10 +38,10 @@ class PreviewTransport(BitwardenServeClient):
         read_attachment: Callable[[str, str], bytes],
         validate_update: Callable[[str, BwItemResponse], None],
     ) -> None:
-        self._read_item = read_item
-        self._read_attachment = read_attachment
-        self._validate_update = validate_update
-        self._snapshots: dict[str, BwItemResponse] = {}
+        self.read_item = read_item
+        self.read_attachment = read_attachment
+        self.validate_update = validate_update
+        self.snapshots: dict[str, BwItemResponse] = {}
         self.updated_ids: set[str] = set()
         self.deleted_attachments: set[tuple[str, str]] = set()
 
@@ -56,20 +56,20 @@ class PreviewTransport(BitwardenServeClient):
             for attachment in item.get("attachments") or []
             if attachment["id"] != attachment_id
         ]
-        self._snapshots[item_id] = item
+        self.snapshots[item_id] = item
         self.deleted_attachments.add((item_id, attachment_id))
 
     def get_item(self, item_id: str) -> BwItemResponse:
-        if item_id not in self._snapshots:
-            self._snapshots[item_id] = copy.deepcopy(self._read_item(item_id))
-        return copy.deepcopy(self._snapshots[item_id])
+        if item_id not in self.snapshots:
+            self.snapshots[item_id] = copy.deepcopy(self.read_item(item_id))
+        return copy.deepcopy(self.snapshots[item_id])
 
     def get_attachment(self, item_id: str, attachment_id: str) -> bytes:
-        return self._read_attachment(item_id, attachment_id)
+        return self.read_attachment(item_id, attachment_id)
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
-        self._validate_update(item_id, item)
-        self._snapshots[item_id] = copy.deepcopy(item)
+        self.validate_update(item_id, item)
+        self.snapshots[item_id] = copy.deepcopy(item)
         self.updated_ids.add(item_id)
 
     def update_item_if_revision(
@@ -81,9 +81,9 @@ class PreviewTransport(BitwardenServeClient):
 
     def update_dedup_entry(self, kp_uuid: str, item: BwItemResponse) -> None:
         # Reconciliation updates its local index after a simulated write.
-        self._snapshots[item["id"]] = copy.deepcopy(item)
+        self.snapshots[item["id"]] = copy.deepcopy(item)
 
-    def _request(
+    def request(
         self,
         method: str,
         path: str,

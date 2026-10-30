@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 from typing import cast
 
-from e2e_vaultwarden_test import _bw_json, _get_session, _run, _run_migration
+from e2e_vaultwarden_test import bw_json, get_session, run, run_migration
 from passkey_conversion_test import MARKED_ID, source_properties, verify_native_key
 from pykeepass import create_database
 
@@ -29,13 +29,13 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
         for name, value in properties.items():
             entry.set_custom_property(name, value, protect=True)
     database.save()
-    session = _get_session(env, password)
+    session = get_session(env, password)
 
     def read_cases() -> dict[str, BwItemResponse]:
         nonlocal session
-        session = _get_session(env, password)
-        _run(["bw", "sync", "--session", session], env=env)
-        items = _bw_json(env, "list", "items", "--session", session)
+        session = get_session(env, password)
+        run(["bw", "sync", "--session", session], env=env)
+        items = bw_json(env, "list", "items", "--session", session)
         result: dict[str, BwItemResponse] = {}
         for case in cases:
             matches = [item for item in items if item.get("name") == f"{prefix} {case}"]
@@ -44,7 +44,7 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
         return result
 
     try:
-        _run_migration(source, kp_password, password, env)
+        run_migration(source, kp_password, password, env)
         first = read_cases()
         login = first["valid"].get("login")
         assert login is not None
@@ -64,7 +64,7 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
             "invalid"
         ]
         assert all(field["type"] == 1 for field in recovered.values())
-        _run_migration(source, kp_password, password, env)
+        run_migration(source, kp_password, password, env)
         second = read_cases()
         for case in cases:
             assert second[case]["id"] == first[case]["id"]
@@ -72,9 +72,9 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 "Unchanged passkey rewritten"
             )
     finally:
-        session = _get_session(env, password)
-        _run(["bw", "sync", "--session", session], env=env)
-        for item in _bw_json(env, "list", "items", "--session", session):
+        session = get_session(env, password)
+        run(["bw", "sync", "--session", session], env=env)
+        for item in bw_json(env, "list", "items", "--session", session):
             candidate = cast(BwItemResponse, item)
             if not str(candidate.get("name")).startswith(prefix):
                 continue
@@ -82,7 +82,7 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 field["name"] == "KP2BW_ID" and field["value"] in source_ids
                 for field in candidate.get("fields") or []
             ):
-                _run(
+                run(
                     [
                         "bw",
                         "delete",

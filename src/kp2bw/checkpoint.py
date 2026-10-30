@@ -16,8 +16,8 @@ from .exceptions import ConversionError
 
 logger = logging.getLogger(__name__)
 type Phase = Literal["pending", "slot", "uploaded", "verified", "mapped"]
-_PHASES = {"pending", "slot", "uploaded", "verified", "mapped"}
-_DIGEST = re.compile(r"[0-9a-f]{64}")
+PHASES = {"pending", "slot", "uploaded", "verified", "mapped"}
+DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 def metadata_digest(value: object) -> str:
@@ -64,13 +64,13 @@ class CheckpointRecord:
         if (
             not re.fullmatch(r"[0-9a-fA-F]{32}", self.entry_id)
             or not all(
-                _DIGEST.fullmatch(v)
+                DIGEST.fullmatch(v)
                 for v in (self.source_id, self.source_digest, self.name_digest)
             )
             or type(self.source_size) is not int
             or self.source_size < 0
             or not self.item_id
-            or self.phase not in _PHASES
+            or self.phase not in PHASES
             or len(set(self.before_ids)) != len(self.before_ids)
         ):
             raise ConversionError("Invalid attachment checkpoint record")
@@ -80,14 +80,14 @@ class CheckpointRecord:
             )
         if self.previous_attachment_id is not None and (
             self.previous_digest is None
-            or not _DIGEST.fullmatch(self.previous_digest)
+            or not DIGEST.fullmatch(self.previous_digest)
             or self.previous_name_digest is None
-            or not _DIGEST.fullmatch(self.previous_name_digest)
+            or not DIGEST.fullmatch(self.previous_name_digest)
         ):
             raise ConversionError(
                 "Checkpoint replacement requires the previous file's verified hashes"
             )
-        if self.remote_metadata_digest is not None and not _DIGEST.fullmatch(
+        if self.remote_metadata_digest is not None and not DIGEST.fullmatch(
             self.remote_metadata_digest
         ):
             raise ConversionError("Invalid checkpoint remote metadata digest")
@@ -192,7 +192,7 @@ class AttachmentCheckpoint:
         self.path = path
         self.scope_digest = scope.digest
         self.records: dict[str, CheckpointRecord] = {}
-        self._lock: int | None = None
+        self.lock: int | None = None
 
     def __enter__(self) -> Self:
         try:
@@ -222,9 +222,9 @@ class AttachmentCheckpoint:
             raise ConversionError(
                 "Attachment checkpoint is already in use or cannot be locked"
             ) from None
-        self._lock = fd
+        self.lock = fd
         try:
-            self._load()
+            self.load()
         except OSError:
             self.close()
             raise ConversionError("Cannot read the attachment checkpoint") from None
@@ -242,11 +242,11 @@ class AttachmentCheckpoint:
         self.close()
 
     def close(self) -> None:
-        if self._lock is not None:
-            os.close(self._lock)
-            self._lock = None
+        if self.lock is not None:
+            os.close(self.lock)
+            self.lock = None
 
-    def _load(self) -> None:
+    def load(self) -> None:
         try:
             value: object = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -282,7 +282,7 @@ class AttachmentCheckpoint:
             loaded = {record.key: record for record in records}
             if len(loaded) != len(records):
                 raise ConversionError("Duplicate checkpoint source identities")
-            self._check_destinations(loaded)
+            self.check_destinations(loaded)
         except ConversionError:
             logger.warning(
                 "Invalid attachment checkpoint ignored; remote files will be verified again"
@@ -294,12 +294,12 @@ class AttachmentCheckpoint:
         self.save_many([record])
 
     def save_many(self, updates: Sequence[CheckpointRecord]) -> None:
-        if self._lock is None:
+        if self.lock is None:
             raise ConversionError("Attachment checkpoint must be locked before writing")
         records = {**self.records, **{record.key: record for record in updates}}
-        self._check_destinations(records)
+        self.check_destinations(records)
         try:
-            self._write(records)
+            self.write(records)
         except OSError:
             raise ConversionError(
                 "Could not atomically save the attachment checkpoint"
@@ -307,7 +307,7 @@ class AttachmentCheckpoint:
         self.records = records
 
     @staticmethod
-    def _check_destinations(records: dict[str, CheckpointRecord]) -> None:
+    def check_destinations(records: dict[str, CheckpointRecord]) -> None:
         destinations = [
             (record.item_id, record.attachment_id)
             for record in records.values()
@@ -316,7 +316,7 @@ class AttachmentCheckpoint:
         if len(set(destinations)) != len(destinations):
             raise ConversionError("Ambiguous checkpoint destination identities")
 
-    def _write(self, records: dict[str, CheckpointRecord]) -> None:
+    def write(self, records: dict[str, CheckpointRecord]) -> None:
         data = {
             "version": 1,
             "scope": self.scope_digest,

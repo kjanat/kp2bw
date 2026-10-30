@@ -12,43 +12,43 @@ from typing import cast
 from unittest.mock import MagicMock, patch
 
 from attachment_checkpoint_test import record, scope
-from convert_update_test import UpdateTestConverter, _make_desired, _make_existing
+from convert_update_test import UpdateTestConverter, make_desired, make_existing
 from pykeepass import create_database
 
-from kp2bw._attachment_capability import AttachmentCapability, attachment_capability
-from kp2bw._attachment_resume import transaction_filename
-from kp2bw._checkpoint import AttachmentCheckpoint
-from kp2bw._cli_policy_state import CliPolicyState
-from kp2bw._item_sync import stamp_content
-from kp2bw._preview import PreviewEntry, describe_payload
-from kp2bw._preview_transport import PreviewCheckpoint, PreviewTransport
-from kp2bw._ssh_mapping import parse_ssh_rules
+from kp2bw.attachment_capability import AttachmentCapability, attachment_capability
+from kp2bw.attachment_resume import transaction_filename
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.checkpoint import AttachmentCheckpoint
 from kp2bw.cli import main as cli_main
+from kp2bw.cli_policy_state import CliPolicyState
 from kp2bw.convert import Converter
 from kp2bw.exceptions import BitwardenClientError
+from kp2bw.item_sync import stamp_content
+from kp2bw.preview import PreviewEntry, describe_payload
+from kp2bw.preview_transport import PreviewCheckpoint, PreviewTransport
+from kp2bw.ssh_mapping import parse_ssh_rules
 
 
 def check_target_reconciliation() -> None:
     for condition in ("unchanged", "changed", "protected", "unsupported"):
-        existing = _make_existing(revisionDate="revision")
+        existing = make_existing(revisionDate="revision")
         stamp_content(existing)
-        desired = _make_desired()
+        desired = make_desired()
         if condition in {"changed", "protected", "unsupported"}:
             desired["notes"] = "new source notes"
         if condition == "protected":
             existing["notes"] = "manual destination edit"
         original = copy.deepcopy(existing)
 
-        def read(_item_id: str, existing: BwItemResponse = existing) -> BwItemResponse:
+        def read(item_id: str, existing: BwItemResponse = existing) -> BwItemResponse:
             return copy.deepcopy(existing)
 
-        def attachment(_item_id: str, _attachment_id: str) -> bytes:
+        def attachment(item_id: str, attachment_id: str) -> bytes:
             raise AssertionError("This fixture has no attachment reads")
 
         def validate(
-            _item_id: str, _payload: BwItemResponse, condition: str = condition
+            item_id: str, payload: BwItemResponse, condition: str = condition
         ) -> None:
             if condition == "unsupported":
                 raise BitwardenClientError("Unsupported synthetic capability")
@@ -70,7 +70,7 @@ def check_target_reconciliation() -> None:
         assert not uploads and not stale
         assert existing == original, "Preview changed its source destination snapshot"
         try:
-            transport._request("DELETE", "/object/item/synthetic")
+            transport.request("DELETE", "/object/item/synthetic")
         except BitwardenClientError:
             pass
         else:
@@ -91,10 +91,12 @@ def check_checkpoint_snapshot() -> None:
         preview.save(replace(record(), remote_revision="predicted"))
         assert preview.records[record().key].remote_revision == "predicted"
         assert {p.name: p.read_bytes() for p in Path(directory).iterdir()} == before
-        item = _make_existing(attachments=[{"id": "orphan", "fileName": "file"}])
+        item = make_existing(attachments=[{"id": "orphan", "fileName": "file"}])
         original = copy.deepcopy(item)
         transport = PreviewTransport(
-            lambda _: item, lambda _item, _attachment: b"", lambda _item, _payload: None
+            lambda _: item,
+            lambda unused_item, attachment: b"",
+            lambda unused_item, payload: None,
         )
         transport.delete_attachment(item["id"], "orphan")
         transport.sync(force=True)
@@ -110,8 +112,8 @@ def main() -> None:
     ):
         with (
             patch("sys.argv", ["kp2bw", *arguments]),
-            patch("kp2bw.cli._load_dotenv", return_value=None),
-            patch("kp2bw.cli._configure_logging", return_value=None),
+            patch("kp2bw.cli.load_dotenv", return_value=None),
+            patch("kp2bw.cli.configure_logging", return_value=None),
             patch(
                 "kp2bw.cli.ensure_bw_available",
                 side_effect=AssertionError("Invalid modes opened Bitwarden"),
@@ -124,7 +126,7 @@ def main() -> None:
             else:
                 raise AssertionError("Preview/selection accepted a mutation-only mode")
     check_checkpoint_snapshot()
-    native = _make_desired(type=3, card={"number": "private-card-number"})
+    native = make_desired(type=3, card={"number": "private-card-number"})
     native_report = PreviewEntry("source", "planned")
     describe_payload(native_report, native, [])
     assert "card.number" in native_report.native_fields
@@ -197,8 +199,8 @@ def main() -> None:
         assert {a.kind for a in planned.attachments} == {"notes", "original"}
         # The plan is the metadata projection of the same payload preparation
         # used by execution, including collision resolution for generated files.
-        actual = next(iter(converter._entries.values()))
-        files = converter._attachment_sources(actual[3])
+        actual = next(iter(converter.entries.values()))
+        files = converter.attachment_sources(actual[3])
         assert [(a.filename, a.bytes) for a in planned.attachments] == [
             (a.filename, len(a.data)) for a in files
         ]
@@ -253,9 +255,9 @@ def main() -> None:
         with (
             patch.dict(os.environ, {}, clear=True),
             patch("sys.argv", ["kp2bw", str(path), "--preview", "json"]),
-            patch("kp2bw.cli._load_dotenv", return_value=None),
-            patch("kp2bw.cli._configure_logging", return_value=None),
-            patch("kp2bw.cli._read_password", return_value="synthetic") as passwords,
+            patch("kp2bw.cli.load_dotenv", return_value=None),
+            patch("kp2bw.cli.configure_logging", return_value=None),
+            patch("kp2bw.cli.read_password", return_value="synthetic") as passwords,
             patch(
                 "kp2bw.cli.ensure_bw_available",
                 side_effect=AssertionError("Preview required bw"),
@@ -292,10 +294,10 @@ def main() -> None:
                     "collection",
                 ],
             ),
-            patch("kp2bw.cli._load_dotenv", return_value=None),
-            patch("kp2bw.cli._configure_logging", return_value=None),
+            patch("kp2bw.cli.load_dotenv", return_value=None),
+            patch("kp2bw.cli.configure_logging", return_value=None),
             patch(
-                "kp2bw.cli._read_password",
+                "kp2bw.cli.read_password",
                 side_effect=["synthetic", "destination-password"],
             ),
             patch("kp2bw.cli.ensure_bw_available") as availability,
@@ -359,13 +361,13 @@ def main() -> None:
         snapshot = {p.name: p.read_bytes() for p in Path(directory).iterdir()}
         created = selected.preview(cast(BitwardenServeClient, target))
         assert created.entries[0].outcome == "create"
-        from kp2bw._checkpoint import CheckpointScope
+        from kp2bw.checkpoint import CheckpointScope
 
         digest = CheckpointScope(
-            "https://synthetic.example", "account", selected._source_scope_id
+            "https://synthetic.example", "account", selected.source_scope_id
         ).digest
-        sources = selected._attachment_sources(
-            selected._entries[entry.uuid.hex.upper()][3]
+        sources = selected.attachment_sources(
+            selected.entries[entry.uuid.hex.upper()][3]
         )
         assert [a.filename for a in created.entries[0].attachments] == [
             transaction_filename(source, digest, entry.uuid.hex.upper(), None)

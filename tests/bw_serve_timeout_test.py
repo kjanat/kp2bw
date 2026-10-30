@@ -13,56 +13,56 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 from kp2bw.bw_serve import (
-    _HTTP_TIMEOUT_ENV,
-    _HTTP_TIMEOUT_MAX_S,
-    _HTTP_TIMEOUT_S,
-    _resolve_http_timeout,
+    HTTP_TIMEOUT_ENV,
+    HTTP_TIMEOUT_MAX_S,
+    HTTP_TIMEOUT_S,
+    resolve_http_timeout,
 )
 
 
 @contextmanager
-def _env(value: str | None) -> Generator[None]:
+def env(value: str | None) -> Generator[None]:
     """Set (or unset) KP2BW_HTTP_TIMEOUT for the block, restoring it after."""
-    saved = os.environ.get(_HTTP_TIMEOUT_ENV)
+    saved = os.environ.get(HTTP_TIMEOUT_ENV)
     if value is None:
-        _ = os.environ.pop(_HTTP_TIMEOUT_ENV, None)
+        _ = os.environ.pop(HTTP_TIMEOUT_ENV, None)
     else:
-        os.environ[_HTTP_TIMEOUT_ENV] = value
+        os.environ[HTTP_TIMEOUT_ENV] = value
     try:
         yield
     finally:
         if saved is None:
-            _ = os.environ.pop(_HTTP_TIMEOUT_ENV, None)
+            _ = os.environ.pop(HTTP_TIMEOUT_ENV, None)
         else:
-            os.environ[_HTTP_TIMEOUT_ENV] = saved
+            os.environ[HTTP_TIMEOUT_ENV] = saved
 
 
 def assert_unset_uses_default() -> None:
     """No env var → the built-in default timeout."""
-    with _env(None):
-        got = _resolve_http_timeout()
-    if got != _HTTP_TIMEOUT_S:
-        raise AssertionError(f"expected default {_HTTP_TIMEOUT_S}, got {got}")
+    with env(None):
+        got = resolve_http_timeout()
+    if got != HTTP_TIMEOUT_S:
+        raise AssertionError(f"expected default {HTTP_TIMEOUT_S}, got {got}")
 
 
 def assert_valid_override_applied() -> None:
     """A positive numeric value (int or float form) is used verbatim."""
-    with _env("300"):
-        if not math.isclose(_resolve_http_timeout(), 300.0):
+    with env("300"):
+        if not math.isclose(resolve_http_timeout(), 300.0):
             raise AssertionError("integer override not applied")
-    with _env("12.5"):
-        if not math.isclose(_resolve_http_timeout(), 12.5):
+    with env("12.5"):
+        if not math.isclose(resolve_http_timeout(), 12.5):
             raise AssertionError("float override not applied")
 
 
 def assert_invalid_falls_back() -> None:
     """Non-numeric, non-positive, and blank values fall back to the default."""
     for bad in ("abc", "0", "-5", "", "   "):
-        with _env(bad):
-            got = _resolve_http_timeout()
-        if got != _HTTP_TIMEOUT_S:
+        with env(bad):
+            got = resolve_http_timeout()
+        if got != HTTP_TIMEOUT_S:
             raise AssertionError(
-                f"{bad!r} should fall back to {_HTTP_TIMEOUT_S}, got {got}"
+                f"{bad!r} should fall back to {HTTP_TIMEOUT_S}, got {got}"
             )
 
 
@@ -73,17 +73,17 @@ def assert_above_cap_clamps() -> None:
     would discard intent), but a typo like ``999999`` shouldn't silently hang a
     migration for hours -- so the resolver clamps to the documented ceiling.
     """
-    huge = str(_HTTP_TIMEOUT_MAX_S * 10)
-    with _env(huge):
-        got = _resolve_http_timeout()
-    if got != _HTTP_TIMEOUT_MAX_S:
+    huge = str(HTTP_TIMEOUT_MAX_S * 10)
+    with env(huge):
+        got = resolve_http_timeout()
+    if got != HTTP_TIMEOUT_MAX_S:
         raise AssertionError(
-            f"{huge!r} should clamp to {_HTTP_TIMEOUT_MAX_S}, got {got}"
+            f"{huge!r} should clamp to {HTTP_TIMEOUT_MAX_S}, got {got}"
         )
     # Exactly the cap is honoured (boundary case: only *above* gets clamped).
-    with _env(str(_HTTP_TIMEOUT_MAX_S)):
-        got = _resolve_http_timeout()
-    if got != _HTTP_TIMEOUT_MAX_S:
+    with env(str(HTTP_TIMEOUT_MAX_S)):
+        got = resolve_http_timeout()
+    if got != HTTP_TIMEOUT_MAX_S:
         raise AssertionError(f"the cap itself should be honoured verbatim, got {got}")
 
 
