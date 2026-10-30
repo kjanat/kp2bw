@@ -158,6 +158,37 @@ def main() -> None:
         assert recovered[1][first_key] != after[1][first_key]
         migrate()
         assert verify() == recovered
+        # Newly added sources also recover an upload whose association was rejected.
+        entry.add_attachment(
+            db.add_binary(b"new source after initial migration"), "added.txt"
+        )
+        db.save()
+        added_key = source_file("original", "added.txt", 1, "added.txt", b"").source_id
+        expected[added_key] = b"new source after initial migration"
+        with (
+            patch.dict(os.environ, env),
+            patch.object(
+                BitwardenServeClient,
+                "update_item",
+                side_effect=BitwardenClientError(
+                    "synthetic new-source metadata rejection"
+                ),
+            ),
+        ):
+            assert converter.convert() != 0
+        with (
+            patch.dict(os.environ, env),
+            patch.object(
+                BitwardenServeClient,
+                "upload_attachments",
+                side_effect=AssertionError("New-source retry uploaded another copy"),
+            ),
+        ):
+            assert converter.convert() == 0
+        added = verify()
+        assert all(added[1][key] == value for key, value in recovered[1].items())
+        migrate()
+        assert verify() == added
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
             item = bw.get_item_by_uuid(entry.uuid.hex.upper())
             assert item is not None
