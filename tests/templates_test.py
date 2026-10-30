@@ -13,6 +13,7 @@ from kp2bw._item_sync import (
     pre_fido2_content_signature,
     sync_stamp_matches,
 )
+from kp2bw._source_fields import source_field_name
 from kp2bw._templates import (
     TemplateRule,
     apply_template,
@@ -58,6 +59,18 @@ def main() -> None:
         },
     )
     assert not conflict.consumed and not conflict.values and conflict.warnings
+    duplicate_name = source_field_name("Number", 2)
+    duplicate = plan_template(
+        rule, {"Number": "4111111111111111", duplicate_name: "5555555555554444"}
+    )
+    assert not duplicate.consumed and not duplicate.values and duplicate.warnings
+    escaped_identity = source_field_name("KP2BW_ID")
+    identity_plan = plan_template(
+        TemplateRule("identity", {"KP2BW_ID": "username"}),
+        {"KP2BW_ID": "managed-uuid", escaped_identity: "source-username"},
+    )
+    assert identity_plan.values == {"username": "source-username"}
+    assert identity_plan.consumed == {escaped_identity}
     partial = plan_template(rule, {"Expiry": "03/29", "Expiry month": "4"})
     assert "Expiry" not in partial.consumed
     invalid_cases: list[object] = [
@@ -95,6 +108,20 @@ def main() -> None:
             "_etm_template_uuid": ("0" * 32, 0),
         },
     )
+    identity = copy.deepcopy(item)
+    identity["fields"].extend([
+        {"name": "KP2BW_ID", "value": "managed-uuid", "type": 0},
+        {"name": escaped_identity, "value": "source-username", "type": 0},
+    ])
+    apply_template(identity, TemplateRule("identity", {"KP2BW_ID": "username"}))
+    assert (
+        identity["identity"] and identity["identity"]["username"] == "source-username"
+    )
+    assert any(
+        field["name"] == "KP2BW_ID" and field["value"] == "managed-uuid"
+        for field in identity["fields"]
+    )
+    assert not any(field["name"] == escaped_identity for field in identity["fields"])
     apply_template(item, rule)
     assert (
         item["type"] == 3
