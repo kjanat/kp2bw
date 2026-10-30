@@ -255,7 +255,9 @@ def bw_cli_version(bw_cmd: list[str], bw_cwd: str | None) -> str | None:
         )
     except OSError, subprocess.TimeoutExpired:
         return None
-    match = re.search(r"\d{4}\.\d+\.\d+(?:[-+.][0-9A-Za-z.-]+)?", result.stdout)
+    if result.returncode != 0:
+        return None
+    match = re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", result.stdout.strip())
     return match.group(0) if match else None
 
 
@@ -1175,6 +1177,7 @@ class BitwardenServeClient:
                     args,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                     check=False,
                     timeout=self._http_timeout,
                     stdin=subprocess.DEVNULL,
@@ -1186,7 +1189,7 @@ class BitwardenServeClient:
                         "VW_SESSION": self._inventory_session or "",
                     },
                 )
-            except OSError, subprocess.TimeoutExpired:
+            except OSError, UnicodeError, subprocess.TimeoutExpired:
                 raise BitwardenClientError(
                     "Could not verify the post-sync CLI inventory"
                 ) from None

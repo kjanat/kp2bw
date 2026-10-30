@@ -25,7 +25,11 @@ from kp2bw._item_sync import stamp_content
 from kp2bw._source_fields import source_field_name, source_field_origin
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
-from kp2bw.exceptions import BitwardenClientError, ConversionError
+from kp2bw.exceptions import (
+    BitwardenClientError,
+    BitwardenServeExitedError,
+    ConversionError,
+)
 
 
 def check_persisted_mapping(failure: str | None) -> None:
@@ -87,7 +91,34 @@ def check_persisted_mapping(failure: str | None) -> None:
     client.delete_attachment.assert_not_called()
 
 
+def check_fatal_attachment_read() -> None:
+    source = source_file("original", "file.txt", 1, "file.txt", b"data")
+    for operation in ("get_item", "get_attachment"):
+        existing = _make_existing(attachments=[{"id": "file", "fileName": "file.txt"}])
+        client = MagicMock(spec=BitwardenServeClient)
+        client.get_item.return_value = existing
+        getattr(client, operation).side_effect = BitwardenServeExitedError(
+            "serve exited"
+        )
+        try:
+            UpdateTestConverter().reconcile(
+                cast(BitwardenServeClient, client),
+                existing,
+                None,
+                _make_desired(),
+                [source],
+                fixed_coll_id=None,
+            )
+        except BitwardenServeExitedError:
+            pass
+        else:
+            raise AssertionError(f"Fatal {operation} failure was swallowed")
+        client.upload_attachments.assert_not_called()
+        client.delete_attachment.assert_not_called()
+
+
 def main() -> None:
+    check_fatal_attachment_read()
     existing = _make_existing(
         collectionIds=["old"],
         fields=fields_from_records({
@@ -175,6 +206,35 @@ def main() -> None:
         pass
     else:
         raise AssertionError("Ambiguous pending replacement was accepted")
+    # New sources reuse acknowledged uploads even if saving the association failed.
+    added = source_file("original", "added.txt", 1, "added.txt", b"added")
+    for collision in (False, True):
+        before = [*remote, *(([("unrelated", "added.txt")]) if collision else [])]
+        data["unrelated"] = b"unrelated"
+        first = plan_attachments([*sources, added], records, before, data.__getitem__)
+        assert len(first.uploads) == 1
+        pending_name = first.uploads[0].filename
+        data["new-source"] = added.data
+        pending = [*before, ("new-source", pending_name)]
+        for _ in range(2):
+            retry = plan_attachments(
+                [*sources, added], records, pending, data.__getitem__
+            )
+            assert not retry.uploads and not retry.stale
+            assert retry.records[added.source_id].attachment_id == "new-source"
+            assert retry.previous_records == records
+        data["duplicate-new-source"] = added.data
+        try:
+            plan_attachments(
+                [*sources, added],
+                records,
+                [*pending, ("duplicate-new-source", pending_name)],
+                data.__getitem__,
+            )
+        except ConversionError:
+            pass
+        else:
+            raise AssertionError("Ambiguous new-source upload was accepted")
     # Different legacy bytes establish a unique match, even with duplicate names.
     legacy = plan_attachments(
         sources[:2], {}, [("0", "notes.txt"), ("1", "notes.txt")], data.__getitem__
