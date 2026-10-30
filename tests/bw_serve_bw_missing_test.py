@@ -17,7 +17,7 @@ from kp2bw.exceptions import BitwardenClientError
 
 
 @contextmanager
-def _bw_not_on_path() -> Generator[None]:
+def bw_not_on_path() -> Generator[None]:
     """Point PATH at an empty directory so `shutil.which('bw')` returns None."""
     original = os.environ.get("PATH")
     with tempfile.TemporaryDirectory() as empty_dir:
@@ -32,7 +32,7 @@ def _bw_not_on_path() -> Generator[None]:
 
 
 def assert_ensure_raises_friendly_error() -> None:
-    with _bw_not_on_path():
+    with bw_not_on_path():
         try:
             ensure_bw_available()
         except BitwardenClientError as exc:
@@ -43,7 +43,7 @@ def assert_ensure_raises_friendly_error() -> None:
 
 
 def assert_client_init_raises_friendly_error() -> None:
-    with _bw_not_on_path():
+    with bw_not_on_path():
         try:
             BitwardenServeClient("dummy-password")
         except BitwardenClientError as exc:

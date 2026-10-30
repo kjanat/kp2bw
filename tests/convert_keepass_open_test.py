@@ -17,7 +17,7 @@ from pykeepass import PyKeePass, create_database
 from pykeepass.exceptions import CredentialsError
 
 from kp2bw import cli
-from kp2bw._console import console
+from kp2bw.console import console
 from kp2bw.convert import Converter, collect_keepass_uris
 from kp2bw.exceptions import ConversionError
 
@@ -29,19 +29,15 @@ ENTRY_URL = "https://example.com"
 class OpenTestConverter(Converter):
     """Converter exposing the offline database load for open-failure tests."""
 
-    def load_keepass_data(self) -> None:
-        """Run the load phase that opens the ``.kdbx`` file."""
-        self._load_keepass_data()
 
-
-def _seed(db_path: str) -> None:
+def seed(db_path: str) -> None:
     kp: PyKeePass = create_database(db_path, password=PASSWORD)
     group = kp.add_group(kp.root_group, "Demo")
     _ = kp.add_entry(group, "Example", "user", "entry-secret", url=ENTRY_URL)
     kp.save()
 
 
-def _converter(db_path: str, password: str) -> OpenTestConverter:
+def make_converter(db_path: str, password: str) -> OpenTestConverter:
     return OpenTestConverter(
         keepass_file_path=db_path,
         keepass_password=password,
@@ -55,7 +51,7 @@ def _converter(db_path: str, password: str) -> OpenTestConverter:
     )
 
 
-def _check_message(exc: ConversionError, db_path: str) -> None:
+def check_message(exc: ConversionError, db_path: str) -> None:
     message = str(exc)
     if db_path not in message:
         raise AssertionError(f"message must name the database, got {message!r}")
@@ -68,16 +64,16 @@ def assert_wrong_password_raises_conversion_error() -> None:
     """The migration load path must report a wrong password as a ConversionError."""
     with tempfile.TemporaryDirectory(prefix="kp2bw-open-") as tmp_dir:
         db_path = str(Path(tmp_dir) / "vault.kdbx")
-        _seed(db_path)
+        seed(db_path)
 
         try:
-            _converter(db_path, WRONG_PASSWORD).load_keepass_data()
+            make_converter(db_path, WRONG_PASSWORD).load_keepass_data()
         except CredentialsError as exc:
             raise AssertionError(
                 "a wrong password must not surface pykeepass' CredentialsError"
             ) from exc
         except ConversionError as exc:
-            _check_message(exc, db_path)
+            check_message(exc, db_path)
             lowered = str(exc).lower()
             if "password" not in lowered:
                 raise AssertionError(
@@ -95,12 +91,12 @@ def assert_wrong_password_raises_conversion_error_for_uri_report() -> None:
     """The read-only URI report shares the guarded open path."""
     with tempfile.TemporaryDirectory(prefix="kp2bw-open-") as tmp_dir:
         db_path = str(Path(tmp_dir) / "vault.kdbx")
-        _seed(db_path)
+        seed(db_path)
 
         try:
             _ = collect_keepass_uris(db_path, WRONG_PASSWORD, None)
         except ConversionError as exc:
-            _check_message(exc, db_path)
+            check_message(exc, db_path)
         else:
             raise AssertionError("a wrong password must fail the URI report")
 
@@ -111,9 +107,9 @@ def assert_missing_database_raises_conversion_error() -> None:
         db_path = str(Path(tmp_dir) / "absent.kdbx")
 
         try:
-            _converter(db_path, PASSWORD).load_keepass_data()
+            make_converter(db_path, PASSWORD).load_keepass_data()
         except ConversionError as exc:
-            _check_message(exc, db_path)
+            check_message(exc, db_path)
         else:
             raise AssertionError("a missing database must fail the load")
 
@@ -125,9 +121,9 @@ def assert_non_keepass_file_raises_conversion_error() -> None:
         _ = Path(db_path).write_bytes(b"not a keepass database")
 
         try:
-            _converter(db_path, PASSWORD).load_keepass_data()
+            make_converter(db_path, PASSWORD).load_keepass_data()
         except ConversionError as exc:
-            _check_message(exc, db_path)
+            check_message(exc, db_path)
         else:
             raise AssertionError("a non-KeePass file must fail the load")
 
@@ -136,9 +132,9 @@ def assert_correct_password_still_opens_the_database() -> None:
     """The guarded open must leave the success path untouched."""
     with tempfile.TemporaryDirectory(prefix="kp2bw-open-") as tmp_dir:
         db_path = str(Path(tmp_dir) / "vault.kdbx")
-        _seed(db_path)
+        seed(db_path)
 
-        converter = _converter(db_path, PASSWORD)
+        converter = make_converter(db_path, PASSWORD)
         converter.load_keepass_data()
 
         uris = collect_keepass_uris(db_path, PASSWORD, None)
@@ -155,7 +151,7 @@ def assert_cli_prints_one_error_line_for_wrong_password() -> None:
 
     with tempfile.TemporaryDirectory(prefix="kp2bw-open-") as tmp_dir:
         db_path = str(Path(tmp_dir) / "vault.kdbx")
-        _seed(db_path)
+        seed(db_path)
 
         try:
             os.chdir(tmp_dir)

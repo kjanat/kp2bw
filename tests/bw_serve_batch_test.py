@@ -16,12 +16,12 @@ from kp2bw.bw_types import BwItemCreate
 from kp2bw.exceptions import BitwardenClientError
 
 
-def _item(name: str) -> BwItemCreate:
+def unused_item(name: str) -> BwItemCreate:
     """Build a minimal create-shaped item carrying only what the batch reads."""
     return cast(BwItemCreate, {"name": name})
 
 
-class _BatchClient(BitwardenServeClient):
+class BatchClient(BitwardenServeClient):
     """Client double whose create_item/create_folder fail for named inputs.
 
     Bypasses the real ``__init__`` (which would spawn ``bw serve``); only the
@@ -35,24 +35,24 @@ class _BatchClient(BitwardenServeClient):
         fail_items: Iterable[str] | None = None,
         fail_folders: Iterable[str] | None = None,
     ) -> None:
-        self._folders = {}
-        self._fail_items = set(fail_items or ())
-        self._fail_folders = set(fail_folders or ())
+        self.folder_cache = {}
+        self.fail_items = set(fail_items or ())
+        self.fail_folders = set(fail_folders or ())
         self.created: list[str] = []
         self.created_payloads: list[dict[str, Any]] = []
         self.folders_created: list[str] = []
 
     def create_folder(self, name: str) -> str:
-        if name in self._fail_folders:
+        if name in self.fail_folders:
             raise BitwardenClientError(f"simulated folder failure: {name}")
         self.folders_created.append(name)
         folder_id = f"fid-{name}"
-        self._folders[name] = folder_id
+        self.folder_cache[name] = folder_id
         return folder_id
 
     def create_item(self, item: BwItemCreate) -> str:
         name = item.get("name", "?")
-        if name in self._fail_items:
+        if name in self.fail_items:
             raise BitwardenClientError(f"simulated create timeout: {name}")
         self.created.append(name)
         self.created_payloads.append(dict(item))
@@ -61,11 +61,11 @@ class _BatchClient(BitwardenServeClient):
 
 def assert_item_failure_does_not_abort_batch() -> None:
     """The #24 regression: a create timeout mid-batch stranded all later items."""
-    bw = _BatchClient(fail_items={"b"})
+    bw = BatchClient(fail_items={"b"})
     entries = {
-        "k1": (None, _item("a")),
-        "k2": (None, _item("b")),
-        "k3": (None, _item("c")),
+        "k1": (None, unused_item("a")),
+        "k2": (None, unused_item("b")),
+        "k3": (None, unused_item("c")),
     }
     key_to_id = bw.create_items_batch(entries)
     if set(key_to_id) != {"k1", "k3"}:
@@ -78,18 +78,18 @@ def assert_item_failure_does_not_abort_batch() -> None:
 
 def assert_failed_items_are_reported() -> None:
     """on_item_failed fires once per failed key; on_item_created per success."""
-    bw = _BatchClient(fail_items={"b"})
+    bw = BatchClient(fail_items={"b"})
     entries = {
-        "k1": (None, _item("a")),
-        "k2": (None, _item("b")),
-        "k3": (None, _item("c")),
+        "k1": (None, unused_item("a")),
+        "k2": (None, unused_item("b")),
+        "k3": (None, unused_item("c")),
     }
     created: list[int] = []
     failed: list[str] = []
     bw.create_items_batch(
         entries,
         on_item_created=lambda: created.append(1),
-        on_item_failed=lambda key, _exc: failed.append(key),
+        on_item_failed=lambda key, exc: failed.append(key),
     )
     if failed != ["k2"]:
         raise AssertionError(f"the failed key must be reported once, got {failed}")
@@ -105,15 +105,15 @@ def assert_folder_failure_skips_only_its_items() -> None:
     An item must never be silently created without its folder (which would
     misplace it into the no-folder root); it is reported as failed instead.
     """
-    bw = _BatchClient(fail_folders={"Bad"})
+    bw = BatchClient(fail_folders={"Bad"})
     entries = {
-        "k1": ("Good", _item("a")),
-        "k2": ("Bad", _item("b")),
-        "k3": (None, _item("c")),
+        "k1": ("Good", unused_item("a")),
+        "k2": ("Bad", unused_item("b")),
+        "k3": (None, unused_item("c")),
     }
     failed: list[str] = []
     key_to_id = bw.create_items_batch(
-        entries, on_item_failed=lambda key, _exc: failed.append(key)
+        entries, on_item_failed=lambda key, exc: failed.append(key)
     )
     if set(key_to_id) != {"k1", "k3"}:
         raise AssertionError(
@@ -127,10 +127,10 @@ def assert_folder_failure_skips_only_its_items() -> None:
 
 def assert_no_folder_mode_does_not_create_or_bind_folders() -> None:
     """Disabling folders leaves items at the root and never calls create_folder."""
-    bw = _BatchClient(fail_folders={"Bad"})
+    bw = BatchClient(fail_folders={"Bad"})
     entries = {
-        "k1": ("Good", _item("a")),
-        "k2": ("Bad", _item("b")),
+        "k1": ("Good", unused_item("a")),
+        "k2": ("Bad", unused_item("b")),
     }
     key_to_id = bw.create_items_batch(entries, create_folders=False)
     if set(key_to_id) != {"k1", "k2"}:

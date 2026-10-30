@@ -11,20 +11,20 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from _snapshot import JsonValue, as_object
-from e2e_vaultwarden_test import _bw_json, _get_session, _run, _run_migration
+from e2e_vaultwarden_test import bw_json, get_session, run, run_migration
 from pykeepass import create_database
+from snapshot import JsonValue, as_object
 
-from kp2bw._item_sync import stamp_content
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.item_sync import stamp_content
 
 type JsonObject = dict[str, JsonValue]
 
 logger = logging.getLogger("e2e.metadata")
 
 
-def _metadata(item: JsonObject) -> str | None:
+def metadata(item: JsonObject) -> str | None:
     fields = item.get("fields") or []
     assert isinstance(fields, list)
     matches = [
@@ -64,9 +64,9 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
     db.save()
 
     def read_items() -> dict[str, JsonObject]:
-        session = _get_session(env, password)
-        _run(["bw", "sync", "--session", session], env=env)
-        items = _bw_json(env, "list", "items", "--session", session)
+        session = get_session(env, password)
+        run(["bw", "sync", "--session", session], env=env)
+        items = bw_json(env, "list", "items", "--session", session)
         result: dict[str, JsonObject] = {}
         for case, name in names.items():
             matches = [item for item in items if item.get("name") == name]
@@ -76,10 +76,10 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
 
     try:
         logger.info("Checking persisted JSON tags and expiry")
-        _run_migration(source, kp_password, password, env, metadata=True)
+        run_migration(source, kp_password, password, env, metadata=True)
         initial = read_items()
         for case, item in initial.items():
-            value = _metadata(item)
+            value = metadata(item)
             if case == "empty":
                 assert value is None, "Empty metadata should be omitted"
             else:
@@ -107,13 +107,13 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
                     item["notes"] = "Manually edited in Bitwarden"
                 bw.update_item(str(item["id"]), item)
         seeded = read_items()
-        assert _metadata(seeded["yaml"]) == old_yaml
+        assert metadata(seeded["yaml"]) == old_yaml
         logger.info("Checking safe YAML upgrades and protected manual edits")
-        _run_migration(source, kp_password, password, env, metadata=True)
+        run_migration(source, kp_password, password, env, metadata=True)
         upgraded = read_items()
         for case in ("yaml", "unstamped"):
             assert upgraded[case]["id"] == seeded[case]["id"]
-            value = _metadata(upgraded[case])
+            value = metadata(upgraded[case])
             assert value is not None and json.loads(value) == expected
             assert upgraded[case]["revisionDate"] != seeded[case]["revisionDate"]
         for case in ("fresh", "edited-meta", "edited-notes", "empty"):
@@ -121,12 +121,12 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 "Untouched or protected item was rewritten"
             )
         logger.info("Checking metadata-enabled unchanged rerun")
-        _run_migration(source, kp_password, password, env, metadata=True)
+        run_migration(source, kp_password, password, env, metadata=True)
         assert read_items() == upgraded, "Metadata rerun changed content or revisions"
     finally:
-        session = _get_session(env, password)
-        _run(["bw", "sync", "--session", session], env=env)
-        for item in _bw_json(env, "list", "items", "--session", session):
+        session = get_session(env, password)
+        run(["bw", "sync", "--session", session], env=env)
+        for item in bw_json(env, "list", "items", "--session", session):
             if item.get("name") not in names.values():
                 continue
             fields = item.get("fields") or []
@@ -136,7 +136,7 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 and str(as_object(f).get("value")) in source_ids
                 for f in fields
             ):
-                _run(
+                run(
                     [
                         "bw",
                         "delete",
@@ -156,7 +156,7 @@ def main() -> None:
     env = os.environ.copy()
     env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
     env["BW_NOINTERACTION"] = "true"
-    status = json.loads(_run(["bw", "status"], env=env))
+    status = json.loads(run(["bw", "status"], env=env))
     assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")
     assert status.get("userEmail", "").casefold() == env["BW_TEST_EMAIL"].casefold()
     with tempfile.TemporaryDirectory() as directory:

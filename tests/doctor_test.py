@@ -6,7 +6,7 @@ from pathlib import Path
 from kp2bw import __version__
 from kp2bw.doctor import DoctorReport, collect_report, redact_report, render_report
 
-_BASE = DoctorReport(
+BASE = DoctorReport(
     kp2bw_version="1.2.3",
     revision="0123456789abcdef0123456789abcdef01234567",
     revision_source="git checkout",
@@ -23,7 +23,7 @@ _BASE = DoctorReport(
 
 
 def assert_redact_masks_self_hosted_url_and_home_paths() -> None:
-    redacted = redact_report(_BASE)
+    redacted = redact_report(BASE)
     if redacted.bw_server_url != "https://<redacted self-hosted>":
         raise AssertionError(
             f"self-hosted URL must be masked: {redacted.bw_server_url}"
@@ -32,20 +32,20 @@ def assert_redact_masks_self_hosted_url_and_home_paths() -> None:
         raise AssertionError(f".env path must be home-relative: {redacted.dotenv_path}")
     if redacted.bw_command != "~/.local/bin/bw":
         raise AssertionError(f"bw path must be home-relative: {redacted.bw_command}")
-    if redacted.server_product != _BASE.server_product:
+    if redacted.server_product != BASE.server_product:
         raise AssertionError("the server product identifies software, keep it")
     if str(Path.home()) in "\n".join(str(line) for line in render_report(redacted)):
         raise AssertionError("rendered redacted report must not contain the home dir")
 
 
 def assert_redact_keeps_official_cloud_hosts() -> None:
-    cloud = replace(_BASE, bw_server_url="https://vault.bitwarden.com")
+    cloud = replace(BASE, bw_server_url="https://vault.bitwarden.com")
     if redact_report(cloud).bw_server_url != "https://vault.bitwarden.com":
         raise AssertionError("official Bitwarden hosts identify the tier, keep them")
 
 
 def assert_render_includes_versions_and_support_links() -> None:
-    lines = render_report(_BASE)
+    lines = render_report(BASE)
     text = "\n".join(str(line) for line in lines)
     for needle in (
         "1.2.3",
@@ -56,16 +56,16 @@ def assert_render_includes_versions_and_support_links() -> None:
     ):
         if needle not in text:
             raise AssertionError(f"rendered report must mention {needle!r}:\n{text}")
-    if _BASE.revision is not None and _BASE.revision in text:
+    if BASE.revision is not None and BASE.revision in text:
         raise AssertionError("the full sha must render short, not inline")
-    commit_url = f"https://github.com/kjanat/kp2bw/commit/{_BASE.revision}"
+    commit_url = f"https://github.com/kjanat/kp2bw/commit/{BASE.revision}"
     if not any(commit_url in str(span.style) for line in lines for span in line.spans):
         raise AssertionError("the short sha must hyperlink to the full commit URL")
 
 
 def assert_missing_bw_is_unhealthy() -> None:
     broken = replace(
-        _BASE,
+        BASE,
         bw_command=None,
         bw_version=None,
         bw_serve_supported=None,

@@ -10,7 +10,7 @@ from unittest import mock
 from kp2bw import cli
 
 # Environment kp2bw reads; every key is saved and restored around the run.
-_MANAGED_ENV = (
+MANAGED_ENV = (
     "KP2BW_KEEPASS_FILE",
     "KP2BW_KEEPASS_PASSWORD",
     "KP2BW_BITWARDEN_PASSWORD",
@@ -22,7 +22,7 @@ _MANAGED_ENV = (
 )
 
 
-class _CapturingConverter:
+class CapturingConverter:
     """Stand-in for the real Converter that records its constructor kwargs."""
 
     captured: ClassVar[dict[str, object]] = {}
@@ -34,7 +34,7 @@ class _CapturingConverter:
         return 0
 
 
-def _reset_root_logging(keep: list[logging.Handler]) -> None:
+def reset_root_logging(keep: list[logging.Handler]) -> None:
     """Detach and close only the handlers ``main()`` added to the root logger.
 
     Snapshot the root handlers (*keep*) before ``cli.main()`` runs, then remove
@@ -63,7 +63,7 @@ def assert_dotenv_supplies_keepass_file() -> None:
     # Snapshot root handlers before main() adds its file handler, so teardown
     # removes only what main() installed and leaves pytest's capture intact.
     original_handlers = list(logging.getLogger().handlers)
-    saved_env = {key: os.environ.get(key) for key in _MANAGED_ENV}
+    saved_env = {key: os.environ.get(key) for key in MANAGED_ENV}
 
     tmp = tempfile.mkdtemp()
     try:
@@ -87,20 +87,20 @@ def assert_dotenv_supplies_keepass_file() -> None:
         # patch.object auto-restores both names when the block exits.
         with (
             mock.patch.object(cli, "ensure_bw_available", return_value=None),
-            mock.patch.object(cli, "Converter", _CapturingConverter),
+            mock.patch.object(cli, "Converter", CapturingConverter),
         ):
             cli.main()
 
-        db_path = _CapturingConverter.captured.get("keepass_file_path")
+        db_path = CapturingConverter.captured.get("keepass_file_path")
         if db_path != "from-dotenv.kdbx":
             raise AssertionError(f"expected db path from .env, got {db_path!r}")
-        if _CapturingConverter.captured.get("create_folders") is not False:
+        if CapturingConverter.captured.get("create_folders") is not False:
             raise AssertionError("KP2BW_CREATE_FOLDERS=0 should disable folders")
     finally:
         sys.argv = original_argv
         # Release the log file (so rmtree works on Windows) without stripping
         # the framework handlers present before the test.
-        _reset_root_logging(original_handlers)
+        reset_root_logging(original_handlers)
         os.chdir(original_cwd)
         shutil.rmtree(tmp, ignore_errors=True)
         for key, value in saved_env.items():
@@ -115,7 +115,7 @@ def assert_empty_env_var_defers_to_dotenv() -> None:
 
     Regression: `KP2BW_KEEPASS_FILE=""` in the environment used to shadow the
     .env entry (load_dotenv override=False treats empty as "set"), producing a
-    baffling "db required". `_load_dotenv` now fills keys that are unset *or
+    baffling "db required". `load_dotenv` now fills keys that are unset *or
     empty* from the file while leaving non-empty exports untouched.
     """
     original_cwd = Path.cwd()
@@ -129,7 +129,7 @@ def assert_empty_env_var_defers_to_dotenv() -> None:
 
         # Empty export -> .env wins.
         os.environ["KP2BW_KEEPASS_FILE"] = ""
-        _ = cli._load_dotenv()
+        _ = cli.load_dotenv()
         if os.environ.get("KP2BW_KEEPASS_FILE") != "from-dotenv.kdbx":
             raise AssertionError(
                 f"empty export should defer to .env, got "
@@ -138,7 +138,7 @@ def assert_empty_env_var_defers_to_dotenv() -> None:
 
         # Non-empty export -> still wins over .env.
         os.environ["KP2BW_KEEPASS_FILE"] = "/real/shell/override.kdbx"
-        _ = cli._load_dotenv()
+        _ = cli.load_dotenv()
         if os.environ.get("KP2BW_KEEPASS_FILE") != "/real/shell/override.kdbx":
             raise AssertionError("non-empty export must win over .env")
     finally:
@@ -161,7 +161,7 @@ def assert_org_disables_personal_folders_by_default() -> None:
     original_cwd = Path.cwd()
     original_argv = sys.argv
     original_handlers = list(logging.getLogger().handlers)
-    saved_env = {key: os.environ.get(key) for key in _MANAGED_ENV}
+    saved_env = {key: os.environ.get(key) for key in MANAGED_ENV}
 
     tmp = tempfile.mkdtemp()
     try:
@@ -176,26 +176,26 @@ def assert_org_disables_personal_folders_by_default() -> None:
         os.chdir(tmp)
         sys.argv = ["kp2bw"]
 
-        def _run() -> object:
+        def run() -> object:
             with (
                 mock.patch.object(cli, "ensure_bw_available", return_value=None),
-                mock.patch.object(cli, "Converter", _CapturingConverter),
+                mock.patch.object(cli, "Converter", CapturingConverter),
             ):
                 cli.main()
-            return _CapturingConverter.captured.get("create_folders")
+            return CapturingConverter.captured.get("create_folders")
 
         # Org set -> folders default off.
         os.environ["KP2BW_BITWARDEN_ORG"] = "org-1"
-        if _run() is not False:
+        if run() is not False:
             raise AssertionError("an org import should default to no personal folders")
 
         # No org -> folders default on.
         _ = os.environ.pop("KP2BW_BITWARDEN_ORG", None)
-        if _run() is not True:
+        if run() is not True:
             raise AssertionError("without an org, personal folders should default on")
     finally:
         sys.argv = original_argv
-        _reset_root_logging(original_handlers)
+        reset_root_logging(original_handlers)
         os.chdir(original_cwd)
         shutil.rmtree(tmp, ignore_errors=True)
         for key, value in saved_env.items():
@@ -215,7 +215,7 @@ def assert_totp_pps_reaches_converter() -> None:
     original_cwd = Path.cwd()
     original_argv = sys.argv
     original_handlers = list(logging.getLogger().handlers)
-    saved_env = {key: os.environ.get(key) for key in _MANAGED_ENV}
+    saved_env = {key: os.environ.get(key) for key in MANAGED_ENV}
 
     tmp = tempfile.mkdtemp()
     try:
@@ -227,28 +227,28 @@ def assert_totp_pps_reaches_converter() -> None:
         _ = os.environ.pop("KP2BW_TOTP_PPS", None)
         os.chdir(tmp)
 
-        def _run(argv: list[str]) -> object:
+        def run(argv: list[str]) -> object:
             sys.argv = argv
             with (
                 mock.patch.object(cli, "ensure_bw_available", return_value=None),
-                mock.patch.object(cli, "Converter", _CapturingConverter),
+                mock.patch.object(cli, "Converter", CapturingConverter),
             ):
                 cli.main()
-            return _CapturingConverter.captured.get("totp_pps")
+            return CapturingConverter.captured.get("totp_pps")
 
-        if _run(["kp2bw"]) is not False:
+        if run(["kp2bw"]) is not False:
             raise AssertionError("PPS TOTP field names must be off by default")
-        if _run(["kp2bw", "--totp-pps"]) is not True:
+        if run(["kp2bw", "--totp-pps"]) is not True:
             raise AssertionError("--totp-pps should enable the PPS field names")
 
         os.environ["KP2BW_TOTP_PPS"] = "1"
-        if _run(["kp2bw"]) is not True:
+        if run(["kp2bw"]) is not True:
             raise AssertionError("KP2BW_TOTP_PPS=1 should enable the PPS field names")
-        if _run(["kp2bw", "--no-totp-pps"]) is not False:
+        if run(["kp2bw", "--no-totp-pps"]) is not False:
             raise AssertionError("--no-totp-pps must win over KP2BW_TOTP_PPS")
     finally:
         sys.argv = original_argv
-        _reset_root_logging(original_handlers)
+        reset_root_logging(original_handlers)
         os.chdir(original_cwd)
         shutil.rmtree(tmp, ignore_errors=True)
         for key, value in saved_env.items():

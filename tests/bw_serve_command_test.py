@@ -22,16 +22,16 @@ from kp2bw.bw_serve import (
 from kp2bw.exceptions import BitwardenClientError
 
 
-def _fake_which(mapping: Mapping[str, str]) -> Callable[..., str | None]:
+def fake_which(mapping: Mapping[str, str]) -> Callable[..., str | None]:
     """Build a ``shutil.which`` replacement backed by a name -> path map."""
 
-    def which(name: str, *_args: object, **_kwargs: object) -> str | None:
+    def which(name: str, *args: object, **kwargs: object) -> str | None:
         return mapping.get(name)
 
     return which
 
 
-def _fake_isfile(target: str | None) -> Callable[[str], bool]:
+def fake_isfile(target: str | None) -> Callable[[str], bool]:
     """Build an ``os.path.isfile`` replacement that matches a single path."""
 
     def isfile(path: str) -> bool:
@@ -43,9 +43,7 @@ def _fake_isfile(target: str | None) -> Callable[[str], bool]:
 def assert_resolve_plain_on_posix() -> None:
     with (
         patch.object(bw_serve.os, "name", "posix"),
-        patch.object(
-            bw_serve.shutil, "which", _fake_which({"bw": "/usr/local/bin/bw"})
-        ),
+        patch.object(bw_serve.shutil, "which", fake_which({"bw": "/usr/local/bin/bw"})),
     ):
         argv, cwd = resolve_bw_command()
     if argv != ["/usr/local/bin/bw"] or cwd is not None:
@@ -56,7 +54,7 @@ def assert_resolve_windows_exe_direct() -> None:
     exe = r"C:\Program Files\Bitwarden CLI\bw.exe"
     with (
         patch.object(bw_serve.os, "name", "nt"),
-        patch.object(bw_serve.shutil, "which", _fake_which({"bw.exe": exe})),
+        patch.object(bw_serve.shutil, "which", fake_which({"bw.exe": exe})),
     ):
         argv, cwd = resolve_bw_command()
     if argv != [exe] or cwd is not None:
@@ -68,7 +66,7 @@ def assert_resolve_prefers_cmd_over_ps1() -> None:
     shim = r"C:\Users\me\AppData\Roaming\npm\bw.cmd"
     with (
         patch.object(bw_serve.os, "name", "nt"),
-        patch.object(bw_serve.shutil, "which", _fake_which({"bw.cmd": shim})),
+        patch.object(bw_serve.shutil, "which", fake_which({"bw.cmd": shim})),
     ):
         argv, cwd = resolve_bw_command()
     # COMSPEC may or may not be set on the test host, so only assert the tail.
@@ -87,9 +85,9 @@ def assert_resolve_ps1_via_powershell() -> None:
     with (
         patch.object(bw_serve.os, "name", "nt"),
         patch.object(bw_serve.os, "pathsep", ";"),
-        patch.object(bw_serve.shutil, "which", _fake_which({})),
+        patch.object(bw_serve.shutil, "which", fake_which({})),
         patch.dict(bw_serve.os.environ, {"PATH": r"C:\tools"}, clear=False),
-        patch.object(bw_serve.os.path, "isfile", _fake_isfile(ps1)),
+        patch.object(bw_serve.os.path, "isfile", fake_isfile(ps1)),
     ):
         argv, cwd = resolve_bw_command()
     if argv[0].lower() != "powershell.exe":  # pwsh/powershell not on fake PATH
@@ -103,7 +101,7 @@ def assert_resolve_ps1_via_powershell() -> None:
 def assert_resolve_missing_raises_posix() -> None:
     with (
         patch.object(bw_serve.os, "name", "posix"),
-        patch.object(bw_serve.shutil, "which", _fake_which({})),
+        patch.object(bw_serve.shutil, "which", fake_which({})),
     ):
         try:
             resolve_bw_command()
@@ -118,9 +116,9 @@ def assert_resolve_missing_raises_windows() -> None:
     with (
         patch.object(bw_serve.os, "name", "nt"),
         patch.object(bw_serve.os, "pathsep", ";"),
-        patch.object(bw_serve.shutil, "which", _fake_which({})),
+        patch.object(bw_serve.shutil, "which", fake_which({})),
         patch.dict(bw_serve.os.environ, {"PATH": r"C:\tools"}, clear=False),
-        patch.object(bw_serve.os.path, "isfile", _fake_isfile(None)),
+        patch.object(bw_serve.os.path, "isfile", fake_isfile(None)),
     ):
         try:
             resolve_bw_command()
@@ -181,7 +179,7 @@ def assert_terminate_serve_reaps_port_when_wrapper_dead() -> None:
     reaped: list[int] = []
     with (
         patch.object(bw_serve.os, "name", "nt"),
-        patch.object(bw_serve, "_kill_port_listeners", reaped.append),
+        patch.object(bw_serve, "kill_port_listeners", reaped.append),
     ):
         terminate_serve(proc, via_shell=True, port=22650, timeout=5)
     if reaped != [22650]:
@@ -200,7 +198,7 @@ def assert_send_with_retry_recovers_idempotent() -> None:
         return ok
 
     got = send_with_retry(
-        send, method="PUT", path="/x", max_attempts=3, sleep=lambda _s: None
+        send, method="PUT", path="/x", max_attempts=3, sleep=lambda s: None
     )
     if got is not ok or calls["n"] != 3:
         raise AssertionError(f"idempotent retry should recover; calls={calls['n']}")
@@ -215,7 +213,7 @@ def assert_send_with_retry_does_not_retry_post() -> None:
         raise httpx.ReadError("forcibly closed")
 
     try:
-        send_with_retry(send, method="POST", path="/x", sleep=lambda _s: None)
+        send_with_retry(send, method="POST", path="/x", sleep=lambda s: None)
     except BitwardenClientError:
         pass
     else:
@@ -232,7 +230,7 @@ def assert_send_with_retry_exhaustion_raises_project_error() -> None:
 
     try:
         send_with_retry(
-            send, method="GET", path="/x", max_attempts=2, sleep=lambda _s: None
+            send, method="GET", path="/x", max_attempts=2, sleep=lambda s: None
         )
     except BitwardenClientError:
         pass
@@ -262,7 +260,7 @@ def assert_send_with_retry_idempotent_override_retries_post() -> None:
         path="/sync",
         idempotent=True,
         max_attempts=3,
-        sleep=lambda _s: None,
+        sleep=lambda s: None,
     )
     if got is not ok or calls["n"] != 2:
         raise AssertionError(
@@ -285,7 +283,7 @@ def assert_send_with_retry_idempotent_override_can_force_single_attempt() -> Non
             path="/x",
             idempotent=False,
             max_attempts=3,
-            sleep=lambda _s: None,
+            sleep=lambda s: None,
         )
     except BitwardenClientError:
         pass
@@ -336,6 +334,18 @@ def assert_login_compat_hint_degrades_to_plain_url() -> None:
 
 
 def main() -> None:
+    for version in ("2026.10.1", "0.1.3", "0.2.0-rc.1"):
+        for returncode in (0, 1):
+            with patch.object(
+                bw_serve.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    [], returncode, version + "\n", ""
+                ),
+            ):
+                assert bw_serve.bw_cli_version(["bw"], None) == (
+                    version if returncode == 0 else None
+                )
     assert_resolve_plain_on_posix()
     assert_resolve_windows_exe_direct()
     assert_resolve_prefers_cmd_over_ps1()

@@ -113,9 +113,30 @@
 			detail:
 				'Allow oversized hidden OTP, passkey, and KeePass-protected fields to become plaintext .txt attachments. Without consent they are warned about and dropped, not exposed.',
 		},
+		{
+			flag: '--archive-history',
+			env: 'KP2BW_ARCHIVE_HISTORY',
+			default: 'Off',
+			detail:
+				'Archive full historical records, including old passwords, protected fields, source timestamps and available attachment bytes. Generated filenames avoid collisions with your files.',
+		},
+		{
+			flag: '--password-history, --no-password-history',
+			env: 'KP2BW_PASSWORD_HISTORY',
+			default: 'On',
+			detail:
+				'Import up to five distinct previous passwords. Preserve unrelated destination history and verify writes. Native history updates require the Vaultwarden CLI through a bw adapter.',
+		},
 	];
 
 	const rerunOptions: Option[] = [
+		{
+			flag: '--entry-id UUID, --item-id UUID',
+			env: 'CLI only',
+			default: 'All eligible entries',
+			detail:
+				'Sync one KeePass entry UUID or one existing Bitwarden item UUID. Both selectors must agree when combined. Unknown, ambiguous or excluded IDs fail before writes. Selection intersects import and destination filters, and never adopts by title. REF dependencies are read without being written; the selected alias becomes a separate item. Combine with --force-update to overwrite only this item; --no-update still preserves its content and attachments. Migration only.',
+		},
 		{
 			flag: '--update, --no-update',
 			env: 'KP2BW_UPDATE',
@@ -153,6 +174,13 @@
 			default: 'Off',
 			detail:
 				'Read-only report of registrable domains containing multiple URI hosts. KeePass source needs FILE; Bitwarden source honors organization and collection scope.',
+		},
+		{
+			flag: '--fixup',
+			env: 'KP2BW_FIXUP',
+			default: 'Off',
+			detail:
+				'Upgrade legacy URL/app fields and YAML metadata in Bitwarden without KeePass. Personal vault by default; -o and a fixed -c select organization scope. Preserve modified items and reject ambiguous data. Recognized unstamped fields are upgraded losslessly and stamped. Repeated runs write nothing; failures return exit code 1.',
 		},
 		{
 			flag: '--migrate-uris',
@@ -279,8 +307,8 @@ python -m kp2bw [OPTIONS] FILE</code></pre>
 					<article>
 						<h3>Bitwarden-only</h3>
 						<p>
-							<code>--report-uris bitwarden</code>, <code>--migrate-uris</code>,
-							and
+							<code>--report-uris bitwarden</code>, <code>--fixup</code>, <code
+							>--migrate-uris</code>, and
 							<code>--strip-ids</code> need no <code>FILE</code> or KeePass
 							password.
 						</p>

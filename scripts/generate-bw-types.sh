@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate src/kp2bw/_bw_api_types.py from specs/vault-management-api.json.
+# Generate src/kp2bw/bw_api_types.py from specs/vault-management-api.json.
 # Run from the repo root:
 #   bash scripts/generate-bw-types.sh
 #
@@ -8,7 +8,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IN_FILE="${REPO_ROOT}/specs/vault-management-api.json"
-OUT_FILE="${REPO_ROOT}/src/kp2bw/_bw_api_types.py"
+OUT_FILE="${REPO_ROOT}/src/kp2bw/bw_api_types.py"
 
 if uvx --from "datamodel-code-generator[ruff]" datamodel-codegen \
 	--input "${IN_FILE}" \

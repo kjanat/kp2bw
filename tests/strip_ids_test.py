@@ -9,17 +9,18 @@ nothing). These checks drive the method with a client double, so no live
 
 from typing import cast
 
+from kp2bw.attachments import FileRecord, fields_from_records
 from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient
 from kp2bw.bw_types import BwField, BwItemResponse
 
 
-def _item(item_id: str, field_names: list[str]) -> BwItemResponse:
+def unused_item(item_id: str, field_names: list[str]) -> BwItemResponse:
     """Build a minimal list-shaped item carrying the named custom fields."""
     fields = [cast(BwField, {"name": name, "value": "v"}) for name in field_names]
     return cast(BwItemResponse, {"id": item_id, "name": item_id, "fields": fields})
 
 
-class _StripClient(BitwardenServeClient):
+class StripClient(BitwardenServeClient):
     """Client double serving a fixed item list and recording every update.
 
     Bypasses the real ``__init__`` (which would spawn ``bw serve``); only the
@@ -28,9 +29,9 @@ class _StripClient(BitwardenServeClient):
     """
 
     def __init__(self, items: list[BwItemResponse]) -> None:
-        self._org_id = None
-        self._collection_id = None
-        self._items = items
+        self.organization_id = None
+        self.collection_id = None
+        self.items = items
         # (item_id, remaining field names) for each PUT the method issues.
         self.updates: list[tuple[str, list[str]]] = []
 
@@ -41,7 +42,7 @@ class _StripClient(BitwardenServeClient):
         organization_id: str | None = None,
         collection_id: str | None = None,
     ) -> list[BwItemResponse]:
-        return self._items
+        return self.items
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
         names = [field.get("name", "") for field in item.get("fields") or []]
@@ -51,12 +52,15 @@ class _StripClient(BitwardenServeClient):
 def assert_only_stamped_items_stripped() -> None:
     """Only items carrying KP2BW_ID are rewritten, and only that field is removed."""
     items = [
-        _item("stamped-both", [KP2BW_ID_FIELD_NAME, "keep"]),
-        _item("plain", ["keep"]),
-        _item("stamped-only", [KP2BW_ID_FIELD_NAME]),
-        _item("no-fields", []),
+        unused_item("stamped-both", [KP2BW_ID_FIELD_NAME, "KP2BW_FILE_test", "keep"]),
+        unused_item("plain", ["keep"]),
+        unused_item("stamped-only", [KP2BW_ID_FIELD_NAME]),
+        unused_item("no-fields", []),
     ]
-    client = _StripClient(items)
+    items[0]["fields"].extend(
+        fields_from_records({"0" * 64: FileRecord("attachment", "1" * 64, "2" * 64)})
+    )
+    client = StripClient(items)
 
     result = client.strip_field_from_items(KP2BW_ID_FIELD_NAME)
 
@@ -74,14 +78,14 @@ def assert_only_stamped_items_stripped() -> None:
             raise AssertionError(f"{item_id} still carries {KP2BW_ID_FIELD_NAME}")
     # The unrelated field on the multi-field item must survive.
     both_remaining = dict(client.updates)["stamped-both"]
-    if both_remaining != ["keep"]:
+    if both_remaining != ["KP2BW_FILE_test", "keep"]:
         raise AssertionError(f"non-stamp field not preserved: {both_remaining}")
 
 
 def assert_second_pass_is_noop() -> None:
     """Re-running over already-clean items strips nothing and issues no PUTs."""
-    items = [_item("plain", ["keep"]), _item("no-fields", [])]
-    client = _StripClient(items)
+    items = [unused_item("plain", ["keep"]), unused_item("no-fields", [])]
+    client = StripClient(items)
 
     result = client.strip_field_from_items(KP2BW_ID_FIELD_NAME)
 
@@ -101,15 +105,15 @@ def assert_declined_confirmation_aborts_without_touching_vault() -> None:
 
     from kp2bw import cli
 
-    def _must_not_build(*_args: object, **_kwargs: object) -> object:
+    def must_not_build(*args: object, **kwargs: object) -> object:
         raise AssertionError("client built despite a declined confirmation")
 
     with (
         mock.patch("builtins.input", return_value="n"),
-        mock.patch.object(cli, "BitwardenServeClient", _must_not_build),
+        mock.patch.object(cli, "BitwardenServeClient", must_not_build),
     ):
         try:
-            cli._run_strip_ids(
+            cli.run_strip_ids(
                 bitwarden_password_arg="bw-pw",
                 org_id=None,
                 collection_id=None,
@@ -134,29 +138,29 @@ def assert_yes_skips_confirmation_prompt() -> None:
     from kp2bw import cli
     from kp2bw.bw_serve import StripResult
 
-    class _FakeClient:
+    class FakeClient:
         """Minimal context-manager stand-in exposing the one method called."""
 
         def __enter__(self) -> Self:
             return self
 
-        def __exit__(self, *_exc: object) -> None:
+        def __exit__(self, *exc: object) -> None:
             return None
 
-        def strip_field_from_items(self, *_field_names: str) -> StripResult:
+        def strip_field_from_items(self, *field_names: str) -> StripResult:
             return StripResult(scanned=3, stripped=0)
 
-    def _must_not_prompt(*_args: object, **_kwargs: object) -> str:
+    def must_not_prompt(*args: object, **kwargs: object) -> str:
         raise AssertionError("prompted despite -y (skip_confirm=True)")
 
-    def _make_client(*_args: object, **_kwargs: object) -> _FakeClient:
-        return _FakeClient()
+    def make_client(*args: object, **kwargs: object) -> FakeClient:
+        return FakeClient()
 
     with (
-        mock.patch("builtins.input", _must_not_prompt),
-        mock.patch.object(cli, "BitwardenServeClient", _make_client),
+        mock.patch("builtins.input", must_not_prompt),
+        mock.patch.object(cli, "BitwardenServeClient", make_client),
     ):
-        cli._run_strip_ids(
+        cli.run_strip_ids(
             bitwarden_password_arg="bw-pw",
             org_id=None,
             collection_id=None,

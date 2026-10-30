@@ -33,12 +33,12 @@ The fix is to recreate the junctions: a freshly created one is trusted again. In
 
 ```powershell
 Get-ChildItem "$env:APPDATA\uv\python" -Force |
-    Where-Object LinkType -eq 'Junction' |
-    ForEach-Object {
-        $target = $_.Target
-        $_.Delete()
-        New-Item -ItemType Junction -Path $_.FullName -Target $target | Out-Null
-    }
+  Where-Object LinkType -eq 'Junction' |
+  ForEach-Object {
+    $target = $_.Target
+    $_.Delete()
+    New-Item -ItemType Junction -Path $_.FullName -Target $target | Out-Null
+  }
 ```
 
 Then re-run the command that failed. If the error returns after a Windows update or a new `uv python install`, run the
@@ -93,7 +93,7 @@ use the same CLI for the manual login step too:
 
 ```shell
 npm install -g @bitwarden/cli@<version>
-bw --version                                  # confirm the pinned one is active
+bw --version                                  # confirm the installed version
 bw config server https://vault.example.com
 bw login <user>                               # uses the legacy prelogin route
 ```

@@ -31,22 +31,8 @@ class ResilienceTestConverter(Converter):
             import_tags=None,
         )
 
-    def resolve_collection_safely(
-        self,
-        bw: BitwardenServeClient,
-        bw_item: BwItemCreate,
-        folder: str | None,
-        firstlevel: str | None,
-    ) -> bool:
-        """Public shim for the guarded collection resolution."""
-        return self._resolve_collection_safely(bw, bw_item, folder, firstlevel)
 
-    def sync_safely(self, bw: BitwardenServeClient) -> None:
-        """Public shim for the guarded pre-attachment sync."""
-        self._sync_safely(bw)
-
-
-class _FakeBw:
+class FakeBw:
     """Client double whose org-collection create and sync can be scripted to fail."""
 
     def __init__(
@@ -56,38 +42,38 @@ class _FakeBw:
         fail_sync: bool = False,
         coll_id: str = "coll-1",
     ) -> None:
-        self._fail_collection = fail_collection
-        self._fail_sync = fail_sync
-        self._coll_id = coll_id
+        self.fail_collection = fail_collection
+        self.fail_sync = fail_sync
+        self.coll_id = coll_id
         self.calls: list[str] = []
         self.sync_attempts = 0
 
     def create_org_collection(self, name: str) -> str | None:
         self.calls.append(name)
-        if self._fail_collection:
+        if self.fail_collection:
             raise BitwardenClientError(f"simulated collection POST failure: {name}")
-        return self._coll_id
+        return self.coll_id
 
     def sync(self) -> None:
         self.sync_attempts += 1
-        if self._fail_sync:
+        if self.fail_sync:
             raise BitwardenClientError("simulated sync failure")
 
 
-def _bw_item() -> BwItemCreate:
+def make_bw_item() -> BwItemCreate:
     return cast(BwItemCreate, {"name": "Account", "collectionIds": []})
 
 
-def _as_bw(fake: _FakeBw) -> BitwardenServeClient:
+def as_bw(fake: FakeBw) -> BitwardenServeClient:
     return cast(BitwardenServeClient, fake)
 
 
 def assert_collection_failure_is_non_fatal() -> None:
     """A dropped org-collection POST must not propagate; the entry is skipped."""
     conv = ResilienceTestConverter()
-    bw = _FakeBw(fail_collection=True)
-    bw_item = _bw_item()
-    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team/Servers", "Team")
+    bw = FakeBw(fail_collection=True)
+    bw_item = make_bw_item()
+    ok = conv.resolve_collection_safely(as_bw(bw), bw_item, "Team/Servers", "Team")
     if ok:
         raise AssertionError("a failed collection resolution must report False")
     if bw_item.get("collectionIds"):
@@ -96,9 +82,9 @@ def assert_collection_failure_is_non_fatal() -> None:
 
 def assert_collection_success_assigns_and_reports_true() -> None:
     conv = ResilienceTestConverter()
-    bw = _FakeBw(coll_id="coll-9")
-    bw_item = _bw_item()
-    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team/Servers", "Team")
+    bw = FakeBw(coll_id="coll-9")
+    bw_item = make_bw_item()
+    ok = conv.resolve_collection_safely(as_bw(bw), bw_item, "Team/Servers", "Team")
     if not ok:
         raise AssertionError("a successful resolution must report True")
     if bw.calls != ["Team"]:
@@ -113,9 +99,9 @@ def assert_collection_success_assigns_and_reports_true() -> None:
 
 def assert_nested_collection_uses_full_folder_path() -> None:
     conv = ResilienceTestConverter(coll_id="nested")
-    bw = _FakeBw(coll_id="coll-nested")
-    bw_item = _bw_item()
-    ok = conv.resolve_collection_safely(_as_bw(bw), bw_item, "Team/Servers", "Team")
+    bw = FakeBw(coll_id="coll-nested")
+    bw_item = make_bw_item()
+    ok = conv.resolve_collection_safely(as_bw(bw), bw_item, "Team/Servers", "Team")
     if not ok:
         raise AssertionError("a successful nested resolution must report True")
     if bw.calls != ["Team/Servers"]:
@@ -136,8 +122,8 @@ def assert_pre_attachment_sync_failure_is_non_fatal() -> None:
     a run whose items already landed.
     """
     conv = ResilienceTestConverter()
-    bw = _FakeBw(fail_sync=True)
-    conv.sync_safely(_as_bw(bw))  # must not raise
+    bw = FakeBw(fail_sync=True)
+    conv.sync_safely(as_bw(bw))  # must not raise
     if bw.sync_attempts != 1:
         raise AssertionError(
             f"sync_safely must attempt the sync once, got {bw.sync_attempts}"

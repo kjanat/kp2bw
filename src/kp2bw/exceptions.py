@@ -12,3 +12,23 @@ class BitwardenHttpError(BitwardenClientError):
 
 class ConversionError(Exception):
     """Raised when a KeePass to Bitwarden conversion operation fails."""
+
+
+class BitwardenAttachmentMissingError(BitwardenHttpError):
+    """The CLI reached attachment storage, which reported a missing file body."""
+
+
+class FieldLimitError(ConversionError):
+    """Raised when a final item exceeds a destination field budget."""
+
+
+class BitwardenServeExitedError(ConversionError):
+    """Fatal transport loss; per-item failure handlers must not swallow it."""
+
+
+class HistoryConversionError(ConversionError):
+    """History cannot be preserved under the requested migration policy."""
+
+
+class FixupDataError(ConversionError):
+    """A legacy item representation cannot be upgraded losslessly."""

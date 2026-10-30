@@ -19,7 +19,7 @@ from Cryptodome.PublicKey import RSA
 from Cryptodome.Util.Padding import pad
 
 
-def _b64(value: bytes) -> str:
+def b64(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
@@ -38,9 +38,7 @@ def create_scope_organization(
         master = hashlib.pbkdf2_hmac(
             "sha256", password.encode(), email.lower().encode(), kdf["kdfIterations"]
         )
-        password_hash = _b64(
-            hashlib.pbkdf2_hmac("sha256", master, password.encode(), 1)
-        )
+        password_hash = b64(hashlib.pbkdf2_hmac("sha256", master, password.encode(), 1))
         login = api.post(
             "/identity/connect/token",
             data={
@@ -62,7 +60,7 @@ def create_scope_organization(
         keys.raise_for_status()
         public_key = RSA.import_key(base64.b64decode(keys.json()["publicKey"]))
         org_key = os.urandom(64)
-        encrypted_key = "4." + _b64(
+        encrypted_key = "4." + b64(
             PKCS1_OAEP.new(public_key, hashAlgo=SHA1).encrypt(org_key)
         )
         iv = os.urandom(16)
@@ -71,7 +69,7 @@ def create_scope_organization(
             pad(b"Scope A", 16)
         )
         mac = hmac.digest(org_key[32:], iv + ciphertext, "sha256")
-        collection_name = "2." + "|".join(map(_b64, (iv, ciphertext, mac)))
+        collection_name = "2." + "|".join(map(b64, (iv, ciphertext, mac)))
         response = api.post(
             "/api/organizations",
             json={

@@ -1,4 +1,5 @@
 import getpass
+import json
 import logging
 import os
 import platform
@@ -8,22 +9,26 @@ from argparse import ArgumentParser, BooleanOptionalAction, HelpFormatter, Names
 from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
+from uuid import UUID
 
 from dotenv import dotenv_values, find_dotenv
 from rich.logging import RichHandler
 from rich.markup import escape
 
 from . import VERBOSE, __title__, __version__
-from ._console import console
 from .bw_serve import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
     BitwardenServeClient,
     ensure_bw_available,
 )
-from .convert import Converter, collect_keepass_uris
+from .console import console
+from .convert import COLLECTION_FOLDER_MODES, Converter, collect_keepass_uris
 from .doctor import collect_report, redact_report, render_report
 from .exceptions import BitwardenClientError, ConversionError
+from .fixups import FixupOptions, run_fixups
+from .ssh_mapping import parse_ssh_rules
+from .templates import parse_template_overrides
 from .uri_mapping import (
     UriMatchValue,
     collision_groups,
@@ -38,14 +43,14 @@ logger = logging.getLogger(__name__)
 CLI_DOCS_URL: str = "https://kjanat.github.io/kp2bw/docs/"
 
 
-def _cli_docs_link(*, terminal: bool) -> str:
+def cli_docs_link(*, terminal: bool) -> str:
     """Return clickable docs text for terminals and a plain URL for pipes."""
     if not terminal:
         return CLI_DOCS_URL
     return f"\x1b]8;;{CLI_DOCS_URL}\x1b\\CLI reference\x1b]8;;\x1b\\"
 
 
-def _supports_osc8() -> bool:
+def supports_osc8() -> bool:
     """Return whether stdout is a terminal expected to render hyperlinks."""
     return sys.stdout.isatty() and os.environ.get("TERM", "") != "dumb"
 
@@ -60,7 +65,7 @@ class MyArgParser(ArgumentParser):
         sys.exit(2)
 
 
-class _NoBreakHelpFormatter(HelpFormatter):
+class NoBreakHelpFormatter(HelpFormatter):
     """Wrap help without splitting URLs or terminal escape sequences."""
 
     def _fill_text(self, text: str, width: int, indent: str) -> str:
@@ -77,7 +82,7 @@ class _NoBreakHelpFormatter(HelpFormatter):
         )
 
 
-def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
+def parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
     """Parse an environment variable string into a boolean, or ``None`` if unset."""
     if value is None:
         return None
@@ -97,7 +102,7 @@ def _parse_bool_env(value: str | None, *, env_var: str) -> bool | None:
     )
 
 
-def _split_csv_env(value: str | None) -> list[str] | None:
+def split_csv_env(value: str | None) -> list[str] | None:
     """Split a comma-separated environment variable into a list of trimmed strings."""
     if value is None:
         return None
@@ -106,14 +111,14 @@ def _split_csv_env(value: str | None) -> list[str] | None:
     return tags or None
 
 
-def _with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
+def with_env[T](arg_value: T | None, env_var: str) -> T | str | None:
     """Return *arg_value* if set, otherwise fall back to the named environment variable."""
     if arg_value is not None:
         return arg_value
     return os.environ.get(env_var)
 
 
-def _resolve_bool_option(arg_val: bool | None, env_var: str, *, default: bool) -> bool:
+def resolve_bool_option(arg_val: bool | None, env_var: str, *, default: bool) -> bool:
     """Resolve a boolean option through CLI > env var > default precedence.
 
     Raises :exc:`ValueError` when the environment variable holds an unrecognised
@@ -121,11 +126,11 @@ def _resolve_bool_option(arg_val: bool | None, env_var: str, *, default: bool) -
     """
     if arg_val is not None:
         return arg_val
-    parsed = _parse_bool_env(os.environ.get(env_var), env_var=env_var)
+    parsed = parse_bool_env(os.environ.get(env_var), env_var=env_var)
     return parsed if parsed is not None else default
 
 
-def _load_dotenv() -> str | None:
+def load_dotenv() -> str | None:
     """Load a ``.env`` file (searched upward from the CWD) into ``os.environ``.
 
     Returns the path that was loaded, or ``None`` when no ``.env`` is found.
@@ -150,7 +155,7 @@ def _load_dotenv() -> str | None:
     return dotenv_path
 
 
-def _argparser() -> MyArgParser:
+def argparser() -> MyArgParser:
     """Build and return the CLI argument parser with all flags and env-var support."""
     # Pin prog to the package name (single source: pyproject [project].name,
     # surfaced as __title__). Python 3.14 argparse otherwise derives prog from
@@ -161,8 +166,8 @@ def _argparser() -> MyArgParser:
         prog=__title__,
         usage="%(prog)s [OPTIONS] [FILE]",
         description="Import KeePass into Bitwarden.",
-        epilog=f"Documentation: {_cli_docs_link(terminal=_supports_osc8())}",
-        formatter_class=_NoBreakHelpFormatter,
+        epilog=f"Documentation: {cli_docs_link(terminal=supports_osc8())}",
+        formatter_class=NoBreakHelpFormatter,
     )
 
     parser.add_argument(
@@ -293,6 +298,18 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--entry-id",
+        metavar="UUID",
+        type=lambda value: str(UUID(value)),
+        help="Sync only this KeePass entry UUID.",
+    )
+    parser.add_argument(
+        "--item-id",
+        metavar="UUID",
+        type=lambda value: str(UUID(value)),
+        help="Sync only this existing Bitwarden item UUID.",
+    )
+    parser.add_argument(
         "--force-update",
         dest="force_update",
         help="Overwrite items changed in Bitwarden.",
@@ -300,10 +317,52 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--ssh-map",
+        metavar="JSON",
+        help="Explicit group, template or field mappings for native SSH items.",
+        default=None,
+    )
+    parser.add_argument(
+        "--map-templates",
+        help="Map referenced KeePass templates to cards, identities and secure notes.",
+        action=BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--preview",
+        choices=("text", "json"),
+        nargs="?",
+        const="text",
+        help="Describe the source migration without Bitwarden credentials or writes.",
+    )
+    parser.add_argument(
+        "--preview-target",
+        action="store_true",
+        help="With --preview: inspect the destination vault without modifying it.",
+    )
+    parser.add_argument(
+        "--template-map",
+        metavar="JSON",
+        help="Template UUID and field overrides (requires --map-templates).",
+        default=None,
+    )
+    parser.add_argument(
         "--include-oversize-secrets",
         dest="include_oversize_secrets",
         help="Store oversized secrets as plaintext attachments.",
         action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--archive-history",
+        help="Archive full KeePass history, including historical secrets, as an attachment.",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--password-history",
+        help="Import up to five distinct previous KeePass passwords (default: on).",
+        action=BooleanOptionalAction,
         default=None,
     )
     parser.add_argument(
@@ -329,11 +388,23 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--checkpoint",
+        metavar="PATH",
+        default=None,
+        help="Save verified attachment mappings for resumable migration.",
+    )
+    parser.add_argument(
         "--strip-ids",
         dest="strip_ids",
         help="Remove kp2bw tracking fields, then exit. Irreversible.",
         action="store_true",
         default=None,
+    )
+    parser.add_argument(
+        "--fixup",
+        action="store_true",
+        default=None,
+        help="Upgrade known legacy Bitwarden fields without KeePass.",
     )
     parser.add_argument(
         "--migrate-uris",
@@ -378,7 +449,7 @@ def _argparser() -> MyArgParser:
     return parser
 
 
-def _read_password(arg: str | None, prompt: str) -> str:
+def read_password(arg: str | None, prompt: str) -> str:
     """Return *arg* if provided, otherwise prompt interactively for a password."""
     if not arg:
         arg = getpass.getpass(prompt=prompt)
@@ -386,13 +457,13 @@ def _read_password(arg: str | None, prompt: str) -> str:
     return arg
 
 
-def _fail(exc: BaseException) -> NoReturn:
+def fail(exc: BaseException) -> NoReturn:
     """Print an actionable error and exit non-zero, without a stack trace."""
     console.print(f"[red]ERROR:[/red] {escape(str(exc))}")
     sys.exit(1)
 
 
-def _confirm(prompt: str) -> bool:
+def confirm(prompt: str) -> bool:
     """Prompt for a y/n answer, looping until valid; True only on explicit yes."""
     answer: str | None = None
     while answer not in {"y", "n"}:
@@ -400,7 +471,7 @@ def _confirm(prompt: str) -> bool:
     return answer == "y"
 
 
-def _describe_scope(org_id: str | None, collection_id: str | None) -> str:
+def describe_scope(org_id: str | None, collection_id: str | None) -> str:
     """Human-readable description of the vault scope a strip run will touch."""
     if collection_id:
         return f"collection {collection_id} (organization {org_id})"
@@ -409,7 +480,7 @@ def _describe_scope(org_id: str | None, collection_id: str | None) -> str:
     return "your personal vault"
 
 
-def _run_strip_ids(
+def run_strip_ids(
     *,
     bitwarden_password_arg: str | None,
     org_id: str | None,
@@ -429,13 +500,13 @@ def _run_strip_ids(
     before any change; ``-y``/``--yes`` skips it for callers who know what they
     want.  Errors surface as an actionable message rather than a traceback.
     """
-    scope = _describe_scope(org_id, collection_id)
+    scope = describe_scope(org_id, collection_id)
     try:
         if not skip_confirm:
             console.print(
                 f"[bold yellow]Warning:[/bold yellow] this removes the "
                 f"[bold]{KP2BW_ID_FIELD_NAME}[/bold] and "
-                f"[bold]{KP2BW_SYNC_FIELD_NAME}[/bold] fields from every "
+                f"[bold]{KP2BW_SYNC_FIELD_NAME}[/bold] fields and attachment associations from every "
                 f"kp2bw-migrated item in [bold]{escape(scope)}[/bold]. Other "
                 "vault data is untouched, but this [bold]cannot be undone[/bold] "
                 "and makes future migration re-runs unreliable: without the "
@@ -444,13 +515,13 @@ def _run_strip_ids(
                 "this once you are finished migrating and ready to fully adopt "
                 "Bitwarden."
             )
-            if not _confirm(
+            if not confirm(
                 f"Remove {KP2BW_ID_FIELD_NAME}/{KP2BW_SYNC_FIELD_NAME} stamps? [y/n]: "
             ):
                 console.print("[yellow]Aborted; nothing changed.[/yellow]")
                 sys.exit(0)
 
-        bw_pw = _read_password(
+        bw_pw = read_password(
             bitwarden_password_arg, "Please enter your Bitwarden password: "
         )
         with BitwardenServeClient(
@@ -463,7 +534,7 @@ def _run_strip_ids(
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
     except (BitwardenClientError, ConversionError) as exc:
-        _fail(exc)
+        fail(exc)
 
     if result.stripped:
         console.print(
@@ -477,7 +548,7 @@ def _run_strip_ids(
         )
 
 
-def _run_migrate_uris(
+def run_migrate_uris(
     *,
     bitwarden_password_arg: str | None,
     org_id: str | None,
@@ -494,7 +565,7 @@ def _run_migrate_uris(
     field's data survives as a URI), so the confirmation is skippable with ``-y``.
     Errors surface as an actionable message rather than a traceback.
     """
-    scope = _describe_scope(org_id, collection_id)
+    scope = describe_scope(org_id, collection_id)
     try:
         if not skip_confirm:
             console.print(
@@ -502,11 +573,11 @@ def _run_migrate_uris(
                 f"custom fields into login URIs on items in [bold]{escape(scope)}[/bold] "
                 "(the field data is preserved as a URI, then the field removed)."
             )
-            if not _confirm("Migrate URL fields to URIs? [y/n]: "):
+            if not confirm("Migrate URL fields to URIs? [y/n]: "):
                 console.print("[yellow]Aborted; nothing changed.[/yellow]")
                 sys.exit(0)
 
-        bw_pw = _read_password(
+        bw_pw = read_password(
             bitwarden_password_arg, "Please enter your Bitwarden password: "
         )
         with BitwardenServeClient(
@@ -519,7 +590,7 @@ def _run_migrate_uris(
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
     except (BitwardenClientError, ConversionError) as exc:
-        _fail(exc)
+        fail(exc)
 
     if result.migrated:
         console.print(
@@ -539,7 +610,46 @@ def _run_migrate_uris(
         )
 
 
-def _print_uri_report(uris: list[str], source: str) -> None:
+def run_fixup(
+    password_arg: str | None,
+    *,
+    org_id: str | None,
+    collection_id: str | None,
+    skip_confirm: bool,
+    uri_match: UriMatchValue,
+    interpret_uri_syntax: bool,
+) -> None:
+    try:
+        if not skip_confirm:
+            console.print(
+                f"Upgrade known legacy URL and metadata fields in {escape(describe_scope(org_id, collection_id))}."
+            )
+            if not confirm("Apply fixups? [y/n]: "):
+                console.print("Aborted; nothing changed.")
+                return
+        password = read_password(password_arg, "Please enter your Bitwarden password: ")
+        with BitwardenServeClient(
+            password, org_id=org_id, collection_id=collection_id
+        ) as bw:
+            result = run_fixups(
+                bw,
+                org_id=org_id,
+                collection_id=collection_id,
+                options=FixupOptions(uri_match, interpret_uri_syntax),
+            )
+    except KeyboardInterrupt:
+        console.print("Interrupted.")
+        sys.exit(130)
+    except (BitwardenClientError, ConversionError) as exc:
+        fail(exc)
+    console.print(
+        f"Fixup: {result.scanned} scanned, {result.migrated} migrated, {result.skipped} skipped, {result.failed} failed."
+    )
+    if result.failed:
+        sys.exit(1)
+
+
+def print_uri_report(uris: list[str], source: str) -> None:
     """Print the read-only URI collision report to stdout (changes nothing).
 
     Groups hosts by registrable domain and lists the multi-host groups -- the
@@ -562,7 +672,7 @@ def _print_uri_report(uris: list[str], source: str) -> None:
         print(f"{base} ({len(hosts)}): " + ", ".join(hosts))
 
 
-def _run_report_uris_bitwarden(
+def run_report_uris_bitwarden(
     *,
     bitwarden_password_arg: str | None,
     org_id: str | None,
@@ -573,7 +683,7 @@ def _run_report_uris_bitwarden(
     Read-only Bitwarden mode (no KeePass): lists in-scope items, gathers their
     login URIs, and reports the base-domain collisions. Scope follows ``-o``/``-c``.
     """
-    bw_pw = _read_password(
+    bw_pw = read_password(
         bitwarden_password_arg, "Please enter your Bitwarden password: "
     )
     try:
@@ -585,7 +695,7 @@ def _run_report_uris_bitwarden(
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
     except (BitwardenClientError, ConversionError) as exc:
-        _fail(exc)
+        fail(exc)
 
     uris: list[str] = []
     for item in items:
@@ -596,14 +706,14 @@ def _run_report_uris_bitwarden(
             value = entry.get("uri")
             if value:
                 uris.append(value)
-    _print_uri_report(uris, "bitwarden")
+    print_uri_report(uris, "bitwarden")
 
 
 # Third-party loggers whose DEBUG/INFO chatter is valuable in the always-on file
 # log but noise on the console. The loggers stay at DEBUG (so the file keeps
 # everything); console handlers attach a ConsoleNoiseFilter to drop their
 # sub-WARNING records, keeping file completeness and console verbosity decoupled.
-_NOISY_LOGGERS: frozenset[str] = frozenset({"httpx", "httpcore"})
+NOISY_LOGGERS: frozenset[str] = frozenset({"httpx", "httpcore"})
 
 
 class ConsoleNoiseFilter(logging.Filter):
@@ -616,16 +726,16 @@ class ConsoleNoiseFilter(logging.Filter):
     request lines while httpcore connection spam stays file-only.
     """
 
-    def __init__(self, muted: frozenset[str] = _NOISY_LOGGERS) -> None:
+    def __init__(self, muted: frozenset[str] = NOISY_LOGGERS) -> None:
         super().__init__()
-        self._muted = muted
+        self.muted = muted
 
     def filter(self, record: logging.LogRecord) -> bool:
         root_name = record.name.split(".", 1)[0]
-        return not (root_name in self._muted and record.levelno < logging.WARNING)
+        return not (root_name in self.muted and record.levelno < logging.WARNING)
 
 
-def _resolve_log_path() -> Path:
+def resolve_log_path() -> Path:
     """Return the file path for this run's debug log.
 
     ``KP2BW_LOG_FILE`` overrides everything; otherwise ``KP2BW_LOG_DIR`` or a
@@ -654,12 +764,12 @@ def _resolve_log_path() -> Path:
     return log_dir / f"kp2bw-{datetime.now().astimezone():%Y%m%d-%H%M%S}.log"
 
 
-def _configure_logging(*, verbose: bool, debug: bool) -> Path | None:
+def configure_logging(*, verbose: bool, debug: bool) -> Path | None:
     """Configure console + always-on file logging; return the log path.
 
     Console verbosity follows the flags (INFO default, VERBOSE with ``-v``, full
     DEBUG with ``-d``).  A file handler is *always* attached at DEBUG, and the
-    transport loggers (``httpx``/``httpcore``) are pinned to DEBUG too, so the
+    transport loggers (``httpx``/``httpcore``) use DEBUG too, so the
     file captures a complete trace -- per-entry detail plus full request and
     connection logs -- regardless of console verbosity.  The console stays clean
     because each console handler filters that noise out itself
@@ -703,7 +813,7 @@ def _configure_logging(*, verbose: bool, debug: bool) -> Path | None:
     root.addHandler(console_handler)
 
     try:
-        log_path = _resolve_log_path()
+        log_path = resolve_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
@@ -722,10 +832,12 @@ def main() -> None:
     """Entry point: parse arguments, resolve env vars, and run the converter."""
     # Load .env before reading any environment variable so file-provided values
     # are visible to the resolution below; a real shell env var still wins.
-    dotenv_path = _load_dotenv()
+    dotenv_path = load_dotenv()
 
-    args: Namespace = _argparser().parse_args()
+    args: Namespace = argparser().parse_args()
 
+    if (args.entry_id or args.item_id) and args.doctor:
+        argparser().error("Item selection cannot be combined with --doctor")
     if args.doctor:
         report = collect_report()
         if args.redact:
@@ -735,76 +847,109 @@ def main() -> None:
         sys.exit(0 if report.healthy else 1)
 
     # string options: CLI > env > None/default
-    args.keepass_file = _with_env(args.keepass_file, "KP2BW_KEEPASS_FILE")
-    args.kp_pw = _with_env(args.kp_pw, "KP2BW_KEEPASS_PASSWORD")
-    args.kp_keyfile = _with_env(args.kp_keyfile, "KP2BW_KEEPASS_KEYFILE")
-    args.bw_pw = _with_env(args.bw_pw, "KP2BW_BITWARDEN_PASSWORD")
-    args.bw_org = _with_env(args.bw_org, "KP2BW_BITWARDEN_ORG")
-    args.bw_coll = _with_env(args.bw_coll, "KP2BW_BITWARDEN_COLLECTION")
-    args.import_tags = args.import_tags or _split_csv_env(
+    args.keepass_file = with_env(args.keepass_file, "KP2BW_KEEPASS_FILE")
+    args.kp_pw = with_env(args.kp_pw, "KP2BW_KEEPASS_PASSWORD")
+    args.kp_keyfile = with_env(args.kp_keyfile, "KP2BW_KEEPASS_KEYFILE")
+    args.bw_pw = with_env(args.bw_pw, "KP2BW_BITWARDEN_PASSWORD")
+    args.bw_org = with_env(args.bw_org, "KP2BW_BITWARDEN_ORG")
+    args.bw_coll = with_env(args.bw_coll, "KP2BW_BITWARDEN_COLLECTION")
+    args.import_tags = args.import_tags or split_csv_env(
         os.environ.get("KP2BW_IMPORT_TAGS")
     )
 
     # bool/int options: CLI > env > code default
     try:
-        path_to_name = _resolve_bool_option(
+        path_to_name = resolve_bool_option(
             args.path_to_name, "KP2BW_PATH_TO_NAME", default=False
         )
-        skip_expired = _resolve_bool_option(
+        skip_expired = resolve_bool_option(
             args.skip_expired, "KP2BW_SKIP_EXPIRED", default=False
         )
-        include_recyclebin = _resolve_bool_option(
+        include_recyclebin = resolve_bool_option(
             args.include_recyclebin, "KP2BW_INCLUDE_RECYCLE_BIN", default=False
         )
-        migrate_metadata = _resolve_bool_option(
+        migrate_metadata = resolve_bool_option(
             args.migrate_metadata, "KP2BW_MIGRATE_METADATA", default=True
         )
-        update_existing = _resolve_bool_option(
+        update_existing = resolve_bool_option(
             args.update_existing, "KP2BW_UPDATE", default=True
         )
-        force_update = _resolve_bool_option(
+        force_update = resolve_bool_option(
             args.force_update, "KP2BW_FORCE_UPDATE", default=False
         )
-        include_oversize_secrets = _resolve_bool_option(
+        ssh_rules = ()
+        if ssh_map_path := with_env(args.ssh_map, "KP2BW_SSH_MAP"):
+            try:
+                ssh_rules = parse_ssh_rules(
+                    json.loads(Path(ssh_map_path).read_text(encoding="utf-8"))
+                )
+            except OSError, UnicodeError, json.JSONDecodeError:
+                raise ValueError("Could not read SSH map as UTF-8 JSON") from None
+            except ConversionError as exc:
+                raise ValueError(str(exc)) from None
+        map_templates = resolve_bool_option(
+            args.map_templates, "KP2BW_MAP_TEMPLATES", default=False
+        )
+        template_map = {}
+        template_map_path = with_env(args.template_map, "KP2BW_TEMPLATE_MAP")
+        if template_map_path:
+            if not map_templates:
+                raise ValueError("--template-map requires --map-templates")
+            try:
+                template_map = parse_template_overrides(
+                    json.loads(Path(template_map_path).read_text(encoding="utf-8"))
+                )
+            except OSError, UnicodeError, json.JSONDecodeError:
+                raise ValueError("Could not read template map as UTF-8 JSON") from None
+            except ConversionError as exc:
+                raise ValueError(str(exc)) from None
+        include_oversize_secrets = resolve_bool_option(
             args.include_oversize_secrets,
             "KP2BW_INCLUDE_OVERSIZE_SECRETS",
             default=False,
         )
+        archive_history = resolve_bool_option(
+            args.archive_history, "KP2BW_ARCHIVE_HISTORY", default=False
+        )
+        migrate_password_history = resolve_bool_option(
+            args.password_history, "KP2BW_PASSWORD_HISTORY", default=True
+        )
         # Personal folders are a personal-vault concept; under --bitwarden-org
         # they duplicate the collection tree, so default them off there. Explicit
         # --folder/--no-folder or KP2BW_CREATE_FOLDERS still wins (issue #33).
-        create_folders = _resolve_bool_option(
+        create_folders = resolve_bool_option(
             args.create_folders,
             "KP2BW_CREATE_FOLDERS",
             default=not args.bw_org,
         )
-        skip_confirm = _resolve_bool_option(
+        skip_confirm = resolve_bool_option(
             args.skip_confirm, "KP2BW_YES", default=False
         )
-        strip_ids = _resolve_bool_option(
+        strip_ids = resolve_bool_option(
             args.strip_ids, "KP2BW_STRIP_IDS", default=False
         )
-        migrate_uris = _resolve_bool_option(
+        fixup = resolve_bool_option(args.fixup, "KP2BW_FIXUP", default=False)
+        migrate_uris = resolve_bool_option(
             args.migrate_uris, "KP2BW_MIGRATE_URIS", default=False
         )
-        raw_report = _with_env(args.report_uris, "KP2BW_REPORT_URIS")
+        raw_report = with_env(args.report_uris, "KP2BW_REPORT_URIS")
         report_uris = raw_report.strip().lower() if raw_report else None
         if report_uris not in (None, "keepass", "bitwarden"):
             raise ValueError(
                 f"Invalid KP2BW_REPORT_URIS={raw_report!r}; use 'keepass' or 'bitwarden'"
             )
-        interpret_uri_syntax = _resolve_bool_option(
+        interpret_uri_syntax = resolve_bool_option(
             args.interpret_uri_syntax, "KP2BW_INTERPRET_URI_SYNTAX", default=True
         )
-        totp_pps = _resolve_bool_option(args.totp_pps, "KP2BW_TOTP_PPS", default=False)
+        totp_pps = resolve_bool_option(args.totp_pps, "KP2BW_TOTP_PPS", default=False)
         uri_match: UriMatchValue = parse_match_name(
-            _with_env(args.uri_match, "KP2BW_URI_MATCH") or "default"
+            with_env(args.uri_match, "KP2BW_URI_MATCH") or "default"
         )
-        verbose = _resolve_bool_option(args.verbose, "KP2BW_VERBOSE", default=False)
-        debug = _resolve_bool_option(args.debug, "KP2BW_DEBUG", default=False)
+        verbose = resolve_bool_option(args.verbose, "KP2BW_VERBOSE", default=False)
+        debug = resolve_bool_option(args.debug, "KP2BW_DEBUG", default=False)
     except ValueError as exc:
         _ = sys.stderr.write(f"ERROR: {exc}\n\n")
-        _argparser().print_help()
+        argparser().print_help()
         sys.exit(2)
 
     path_to_name_skip = args.path_to_name_skip
@@ -819,25 +964,41 @@ def main() -> None:
                 _ = sys.stderr.write(
                     f"ERROR: Invalid integer value for KP2BW_PATH_TO_NAME_SKIP: {env_skip!r}\n\n"
                 )
-                _argparser().print_help()
+                argparser().print_help()
                 sys.exit(2)
 
     # Bitwarden-only modes read no KeePass database, so the path requirement
     # (and the KeePass password prompt below) is skipped for them.
-    bitwarden_only = strip_ids or migrate_uris or report_uris == "bitwarden"
+    if args.preview_target and not args.preview:
+        argparser().error("--preview-target requires --preview")
+    if args.preview and (fixup or strip_ids or migrate_uris or report_uris):
+        argparser().error(
+            "--preview cannot be combined with maintenance or URI reports"
+        )
+    if args.preview and args.item_id and not args.preview_target:
+        argparser().error("--item-id requires --preview-target when previewing")
+    if (args.entry_id or args.item_id) and (
+        fixup or strip_ids or migrate_uris or report_uris
+    ):
+        argparser().error("Item selection is only available for migration")
+    if fixup and (strip_ids or migrate_uris or report_uris):
+        argparser().error("--fixup cannot be combined with another maintenance mode")
+    if fixup and args.bw_coll in {"auto", "nested"}:
+        argparser().error("--fixup requires a fixed collection ID")
+    bitwarden_only = fixup or strip_ids or migrate_uris or report_uris == "bitwarden"
     if not bitwarden_only and not args.keepass_file:
         _ = sys.stderr.write(
             "ERROR: KeePass database path is required "
             "(positional FILE or KP2BW_KEEPASS_FILE)\n\n"
         )
-        _argparser().print_help()
+        argparser().print_help()
         sys.exit(2)
 
     if args.bw_coll and not args.bw_org:
         _ = sys.stderr.write(
             "ERROR: --bitwarden-collection requires --bitwarden-org\n\n"
         )
-        _argparser().print_help()
+        argparser().print_help()
         sys.exit(2)
 
     # logging
@@ -845,7 +1006,7 @@ def main() -> None:
     #   -v      : VERBOSE for kp2bw     — per-entry detail on console
     #   -d      : DEBUG for everything  — raw format, httpx included on console
     # A full-detail DEBUG log is always written to a file regardless of the above.
-    log_path = _configure_logging(verbose=verbose, debug=debug)
+    log_path = configure_logging(verbose=verbose, debug=debug)
     if dotenv_path:
         logger.info(f"Loaded environment from {dotenv_path}")
     if log_path is not None:
@@ -859,9 +1020,7 @@ def main() -> None:
     # --report-uris keepass reads only the KeePass database (no Bitwarden, no bw
     # CLI), so it short-circuits before the bw availability check.
     if report_uris == "keepass":
-        kp_pw = _read_password(
-            args.kp_pw, "Please enter your KeePass 2.x db password: "
-        )
+        kp_pw = read_password(args.kp_pw, "Please enter your KeePass 2.x db password: ")
         assert args.keepass_file is not None
         try:
             uris = collect_keepass_uris(
@@ -872,24 +1031,36 @@ def main() -> None:
                 interpret_uri_syntax=interpret_uri_syntax,
             )
         except (ConversionError, OSError, ValueError) as exc:
-            _fail(exc)
-        _print_uri_report(uris, "keepass")
+            fail(exc)
+        print_uri_report(uris, "keepass")
         return
 
     # Verify the Bitwarden CLI is available before prompting for secrets, so the
     # user isn't asked for passwords only to hit a missing-`bw` failure later.
-    try:
-        ensure_bw_available()
-    except BitwardenClientError as exc:
-        _fail(exc)
+    if not args.preview or args.preview_target:
+        try:
+            ensure_bw_available()
+        except BitwardenClientError as exc:
+            fail(exc)
 
     # --report-uris bitwarden reads the live vault (no KeePass) and prints a
     # read-only collision report.
     if report_uris == "bitwarden":
-        _run_report_uris_bitwarden(
+        run_report_uris_bitwarden(
             bitwarden_password_arg=args.bw_pw,
             org_id=args.bw_org,
             collection_id=args.bw_coll,
+        )
+        return
+
+    if fixup:
+        run_fixup(
+            args.bw_pw,
+            org_id=args.bw_org,
+            collection_id=args.bw_coll,
+            skip_confirm=skip_confirm,
+            uri_match=uri_match,
+            interpret_uri_syntax=interpret_uri_syntax,
         )
         return
 
@@ -897,7 +1068,7 @@ def main() -> None:
     # (remove kp2bw's dedup stamps), so it needs neither the bw-setup spiel nor a
     # KeePass password. It handles its own confirmation and Bitwarden password.
     if strip_ids:
-        _run_strip_ids(
+        run_strip_ids(
             bitwarden_password_arg=args.bw_pw,
             org_id=args.bw_org,
             collection_id=args.bw_coll,
@@ -907,7 +1078,7 @@ def main() -> None:
 
     # --migrate-uris is likewise a Bitwarden-only upgrade pass (no KeePass).
     if migrate_uris:
-        _run_migrate_uris(
+        run_migrate_uris(
             bitwarden_password_arg=args.bw_pw,
             org_id=args.bw_org,
             collection_id=args.bw_coll,
@@ -918,7 +1089,7 @@ def main() -> None:
         return
 
     # bw confirmation
-    if not skip_confirm:
+    if not skip_confirm and not args.preview:
         confirm: str | None = None
         print("Do you have bw cli installed and is it set up?")
         print(
@@ -937,10 +1108,14 @@ def main() -> None:
             sys.exit(2)
 
     # stdin password
-    kp_pw: str = _read_password(
+    kp_pw: str = read_password(
         args.kp_pw, "Please enter your KeePass 2.x db password: "
     )
-    bw_pw: str = _read_password(args.bw_pw, "Please enter your Bitwarden password: ")
+    bw_pw: str = (
+        ""
+        if args.preview and not args.preview_target
+        else read_password(args.bw_pw, "Please enter your Bitwarden password: ")
+    )
 
     # The CLI/env validation above guarantees a database path.
     assert args.keepass_file is not None
@@ -962,18 +1137,49 @@ def main() -> None:
         update_existing=update_existing,
         force_update=force_update,
         include_oversize_secrets=include_oversize_secrets,
+        map_templates=map_templates,
+        template_map=template_map,
+        ssh_rules=ssh_rules,
+        archive_history=archive_history,
+        migrate_password_history=migrate_password_history,
         create_folders=create_folders,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,
         totp_pps=totp_pps,
+        checkpoint_path=with_env(args.checkpoint, "KP2BW_CHECKPOINT"),
+        entry_id=args.entry_id,
+        item_id=args.item_id,
     )
     try:
-        failures = c.convert()
+        if args.preview:
+            from .preview import format_preview
+
+            if args.preview_target:
+                with BitwardenServeClient(
+                    bw_pw,
+                    org_id=args.bw_org,
+                    collection_id=None
+                    if args.bw_coll in COLLECTION_FOLDER_MODES
+                    else args.bw_coll,
+                ) as target:
+                    preview = c.preview(target)
+            else:
+                preview = c.preview()
+            print(
+                json.dumps(preview.to_dict(), indent=2)
+                if args.preview == "json"
+                else format_preview(preview)
+            )
+            failures = int(
+                bool(preview.blockers or any(e.blockers for e in preview.entries))
+            )
+        else:
+            failures = c.convert()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)
     except (BitwardenClientError, ConversionError) as exc:
-        _fail(exc)
+        fail(exc)
 
     # Exit non-zero on non-fatal failures (rejected updates/attachment uploads)
     # so wrappers and CI can tell a partial migration from a clean one.

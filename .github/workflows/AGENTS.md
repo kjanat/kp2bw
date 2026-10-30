@@ -12,7 +12,7 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 | Stubs release flow              | `.github/workflows/publish-stubs.yml`      | Triggered by `stubs-v*` tag pushes                       |
 | Docker integration gate         | `.github/workflows/integration-docker.yml` | Reusable workflow; required before main publish          |
 | Windows npm bw.cmd smoke        | `.github/workflows/windows-bw-cmd.yml`     | windows-latest; npm-installs bw and exercises the shim   |
-| Codegen drift check             | `.github/workflows/codegen-check.yml`      | Fails when `_bw_api_types.py` drifts from spec           |
+| Codegen drift check             | `.github/workflows/codegen-check.yml`      | Fails when `bw_api_types.py` drifts from spec            |
 | PR uvx helper comment lifecycle | `.github/actions/pr-test-comment/`         | Composite action; `pr-comment-bot.yml` calls it via `$/` |
 | Version gate logic              | `.github/actions/version-check/`           | Produces `name`, `version`, `pypi_url` output contract   |
 
@@ -22,6 +22,9 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 - Run check jobs through `$/.github/actions/version-check` with `package` and `tag-prefixes` inputs.
 - Preserve workflow output keys from check jobs (`name`, `version`, `pypi_url`) and downstream references.
 - Keep main publish gated by `integration-docker.yml` (`needs: [check, integration]`).
+- Integration runs the script regression adapters before the live matrix.
+- Integration resolves the newest stable server and both CLI packages before testing. Both jobs must pass;
+  the official CLI job also compares golden snapshots. Tools come from `.tool-versions` through mise.
 - Preserve smoke tests from built artifacts before `uv publish`.
 - Stubs build/smoke validation runs without a deployment environment or OIDC write permission. The protected publish
   job is skipped for dry dispatches and consumes the exact validated artifact ID; root workflow `dry` is informational.

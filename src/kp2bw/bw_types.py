@@ -1,6 +1,6 @@
 """Bitwarden API types.
 
-``_bw_api_types`` is auto-generated from ``specs/vault-management-api.json``
+``bw_api_types`` is auto-generated from ``specs/vault-management-api.json``
 via ``scripts/generate-bw-types.sh`` — never edit it by hand.
 
 This module re-exports those types and supplements with three categories of
@@ -18,7 +18,7 @@ things the upstream spec cannot express:
 
 from typing import Literal, NotRequired, TypedDict
 
-from ._bw_api_types import (
+from .bw_api_types import (
     Group,
     ItemCard,
     ItemIdentity,
@@ -37,6 +37,8 @@ __all__ = [
     "BwItemCreate",
     "BwItemLogin",
     "BwItemResponse",
+    "BwPasswordHistory",
+    "BwSshKey",
     "BwUri",
     "Group",
     "ItemCard",
@@ -138,7 +140,22 @@ class BwItemLogin(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-class _BwItemCommon(TypedDict):
+class BwSshKey(TypedDict):
+    """Native SSH item fields, including values older clients cannot derive."""
+
+    privateKey: str
+    publicKey: str
+    keyFingerprint: str
+
+
+class BwPasswordHistory(TypedDict):
+    """Previous password and the instant it stopped being current."""
+
+    password: str
+    lastUsedDate: str | None
+
+
+class BwItemCommon(TypedDict):
     """Fields shared across both the create payload and every API response.
 
     ``notes`` and ``collectionIds`` are typed nullable because ``bw serve``
@@ -147,7 +164,7 @@ class _BwItemCommon(TypedDict):
     them ``NotRequired`` rather than nullable.
 
     ``login`` is intentionally absent from this base: ``BwItemCreate`` declares
-    it required (kp2bw only migrates login-type entries) and ``BwItemResponse``
+    it required for parsed source provenance and ``BwItemResponse``
     declares it ``NotRequired`` (the API omits it on cards, secure notes, and
     identities).  Keeping both declarations in their respective subclasses avoids
     a TypedDict field override, which type checkers cannot represent.
@@ -164,18 +181,23 @@ class _BwItemCommon(TypedDict):
     secureNote: ItemSecureNote | None
     card: ItemCard | None
     identity: ItemIdentity | None
+    sshKey: NotRequired[BwSshKey | None]
+
+    passwordHistory: NotRequired[list[BwPasswordHistory] | None]
 
 
-class BwItemCreate(_BwItemCommon):
+class BwItemCreate(BwItemCommon):
     """Payload for ``POST /object/item`` and ``PUT /object/item/{id}``.
 
-    kp2bw exclusively migrates login-type entries, so ``login`` is required.
+    Parsing retains the source login for REF resolution and provenance, even
+    after explicit template mapping. The transport omits it for native non-login
+    items; their source login data is preserved in a custom field.
     """
 
     login: BwItemLogin
 
 
-class BwItemResponse(_BwItemCommon):
+class BwItemResponse(BwItemCommon):
     """Item returned by ``GET /list/object/items`` and ``POST /object/item``.
 
     Server appends ``id``, ``object``, ``revisionDate`` to the template shape.

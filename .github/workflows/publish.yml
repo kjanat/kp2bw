@@ -46,7 +46,7 @@ jobs:
 
           EOF
             printf 'BUILD_SHA: str | None = "%s"\n' "${sha}"
-          } > src/kp2bw/_build_info.py
+          } > src/kp2bw/build_info.py
       - run: uv build --no-sources
 
       # Check that basic features work and we didn't miss to include crucial files

@@ -77,18 +77,18 @@ MAX_SPEC_DIGITS: int = 8
 # KeePass "HMAC-SHA-*" → the otpauth token Bitwarden matches (case-insensitively
 # against bare "sha1"/"sha256"/"sha512"; a dashed/prefixed value would silently
 # fall back to SHA-1 and generate wrong codes).
-_ALGORITHM_MAP: dict[str, str] = {
+ALGORITHM_MAP: dict[str, str] = {
     "HMAC-SHA-1": "SHA1",
     "HMAC-SHA-256": "SHA256",
     "HMAC-SHA-512": "SHA512",
 }
 
-_OTPAUTH_ALGORITHM_MAP: dict[str, str] = {
+OTPAUTH_ALGORITHM_MAP: dict[str, str] = {
     "SHA1": "SHA1",
     "SHA256": "SHA256",
     "SHA512": "SHA512",
 }
-_OTPAUTH_CODE_PARAMETER_KEYS: frozenset[str] = frozenset({
+OTPAUTH_CODE_PARAMETER_KEYS: frozenset[str] = frozenset({
     "secret",
     "algorithm",
     "digits",
@@ -96,18 +96,18 @@ _OTPAUTH_CODE_PARAMETER_KEYS: frozenset[str] = frozenset({
 })
 
 
-def _decode_utf8(value: str) -> bytes:
+def decode_utf8(value: str) -> bytes:
     """Bare ``TimeOtp-Secret``/``HmacOtp-Secret``: the UTF-8 bytes *are* the key."""
     return value.encode("utf-8")
 
 
-def _decode_hex(value: str) -> bytes:
+def decode_hex(value: str) -> bytes:
     """Decode a hex secret, tolerating common ``:``/``-``/space group separators."""
     cleaned = "".join(value.split()).replace("-", "").replace(":", "")
     return bytes.fromhex(cleaned)
 
 
-def _decode_base32(value: str) -> bytes:
+def decode_base32(value: str) -> bytes:
     """Decode a Base32 secret, tolerating lowercase, spaces and any padding state.
 
     Existing ``=`` padding is stripped before re-padding to a multiple of 8, so
@@ -118,7 +118,7 @@ def _decode_base32(value: str) -> bytes:
     return base64.b32decode(cleaned)
 
 
-def _decode_base64(value: str) -> bytes:
+def decode_base64(value: str) -> bytes:
     """Decode a standard Base64 secret, tolerating whitespace and missing padding."""
     cleaned = "".join(value.split())
     cleaned += "=" * (-len(cleaned) % 4)
@@ -126,7 +126,7 @@ def _decode_base64(value: str) -> bytes:
 
 
 @dataclass(frozen=True)
-class _TotpScheme:
+class TotpScheme:
     """One producer's TOTP custom-field naming, and how its secret is encoded.
 
     ``secret_decoders`` maps each secret key to its decoder in detection-priority
@@ -157,12 +157,12 @@ class _TotpScheme:
         return frozenset(keys)
 
 
-_KEEPASS_TOTP_SCHEME: _TotpScheme = _TotpScheme(
+KEEPASS_TOTP_SCHEME: TotpScheme = TotpScheme(
     secret_decoders=(
-        (KP_TOTP_SECRET_BASE32_KEY, _decode_base32),
-        (KP_TOTP_SECRET_HEX_KEY, _decode_hex),
-        (KP_TOTP_SECRET_BASE64_KEY, _decode_base64),
-        (KP_TOTP_SECRET_UTF8_KEY, _decode_utf8),
+        (KP_TOTP_SECRET_BASE32_KEY, decode_base32),
+        (KP_TOTP_SECRET_HEX_KEY, decode_hex),
+        (KP_TOTP_SECRET_BASE64_KEY, decode_base64),
+        (KP_TOTP_SECRET_UTF8_KEY, decode_utf8),
     ),
     base32_key=KP_TOTP_SECRET_BASE32_KEY,
     length_key=KP_TOTP_LENGTH_KEY,
@@ -170,15 +170,15 @@ _KEEPASS_TOTP_SCHEME: _TotpScheme = _TotpScheme(
     algorithm_key=KP_TOTP_ALGORITHM_KEY,
 )
 
-_PPS_TOTP_SCHEME: _TotpScheme = _TotpScheme(
-    secret_decoders=((PPS_TOTP_SECRET_KEY, _decode_base32),),
+PPS_TOTP_SCHEME: TotpScheme = TotpScheme(
+    secret_decoders=((PPS_TOTP_SECRET_KEY, decode_base32),),
     base32_key=PPS_TOTP_SECRET_KEY,
     length_key=PPS_TOTP_DIGITS_KEY,
     period_key=PPS_TOTP_PERIOD_KEY,
     algorithm_key=None,
 )
 
-_HOTP_SECRET_KEYS: frozenset[str] = frozenset({
+HOTP_SECRET_KEYS: frozenset[str] = frozenset({
     KP_HOTP_SECRET_UTF8_KEY,
     KP_HOTP_SECRET_HEX_KEY,
     KP_HOTP_SECRET_BASE32_KEY,
@@ -188,13 +188,18 @@ _HOTP_SECRET_KEYS: frozenset[str] = frozenset({
 # Every OTP *secret* field this module recognises: both TOTP schemes plus HOTP.
 # Any of these that is not consumed into ``login.totp`` is sensitive and must be
 # stored as a hidden custom field, whichever scheme is active.
-_ALL_SECRET_KEYS: frozenset[str] = (
-    _KEEPASS_TOTP_SCHEME.secret_keys | _PPS_TOTP_SCHEME.secret_keys | _HOTP_SECRET_KEYS
+ALL_SECRET_KEYS: frozenset[str] = (
+    KEEPASS_TOTP_SCHEME.secret_keys | PPS_TOTP_SCHEME.secret_keys | HOTP_SECRET_KEYS
 )
 
 
+def is_otp_secret_field(name: str) -> bool:
+    """Identify source secrets even when duplicate fields need escaped names."""
+    return name in ALL_SECRET_KEYS
+
+
 @dataclass(frozen=True)
-class _TotpConfig:
+class TotpConfig:
     """Resolved TOTP parameters, already mapped to otpauth tokens."""
 
     digits: int
@@ -211,7 +216,7 @@ class _TotpConfig:
         )
 
 
-def _otpauth_int_parameter(
+def otpauth_int_parameter(
     parameters: Mapping[str, str], key: str, default: int
 ) -> int | None:
     """Return one positive ASCII-decimal parameter, or ``None`` if malformed."""
@@ -227,12 +232,12 @@ def _otpauth_int_parameter(
     return parsed if parsed > 0 else None
 
 
-def _otpauth_code_parameters(query: str) -> dict[str, str] | None:
+def otpauth_code_parameters(query: str) -> dict[str, str] | None:
     """Return unambiguous lowercase parameters that affect generated codes."""
     parameters: dict[str, str] = {}
     for key, values in parse_qs(query, keep_blank_values=True).items():
         normalized_key = key.lower()
-        if normalized_key not in _OTPAUTH_CODE_PARAMETER_KEYS:
+        if normalized_key not in OTPAUTH_CODE_PARAMETER_KEYS:
             continue
         if key != normalized_key or normalized_key in parameters or len(values) != 1:
             return None
@@ -240,7 +245,7 @@ def _otpauth_code_parameters(query: str) -> dict[str, str] | None:
     return parameters
 
 
-def _totp_identity(value: str) -> tuple[bytes, _TotpConfig] | None:
+def totp_identity(value: str) -> tuple[bytes, TotpConfig] | None:
     """Parse the code-generating parts of a Bitwarden TOTP value."""
     stripped = value.strip()
     if stripped.lower().startswith("otpauth://"):
@@ -251,7 +256,7 @@ def _totp_identity(value: str) -> tuple[bytes, _TotpConfig] | None:
         if parsed.scheme.lower() != "otpauth" or parsed.netloc.lower() != "totp":
             return None
 
-        parameters = _otpauth_code_parameters(parsed.query)
+        parameters = otpauth_code_parameters(parsed.query)
         if parameters is None:
             return None
         raw_secret = parameters.get("secret")
@@ -259,12 +264,12 @@ def _totp_identity(value: str) -> tuple[bytes, _TotpConfig] | None:
             return None
         raw_algorithm = parameters.get("algorithm", DEFAULT_ALGORITHM)
         algorithm = (
-            _OTPAUTH_ALGORITHM_MAP.get(raw_algorithm.upper())
+            OTPAUTH_ALGORITHM_MAP.get(raw_algorithm.upper())
             if raw_algorithm.isascii()
             else None
         )
-        digits = _otpauth_int_parameter(parameters, "digits", DEFAULT_DIGITS)
-        period = _otpauth_int_parameter(parameters, "period", DEFAULT_PERIOD)
+        digits = otpauth_int_parameter(parameters, "digits", DEFAULT_DIGITS)
+        period = otpauth_int_parameter(parameters, "period", DEFAULT_PERIOD)
         if algorithm is None or digits is None or period is None:
             return None
     else:
@@ -274,12 +279,12 @@ def _totp_identity(value: str) -> tuple[bytes, _TotpConfig] | None:
         period = DEFAULT_PERIOD
 
     try:
-        secret = _decode_base32(raw_secret)
+        secret = decode_base32(raw_secret)
     except ValueError, binascii.Error:
         return None
     if not secret:
         return None
-    return secret, _TotpConfig(digits=digits, period=period, algorithm=algorithm)
+    return secret, TotpConfig(digits=digits, period=period, algorithm=algorithm)
 
 
 def totp_values_equivalent(left: str, right: str) -> bool:
@@ -291,8 +296,8 @@ def totp_values_equivalent(left: str, right: str) -> bool:
     """
     if left == right:
         return True
-    left_identity = _totp_identity(left)
-    return left_identity is not None and left_identity == _totp_identity(right)
+    left_identity = totp_identity(left)
+    return left_identity is not None and left_identity == totp_identity(right)
 
 
 @dataclass(frozen=True)
@@ -319,7 +324,7 @@ class OtpMigration:
     warnings: tuple[str, ...]
 
 
-def _nonempty(props: Mapping[str, str | None], key: str) -> str | None:
+def nonempty(props: Mapping[str, str | None], key: str) -> str | None:
     """Return the trimmed value for *key* if present and non-blank, else ``None``.
 
     ``custom_properties`` values can be ``None`` (an empty ``<Value/>`` element),
@@ -332,15 +337,15 @@ def _nonempty(props: Mapping[str, str | None], key: str) -> str | None:
     return stripped or None
 
 
-def _present_secret_keys(
+def present_secret_keys(
     props: Mapping[str, str | None], candidates: frozenset[str]
 ) -> frozenset[str]:
     """Subset of *candidates* present in *props* with a non-blank value."""
-    return frozenset(key for key in candidates if _nonempty(props, key) is not None)
+    return frozenset(key for key in candidates if nonempty(props, key) is not None)
 
 
-def _find_totp_secret(
-    props: Mapping[str, str | None], scheme: _TotpScheme
+def find_totp_secret(
+    props: Mapping[str, str | None], scheme: TotpScheme
 ) -> tuple[str, str, Callable[[str], bytes]] | None:
     """Return ``(key, raw_value, decoder)`` for the present TOTP secret, or ``None``.
 
@@ -354,7 +359,7 @@ def _find_totp_secret(
     return None
 
 
-def _parse_int_field(
+def parse_int_field(
     raw: str, key: str, default: int, *, warnings: list[str]
 ) -> int | None:
     """Parse a positive integer config value, appending a warning on failure.
@@ -374,16 +379,16 @@ def _parse_int_field(
     return parsed
 
 
-def _parse_config(
-    props: Mapping[str, str | None], scheme: _TotpScheme
-) -> tuple[_TotpConfig, list[str]]:
+def parse_config(
+    props: Mapping[str, str | None], scheme: TotpScheme
+) -> tuple[TotpConfig, list[str]]:
     """Resolve digit count, period and algorithm from *scheme*'s config fields."""
     warnings: list[str] = []
 
     digits = DEFAULT_DIGITS
-    raw_len = _nonempty(props, scheme.length_key)
+    raw_len = nonempty(props, scheme.length_key)
     if raw_len is not None:
-        parsed = _parse_int_field(
+        parsed = parse_int_field(
             raw_len, scheme.length_key, DEFAULT_DIGITS, warnings=warnings
         )
         if parsed is not None:
@@ -402,9 +407,9 @@ def _parse_config(
                 digits = parsed
 
     period = DEFAULT_PERIOD
-    raw_period = _nonempty(props, scheme.period_key)
+    raw_period = nonempty(props, scheme.period_key)
     if raw_period is not None:
-        parsed = _parse_int_field(
+        parsed = parse_int_field(
             raw_period, scheme.period_key, DEFAULT_PERIOD, warnings=warnings
         )
         if parsed is not None:
@@ -412,12 +417,12 @@ def _parse_config(
 
     algorithm = DEFAULT_ALGORITHM
     raw_alg = (
-        _nonempty(props, scheme.algorithm_key)
+        nonempty(props, scheme.algorithm_key)
         if scheme.algorithm_key is not None
         else None
     )
     if raw_alg is not None:
-        mapped = _ALGORITHM_MAP.get(raw_alg.upper())
+        mapped = ALGORITHM_MAP.get(raw_alg.upper())
         if mapped is None:
             warnings.append(
                 f"Unknown {scheme.algorithm_key} {raw_alg!r}; using {DEFAULT_ALGORITHM}."
@@ -425,10 +430,10 @@ def _parse_config(
         else:
             algorithm = mapped
 
-    return _TotpConfig(digits=digits, period=period, algorithm=algorithm), warnings
+    return TotpConfig(digits=digits, period=period, algorithm=algorithm), warnings
 
 
-def _build_otpauth_uri(raw_secret: bytes, config: _TotpConfig, *, label: str) -> str:
+def build_otpauth_uri(raw_secret: bytes, config: TotpConfig, *, label: str) -> str:
     """Build an ``otpauth://totp/`` URI Bitwarden parses losslessly.
 
     The secret is unpadded uppercase Base32 (per the Key URI Format); the label
@@ -468,16 +473,16 @@ def resolve_otp(
     returned in ``hidden_keys``, while its digit-count/period/algorithm fields
     stay ordinary custom fields.  HOTP handling is unaffected.
     """
-    scheme = _PPS_TOTP_SCHEME if totp_pps else _KEEPASS_TOTP_SCHEME
+    scheme = PPS_TOTP_SCHEME if totp_pps else KEEPASS_TOTP_SCHEME
     warnings: list[str] = []
 
-    # A blank/whitespace-only otp field counts as absent (mirroring _nonempty),
+    # A blank/whitespace-only otp field counts as absent (mirroring nonempty),
     # so the TimeOtp-* fallback can still fire and we never emit a whitespace
     # login.totp; a real URI is trimmed of surrounding whitespace.
     otp_value = otp_uri.strip() if otp_uri else None
 
     # HOTP (RFC 4226) is counter-based and has no time-based target in Bitwarden.
-    if _present_secret_keys(custom_properties, _HOTP_SECRET_KEYS):
+    if present_secret_keys(custom_properties, HOTP_SECRET_KEYS):
         warnings.append(
             "HMAC-based OTP (HOTP) cannot be migrated to Bitwarden's time-based "
             "TOTP; its secret is kept as a hidden custom field."
@@ -489,16 +494,16 @@ def resolve_otp(
         return OtpMigration(
             totp=otp_value,
             consumed_keys=frozenset(),
-            hidden_keys=_present_secret_keys(custom_properties, _ALL_SECRET_KEYS),
+            hidden_keys=present_secret_keys(custom_properties, ALL_SECRET_KEYS),
             warnings=tuple(warnings),
         )
 
-    found = _find_totp_secret(custom_properties, scheme)
+    found = find_totp_secret(custom_properties, scheme)
     if found is None:
         return OtpMigration(
             totp=None,
             consumed_keys=frozenset(),
-            hidden_keys=_present_secret_keys(custom_properties, _ALL_SECRET_KEYS),
+            hidden_keys=present_secret_keys(custom_properties, ALL_SECRET_KEYS),
             warnings=tuple(warnings),
         )
 
@@ -513,7 +518,7 @@ def resolve_otp(
         return OtpMigration(
             totp=None,
             consumed_keys=frozenset(),
-            hidden_keys=_present_secret_keys(custom_properties, _ALL_SECRET_KEYS),
+            hidden_keys=present_secret_keys(custom_properties, ALL_SECRET_KEYS),
             warnings=tuple(warnings),
         )
 
@@ -528,17 +533,17 @@ def resolve_otp(
         return OtpMigration(
             totp=None,
             consumed_keys=frozenset(),
-            hidden_keys=_present_secret_keys(custom_properties, _ALL_SECRET_KEYS),
+            hidden_keys=present_secret_keys(custom_properties, ALL_SECRET_KEYS),
             warnings=tuple(warnings),
         )
 
-    config, config_warnings = _parse_config(custom_properties, scheme)
+    config, config_warnings = parse_config(custom_properties, scheme)
     warnings.extend(config_warnings)
 
     present_config_keys = frozenset(
         key
         for key in scheme.config_keys
-        if _nonempty(custom_properties, key) is not None
+        if nonempty(custom_properties, key) is not None
     )
     consumed = present_config_keys | {secret_key}
 
@@ -550,9 +555,9 @@ def resolve_otp(
         # lenient decoding.
         totp = base64.b32encode(raw_bytes).rstrip(b"=").decode("ascii")
     else:
-        totp = _build_otpauth_uri(raw_bytes, config, label=entry_label)
+        totp = build_otpauth_uri(raw_bytes, config, label=entry_label)
 
-    hidden = _present_secret_keys(custom_properties, _ALL_SECRET_KEYS) - consumed
+    hidden = present_secret_keys(custom_properties, ALL_SECRET_KEYS) - consumed
     return OtpMigration(
         totp=totp,
         consumed_keys=frozenset(consumed),

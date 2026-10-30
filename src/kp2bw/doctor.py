@@ -25,13 +25,13 @@ from rich.style import Style
 from rich.text import Text
 
 from . import __title__, __version__
-from ._build_info import BUILD_SHA
+from .build_info import BUILD_SHA
 from .bw_serve import bw_cli_version, resolve_bw_command
 from .exceptions import BitwardenClientError
 
-_SUBPROCESS_TIMEOUT: int = 30
-_HTTP_TIMEOUT: int = 10
-_FULL_SHA: re.Pattern[str] = re.compile(r"[0-9a-f]{40}")
+SUBPROCESS_TIMEOUT: int = 30
+HTTP_TIMEOUT: int = 10
+FULL_SHA: re.Pattern[str] = re.compile(r"[0-9a-f]{40}")
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class DoctorReport:
         return cast(dict[str, str | bool | None], asdict(self))
 
 
-def _revision() -> tuple[str, str] | None:
+def read_revision() -> tuple[str, str] | None:
     """The full git sha this kp2bw comes from plus its source, best source first.
 
     Order: the sha the release workflow baked into the wheel, the commit
@@ -100,10 +100,10 @@ def _revision() -> tuple[str, str] | None:
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=_SUBPROCESS_TIMEOUT,
+                timeout=SUBPROCESS_TIMEOUT,
                 stdin=subprocess.DEVNULL,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             return None
         revision = result.stdout.strip()
         if result.returncode == 0 and revision:
@@ -112,7 +112,7 @@ def _revision() -> tuple[str, str] | None:
     return None
 
 
-def _install_method() -> str:
+def install_method() -> str:
     """How this kp2bw got installed: pip/uv/pipx, tool-managed, or editable."""
     try:
         dist = distribution(__title__)
@@ -143,10 +143,10 @@ def _install_method() -> str:
     return f"{installer} ({', '.join(markers)})" if markers else installer
 
 
-def _server_product(server_url: str) -> str:
+def identify_server_product(server_url: str) -> str:
     """Identify the server behind *server_url* via its anonymous ``/api/config``."""
     try:
-        response = httpx.get(f"{server_url}/api/config", timeout=_HTTP_TIMEOUT)
+        response = httpx.get(f"{server_url}/api/config", timeout=HTTP_TIMEOUT)
         _ = response.raise_for_status()
         config = cast(dict[str, object], response.json())
     except (httpx.HTTPError, ValueError) as exc:
@@ -161,7 +161,7 @@ def _server_product(server_url: str) -> str:
     return f"{name or 'Bitwarden'} {version or '(unknown version)'}"
 
 
-def _bw_output(bw_cmd: list[str], bw_cwd: str | None, *args: str) -> str | None:
+def bw_output(bw_cmd: list[str], bw_cwd: str | None, *args: str) -> str | None:
     """Stdout of one diagnostic ``bw`` subcommand, or ``None`` on failure."""
     try:
         result = subprocess.run(
@@ -169,11 +169,11 @@ def _bw_output(bw_cmd: list[str], bw_cwd: str | None, *args: str) -> str | None:
             check=False,
             capture_output=True,
             text=True,
-            timeout=_SUBPROCESS_TIMEOUT,
+            timeout=SUBPROCESS_TIMEOUT,
             stdin=subprocess.DEVNULL,
             cwd=bw_cwd,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return None
     if result.returncode != 0:
         return None
@@ -197,18 +197,18 @@ def collect_report() -> DoctorReport:
     server_product: str | None = None
     if bw_cmd is not None:
         bw_version = bw_cli_version(bw_cmd, bw_cwd)
-        bw_serve_supported = _bw_output(bw_cmd, bw_cwd, "serve", "--help") is not None
-        server = _bw_output(bw_cmd, bw_cwd, "config", "server")
+        bw_serve_supported = bw_output(bw_cmd, bw_cwd, "serve", "--help") is not None
+        server = bw_output(bw_cmd, bw_cwd, "config", "server")
         if server and server.startswith(("http://", "https://")):
             bw_server_url = server
-            server_product = _server_product(server)
+            server_product = identify_server_product(server)
 
-    revision = _revision()
+    revision = read_revision()
     return DoctorReport(
         kp2bw_version=__version__,
         revision=revision[0] if revision else None,
         revision_source=revision[1] if revision else None,
-        install_method=_install_method(),
+        install_method=install_method(),
         python_version=platform.python_version(),
         platform=sys.platform,
         dotenv_path=dotenv_path,
@@ -253,12 +253,12 @@ def redact_report(report: DoctorReport) -> DoctorReport:
     )
 
 
-def _revision_text(report: DoctorReport) -> Text:
+def revision_text(report: DoctorReport) -> Text:
     """The revision rendered short, hyperlinked to the commit when it is a sha."""
     if not report.revision:
         return Text("unknown")
     short = report.revision[:12]
-    if _FULL_SHA.fullmatch(report.revision):
+    if FULL_SHA.fullmatch(report.revision):
         text = Text(
             short,
             style=Style(
@@ -281,7 +281,7 @@ def render_report(report: DoctorReport) -> list[Text]:
         serve = "supported" if report.bw_serve_supported else "unsupported"
     rows: tuple[tuple[str, Text], ...] = (
         (__title__, Text(report.kp2bw_version)),
-        ("revision", _revision_text(report)),
+        ("revision", revision_text(report)),
         ("installed via", Text(report.install_method)),
         ("python", Text(f"{report.python_version} ({report.platform})")),
         (".env", Text(report.dotenv_path or "none detected")),

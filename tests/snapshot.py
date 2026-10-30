@@ -5,7 +5,7 @@ revision/creation timestamps, attachment urls and sizes -- that change on every
 run.  To assert a migration produced *exactly* the intended vault, this module
 normalizes that JSON into a stable, canonically-ordered shape:
 
-* volatile fields are dropped (allowlist: only owned fields are copied),
+* volatile fields are dropped (allowlist: only selected fields are copied),
 * folder ids are resolved to folder names,
 * each item gets a stable ``token`` derived from ``folder/name`` instead of its
   server id,
@@ -30,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
+from kp2bw.attachments import ATTACHMENT_FIELD_PREFIX
 from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME
 
 # A concrete recursive type for parsed JSON. Laundering ``json.loads``'s ``Any``
@@ -121,14 +122,14 @@ def parse_object(raw: str) -> dict[str, JsonValue]:
     return as_object(data)
 
 
-def _opt_str(m: Mapping[str, JsonValue], key: str) -> str | None:
+def opt_str(m: Mapping[str, JsonValue], key: str) -> str | None:
     value = m.get(key)
     if value is None or isinstance(value, str):
         return value
     raise TypeError(f"field {key!r}: expected string, got {type(value).__name__}")
 
 
-def _opt_int(m: Mapping[str, JsonValue], key: str) -> int | None:
+def opt_int(m: Mapping[str, JsonValue], key: str) -> int | None:
     value = m.get(key)
     if value is None:
         return None
@@ -140,12 +141,12 @@ def _opt_int(m: Mapping[str, JsonValue], key: str) -> int | None:
     raise TypeError(f"field {key!r}: expected int, got {type(value).__name__}")
 
 
-def _int(m: Mapping[str, JsonValue], key: str, *, default: int) -> int:
-    value = _opt_int(m, key)
+def read_int(m: Mapping[str, JsonValue], key: str, *, default: int) -> int:
+    value = opt_int(m, key)
     return default if value is None else value
 
 
-def _bool(m: Mapping[str, JsonValue], key: str) -> bool:
+def read_bool(m: Mapping[str, JsonValue], key: str) -> bool:
     value = m.get(key)
     if value is None:
         return False
@@ -154,7 +155,7 @@ def _bool(m: Mapping[str, JsonValue], key: str) -> bool:
     raise TypeError(f"field {key!r}: expected bool, got {type(value).__name__}")
 
 
-def _objects(m: Mapping[str, JsonValue], key: str) -> list[dict[str, JsonValue]]:
+def objects(m: Mapping[str, JsonValue], key: str) -> list[dict[str, JsonValue]]:
     value = m.get(key)
     if value is None:
         return []
@@ -166,52 +167,52 @@ def _objects(m: Mapping[str, JsonValue], key: str) -> list[dict[str, JsonValue]]
 # --- normalization ----------------------------------------------------------
 
 
-def _norm_uri(raw: Mapping[str, JsonValue]) -> NormUri:
-    return {"uri": _opt_str(raw, "uri"), "match": _opt_int(raw, "match")}
+def norm_uri(raw: Mapping[str, JsonValue]) -> NormUri:
+    return {"uri": opt_str(raw, "uri"), "match": opt_int(raw, "match")}
 
 
-def _norm_field(raw: Mapping[str, JsonValue]) -> NormField:
+def norm_field(raw: Mapping[str, JsonValue]) -> NormField:
     return {
-        "name": _opt_str(raw, "name"),
-        "value": _opt_str(raw, "value"),
-        "type": _int(raw, "type", default=0),
+        "name": opt_str(raw, "name"),
+        "value": opt_str(raw, "value"),
+        "type": read_int(raw, "type", default=0),
     }
 
 
-def _norm_fido2(raw: Mapping[str, JsonValue]) -> NormFido2:
+def norm_fido2(raw: Mapping[str, JsonValue]) -> NormFido2:
     # ``creationDate`` is derived from the KeePass entry's ctime and is dropped;
     # everything else is content sourced from the KeePass passkey fields.
     return {
-        "credentialId": _opt_str(raw, "credentialId"),
-        "keyType": _opt_str(raw, "keyType"),
-        "keyAlgorithm": _opt_str(raw, "keyAlgorithm"),
-        "keyCurve": _opt_str(raw, "keyCurve"),
-        "rpId": _opt_str(raw, "rpId"),
-        "userName": _opt_str(raw, "userName"),
-        "counter": _opt_str(raw, "counter"),
-        "discoverable": _opt_str(raw, "discoverable"),
+        "credentialId": opt_str(raw, "credentialId"),
+        "keyType": opt_str(raw, "keyType"),
+        "keyAlgorithm": opt_str(raw, "keyAlgorithm"),
+        "keyCurve": opt_str(raw, "keyCurve"),
+        "rpId": opt_str(raw, "rpId"),
+        "userName": opt_str(raw, "userName"),
+        "counter": opt_str(raw, "counter"),
+        "discoverable": opt_str(raw, "discoverable"),
     }
 
 
-def _norm_login(raw: Mapping[str, JsonValue]) -> NormLogin:
+def norm_login(raw: Mapping[str, JsonValue]) -> NormLogin:
     uris = sorted(
-        (_norm_uri(u) for u in _objects(raw, "uris")),
+        (norm_uri(u) for u in objects(raw, "uris")),
         key=lambda u: (u["uri"] or "", -1 if u["match"] is None else u["match"]),
     )
     creds = sorted(
-        (_norm_fido2(c) for c in _objects(raw, "fido2Credentials")),
+        (norm_fido2(c) for c in objects(raw, "fido2Credentials")),
         key=lambda c: c["credentialId"] or "",
     )
     return {
-        "username": _opt_str(raw, "username"),
-        "password": _opt_str(raw, "password"),
-        "totp": _opt_str(raw, "totp"),
+        "username": opt_str(raw, "username"),
+        "password": opt_str(raw, "password"),
+        "totp": opt_str(raw, "totp"),
         "uris": uris,
         "fido2Credentials": creds,
     }
 
 
-def _norm_attachments(
+def norm_attachments(
     raw_atts: Sequence[Mapping[str, JsonValue]],
     *,
     item_id: str,
@@ -219,7 +220,7 @@ def _norm_attachments(
 ) -> list[NormAttachment]:
     out: list[NormAttachment] = []
     for att in raw_atts:
-        file_name = _opt_str(att, "fileName")
+        file_name = opt_str(att, "fileName")
         key = attachment_key(item_id, file_name or "")
         digest = attachment_sha256.get(key)
         if digest is None:
@@ -230,43 +231,44 @@ def _norm_attachments(
     return sorted(out, key=lambda a: a["fileName"] or "")
 
 
-def _norm_item(
+def norm_item(
     raw: Mapping[str, JsonValue],
     *,
     folder_names: Mapping[str, str],
     attachment_sha256: Mapping[str, str],
 ) -> tuple[str, NormItem]:
-    item_id = _opt_str(raw, "id") or ""
-    folder_id = _opt_str(raw, "folderId")
+    item_id = opt_str(raw, "id") or ""
+    folder_id = opt_str(raw, "folderId")
     folder = None if folder_id is None else folder_names.get(folder_id, folder_id)
 
     login_raw = raw.get("login")
-    login = _norm_login(login_raw) if isinstance(login_raw, dict) else None
+    login = norm_login(login_raw) if isinstance(login_raw, dict) else None
 
     fields = sorted(
         (
-            _norm_field(f)
-            for f in _objects(raw, "fields")
+            norm_field(f)
+            for f in objects(raw, "fields")
             # kp2bw's managed stamps are volatile per run (KP2BW_ID is a KeePass
             # UUID; KP2BW_SYNC is a content hash) and are implementation metadata,
             # not migrated content -- drop them so the golden stays deterministic.
             if f.get("name") not in (KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME)
+            and not str(f.get("name") or "").startswith(ATTACHMENT_FIELD_PREFIX)
         ),
         key=lambda f: (f["name"] or "", f["type"], f["value"] or ""),
     )
-    attachments = _norm_attachments(
-        _objects(raw, "attachments"),
+    attachments = norm_attachments(
+        objects(raw, "attachments"),
         item_id=item_id,
         attachment_sha256=attachment_sha256,
     )
 
     item: NormItem = {
-        "token": "",  # filled in by _assign_tokens once collisions are known
+        "token": "",  # filled in by assign_tokens once collisions are known
         "folder": folder,
-        "name": _opt_str(raw, "name"),
-        "notes": _opt_str(raw, "notes"),
-        "favorite": _bool(raw, "favorite"),
-        "type": _int(raw, "type", default=1),
+        "name": opt_str(raw, "name"),
+        "notes": opt_str(raw, "notes"),
+        "favorite": read_bool(raw, "favorite"),
+        "type": read_int(raw, "type", default=1),
         "login": login,
         "fields": fields,
         "attachments": attachments,
@@ -274,7 +276,7 @@ def _norm_item(
     return item_id, item
 
 
-def _assign_tokens(pairs: list[tuple[str, NormItem]]) -> None:
+def assign_tokens(pairs: list[tuple[str, NormItem]]) -> None:
     """Assign a stable ``token`` to each item.
 
     The token is ``folder/name``.  When several items share that base (the seed
@@ -291,7 +293,7 @@ def _assign_tokens(pairs: list[tuple[str, NormItem]]) -> None:
         if len(group) == 1:
             group[0][1]["token"] = base
             continue
-        for index, (_id, item) in enumerate(sorted(group, key=lambda p: p[0])):
+        for index, (_, item) in enumerate(sorted(group, key=lambda p: p[0])):
             item["token"] = f"{base}#{index}"
 
 
@@ -303,12 +305,12 @@ def normalize_vault(
 ) -> NormVault:
     """Normalize raw ``bw get item`` objects into a deterministic vault snapshot."""
     pairs = [
-        _norm_item(raw, folder_names=folder_names, attachment_sha256=attachment_sha256)
+        norm_item(raw, folder_names=folder_names, attachment_sha256=attachment_sha256)
         for raw in raw_items
     ]
-    _assign_tokens(pairs)
+    assign_tokens(pairs)
     items = sorted(
-        (item for _id, item in pairs),
+        (item for _, item in pairs),
         key=lambda i: (i["folder"] or "", i["name"] or "", i["token"]),
     )
     return {"items": items}
