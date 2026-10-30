@@ -2171,6 +2171,7 @@ class Converter:
         Returns the number of non-fatal failures (rejected entry creates plus
         updates plus attachment uploads); ``0`` means everything succeeded.
         """
+        self._attachment_plans.clear()
         # load keepass data from database
         self._load_keepass_data()
 
