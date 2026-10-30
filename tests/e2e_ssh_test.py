@@ -65,11 +65,13 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
             login = bw.get_item_by_uuid(alias.uuid.hex.upper())
             assert login is not None
             login = bw.get_item(login["id"])
-            assert login["type"] == 1 and login["login"]["username"] == "ssh-user"
-            assert login["login"]["password"] == "synthetic-password"
+            credentials = login.get("login")
+            assert credentials is not None
+            assert login["type"] == 1 and credentials["username"] == "ssh-user"
+            assert credentials["password"] == "synthetic-password"
             assert any(
                 uri["uri"] == "https://ssh-login.example.test"
-                for uri in login["login"]["uris"]
+                for uri in credentials["uris"]
             )
             if alias_revision is not None:
                 assert login["revisionDate"] == alias_revision
