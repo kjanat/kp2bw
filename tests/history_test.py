@@ -36,7 +36,6 @@ from kp2bw.item_sync import (
     stamp_content,
     sync_stamp_matches,
 )
-
 from kp2bw.ssh_mapping import parse_ssh_rules
 
 

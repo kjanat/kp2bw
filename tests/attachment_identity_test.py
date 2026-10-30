@@ -335,9 +335,22 @@ def main() -> None:
     )
     assert len(retry.uploads) == 1 and retry.uploads[0].filename != pending_name
     assert retry.records == legacy.records
+    # One uniquely matching legacy file is safe to adopt; the missing source
+    # needs its own upload, without replacing or deleting the matched file.
+    partial_legacy = plan_attachments(
+        sources[:2], {}, [("0", "notes.txt")], data.__getitem__
+    )
+    assert set(partial_legacy.records) == {sources[0].source_id}
+    assert partial_legacy.records[sources[0].source_id].attachment_id == "0"
+    assert [source.source_id for source in partial_legacy.uploads] == [
+        sources[1].source_id
+    ]
+    assert partial_legacy.uploads[0].filename != "notes.txt"
+    assert not partial_legacy.stale
+    data["unknown-legacy"] = b"bytes matching neither source"
     for legacy_sources, legacy_remote in (
         (sources[4:], [("4", "same.bin"), ("5", "same.bin")]),
-        (sources[:2], [("0", "notes.txt")]),
+        (sources[:2], [("unknown-legacy", "notes.txt")]),
     ):
         try:
             plan_attachments(legacy_sources, {}, legacy_remote, data.__getitem__)
