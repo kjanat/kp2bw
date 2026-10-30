@@ -14,7 +14,7 @@ ENV PATH="/root/.bun/bin:/app/node_modules/.bin:$PATH"
 WORKDIR /app
 
 # Resolve @bitwarden/cli from the committed package.json + bun.lock (NOT @latest)
-# so the version is pinned and reproducible -- the golden snapshots are a
+# so the version matches the lockfile -- the golden snapshots are a
 # function of this exact CLI's JSON output, and Dependabot bumps it via the
 # `bun` ecosystem. Copy the manifests first so this layer caches independently
 # of source changes (bun-in-docker best practice).

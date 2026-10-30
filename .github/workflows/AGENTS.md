@@ -22,6 +22,8 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 - Run check jobs through `$/.github/actions/version-check` with `package` and `tag-prefixes` inputs.
 - Preserve workflow output keys from check jobs (`name`, `version`, `pypi_url`) and downstream references.
 - Keep main publish gated by `integration-docker.yml` (`needs: [check, integration]`).
+- Integration resolves the newest stable server and both CLI packages before testing. Both jobs must pass;
+  the official CLI job also compares golden snapshots. Tools come from `.tool-versions` through mise.
 - Preserve smoke tests from built artifacts before `uv publish`.
 - Stubs build/smoke validation runs without a deployment environment or OIDC write permission. The protected publish
   job is skipped for dry dispatches and consumes the exact validated artifact ID; root workflow `dry` is informational.

@@ -5,7 +5,7 @@ revision/creation timestamps, attachment urls and sizes -- that change on every
 run.  To assert a migration produced *exactly* the intended vault, this module
 normalizes that JSON into a stable, canonically-ordered shape:
 
-* volatile fields are dropped (allowlist: only owned fields are copied),
+* volatile fields are dropped (allowlist: only selected fields are copied),
 * folder ids are resolved to folder names,
 * each item gets a stable ``token`` derived from ``folder/name`` instead of its
   server id,

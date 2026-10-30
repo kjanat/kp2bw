@@ -33,7 +33,7 @@ services:
       BW_TEST_EMAIL: "integration@example.com"
       BW_TEST_PASSWORD: "TestMasterPassword123!"
       KP_TEST_PASSWORD: "KpSnapshotPassword123!"
-      # The container ships the pinned @bitwarden/cli, so it owns the golden:
+      # Compare expected vault contents using the installed @bitwarden/cli:
       # compare by default; regenerate with `KP2BW_UPDATE_SNAPSHOTS=1 docker compose up`.
       KP2BW_SNAPSHOT_GOLDEN: "1"
       KP2BW_UPDATE_SNAPSHOTS: "${KP2BW_UPDATE_SNAPSHOTS:-0}"
