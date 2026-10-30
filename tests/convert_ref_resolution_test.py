@@ -11,7 +11,7 @@ from pykeepass import Attachment, Entry, Group, PyKeePass, create_database
 
 from kp2bw.bw_serve import KP2BW_SYNC_FIELD_NAME, BitwardenServeClient
 from kp2bw.bw_types import BwFido2Credential, BwField, BwItemCreate, BwItemResponse
-from kp2bw.convert import MAX_BW_ITEM_LENGTH, Converter, EntryValue
+from kp2bw.convert import Converter, EntryValue
 
 REFERENCE_ENTRY_UUID = UUID("12345678-1234-5678-1234-567812345678")
 REFERENCE_ENTRY_UUID_REF = REFERENCE_ENTRY_UUID.hex.upper()
@@ -517,7 +517,7 @@ def assert_oversize_secret_field_is_not_lost_silently() -> None:
     ``.txt`` attachment as usual. Opt-in (``--include-oversize-secrets``): each
     secret is offloaded to its attachment too, so no data is lost.
     """
-    big = "Z" * (MAX_BW_ITEM_LENGTH + 64)
+    big = "Z" * 10_064
     secret_keys = ("HmacOtp-Secret", "protected_codes")
 
     def build(kp: PyKeePass, root: Group) -> None:
@@ -765,7 +765,7 @@ def assert_distinct_ref_preserves_protected_properties() -> None:
 
 def assert_distinct_ref_protects_oversize_secrets() -> None:
     """REF-created items obey the opt-in gate for oversized protected values."""
-    large_secret = "S" * (MAX_BW_ITEM_LENGTH + 1)
+    large_secret = "S" * 10_001
 
     def build(kp: PyKeePass, root: Group) -> None:
         target = kp.add_entry(root, "Target", "target-user", "shared-password")
