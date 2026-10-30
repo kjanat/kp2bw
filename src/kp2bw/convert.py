@@ -1630,7 +1630,12 @@ class Converter:
                         ssh_source is not None
                         and planned_target["type"] == BW_ITEM_TYPE_LOGIN
                     ):
-                        apply_ssh_rule(planned_target, ssh_source[1], ssh_source[0])
+                        fields = {
+                            **ssh_source[1],
+                            "UserName": ref_item["login"]["username"],
+                            "Password": ref_item["login"]["password"],
+                        }
+                        apply_ssh_rule(planned_target, fields, ssh_source[0])
                     if planned_target["type"] != BW_ITEM_TYPE_LOGIN:
                         separate_reason = "a reference to a native non-login item"
                 existing_totp = ref_item["login"]["totp"]
