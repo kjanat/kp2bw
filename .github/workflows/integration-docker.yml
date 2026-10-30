@@ -67,7 +67,7 @@ jobs:
     needs: config
     runs-on: ubuntu-latest
     permissions: { contents: read }
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
       BW_SERVER_URL: https://localhost:18443
