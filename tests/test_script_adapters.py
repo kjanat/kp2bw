@@ -35,6 +35,10 @@ def test_bw_serve_command_script() -> None:
     _run_script_main("bw_serve_command_test.py")
 
 
+def test_bw_serve_exit_script() -> None:
+    _run_script_main("bw_serve_exit_test.py")
+
+
 def test_bw_serve_batch_script() -> None:
     _run_script_main("bw_serve_batch_test.py")
 

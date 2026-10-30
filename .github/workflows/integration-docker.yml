@@ -7,63 +7,80 @@ on:
   push: { branches: [master] }
   workflow_dispatch:
 permissions: {}
+# Compatibility tests must include newly published stable releases.
+env: { MISE_MINIMUM_RELEASE_AGE: "0s", MISE_NPM_PACKAGE_MANAGER: npm }
 defaults: { run: { shell: pwsh } }
 jobs:
   config:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: { contents: read }
-    outputs: { matrix: "${{ steps.pin.outputs.matrix }}" }
+    outputs: { matrix: "${{ steps.resolve.outputs.matrix }}" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
-      - name: Resolve pinned @bitwarden/cli version
-        id: pin
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - name: Discover stable CLI and server releases
+        id: resolve
         run: |
-          $pkg = gc package.json | ConvertFrom-Json
-          $spec = $pkg.devDependencies.'@bitwarden/cli'
-          if ($spec -match '^catalog:(.*)$') {
-          	$catalog = if ($Matches[1]) { $pkg.catalogs.($Matches[1]) } else { $pkg.catalog }
-          	$spec = $catalog.'@bitwarden/cli'
+          $stable = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+          $registry = Invoke-RestMethod 'https://registry.npmjs.org/@bitwarden%2fcli' -Headers @{ Accept = 'application/vnd.npm.install-v1+json' } -TimeoutSec 30
+          if ($registry.name -ne '@bitwarden/cli' -or -not $registry.versions) {
+            throw 'Invalid Bitwarden CLI registry metadata'
           }
-          $version = $spec -replace '^[\^~]', ''
-          if ($version -notmatch '\A\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?\z') {
-          	Write-Host "::error::Unexpected @bitwarden/cli version in package.json: '$spec'"; exit 1
+          $cliVersions = @($registry.versions.PSObject.Properties.Name | Where-Object { $_ -match $stable })
+          $vwRegistry = Invoke-RestMethod 'https://registry.npmjs.org/@kjanat%2fvaultwarden-cli' -Headers @{ Accept = 'application/vnd.npm.install-v1+json' } -TimeoutSec 30
+          if ($vwRegistry.name -ne '@kjanat/vaultwarden-cli' -or -not $vwRegistry.versions) {
+            throw 'Invalid Vaultwarden CLI registry metadata'
           }
-          $include = @(@{ experimental = $false; 'bw-version' = $version })
-          try {
-          	$latest = (Invoke-RestMethod 'https://registry.npmjs.org/@bitwarden/cli' -TimeoutSec 30).'dist-tags'.latest
-          } catch {
-          	$latest = $null
+          $newestVw = $vwRegistry.versions.PSObject.Properties.Name | Where-Object { $_ -match $stable } | Sort-Object { [version]$_ } | Select-Object -Last 1
+          if (-not $newestVw) { throw 'No stable Vaultwarden CLI release found' }
+          $serverTags = & crane ls ghcr.io/dani-garcia/vaultwarden
+          if ($LASTEXITCODE -ne 0) { throw 'Vaultwarden release discovery failed' }
+          $serverVersions = @($serverTags | Where-Object { $_ -match $stable })
+          $newestCli = $cliVersions | Sort-Object { [version]$_ } | Select-Object -Last 1
+          $newestServer = $serverVersions | Sort-Object { [version]$_ } | Select-Object -Last 1
+          if (-not $newestCli -or -not $newestServer) { throw 'No stable CLI/server release found' }
+          $digest = (& crane digest "ghcr.io/dani-garcia/vaultwarden:$newestServer").Trim()
+          if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^sha256:[a-f0-9]{64}$') {
+            throw 'Vaultwarden image resolution returned no valid digest'
           }
-          if ($latest -and $latest -ne $version) {
-          	$include += @{ experimental = $true; 'bw-version' = 'latest' }
-          } else {
-          	Write-Host "Skipping latest canary lane: npm latest ($latest) equals the pin ($version)"
+          $newestImage = "ghcr.io/dani-garcia/vaultwarden@$digest"
+          $include = @(
+            @{ 'cli-package' = '@bitwarden/cli'; lane = 'bitwarden'; 'bw-version' = $newestCli; 'server-version' = $newestServer; 'server-image' = $newestImage },
+            @{ 'cli-package' = '@kjanat/vaultwarden-cli'; lane = 'vaultwarden'; 'bw-version' = $newestVw; 'server-version' = $newestServer; 'server-image' = $newestImage }
+          )
+          if ($env:GITHUB_STEP_SUMMARY) {
+            @('### Resolved compatibility matrix', '', '| Lane | CLI package | CLI version | Vaultwarden | Immutable image |', '| --- | --- | --- | --- | --- |') |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            foreach ($row in $include) {
+              "| $($row.lane) | $($row.'cli-package') | $($row.'bw-version') | $($row.'server-version') | $($row.'server-image') |" |
+                Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            }
           }
           $matrix = @{ include = $include } | ConvertTo-Json -Compress -Depth 4
           "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Matrix:"; $matrix | yq . -P
 
   e2e:
+    name: e2e (${{ matrix.lane }}, ${{ matrix.cli-package }} ${{ matrix.bw-version }}, Vaultwarden ${{ matrix.server-version }})
     needs: config
     runs-on: ubuntu-latest
     permissions: { contents: read }
-    # The full suite includes scope and multi-pass attachment regressions;
-    # official CLI startups alone take several seconds per verification call.
     timeout-minutes: 25
-    continue-on-error: ${{ matrix.experimental }}
     env:
+      KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
       BW_SERVER_URL: https://localhost:18443
       BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
-      KP2BW_SNAPSHOT_GOLDEN: ${{ !matrix.experimental }}
+      KP2BW_SNAPSHOT_GOLDEN: ${{ matrix.cli-package == '@bitwarden/cli' }}
     strategy: { fail-fast: false, matrix: "${{ fromJson(needs.config.outputs.matrix) }}" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
 
       - name: Build Vaultwarden image
-        run: docker build -f tests/Dockerfile.vaultwarden -t kp2bw-vaultwarden tests
+        env: { VAULTWARDEN_IMAGE: "${{ matrix.server-image }}" }
+        run: docker build --pull --build-arg "VAULTWARDEN_IMAGE=$env:VAULTWARDEN_IMAGE" -f tests/Dockerfile.vaultwarden -t kp2bw-vaultwarden tests
 
       - name: Start Vaultwarden
         run: |
@@ -88,13 +105,28 @@ jobs:
             exit 1
           }
           Write-Host "Vaultwarden is healthy"
+          docker exec vaultwarden /vaultwarden --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       - run: uv sync --frozen
 
       - name: Set up Bitwarden CLI (${{ matrix.bw-version }})
+        if: matrix.cli-package == '@bitwarden/cli'
         uses: $/.github/actions/setup-bw
         with: { version: "${{ matrix.bw-version }}" }
+
+      - name: Set up Vaultwarden CLI (${{ matrix.bw-version }})
+        if: matrix.cli-package == '@kjanat/vaultwarden-cli'
+        shell: bash
+        env: { VW_VERSION: "${{ matrix.bw-version }}" }
+        run: |
+          npm install --global --ignore-scripts --prefix "$RUNNER_TEMP/vw-cli" "@kjanat/vaultwarden-cli@$VW_VERSION"
+          mkdir -p "$RUNNER_TEMP/vw-adapter"
+          install -m 755 tests/vw_bw_adapter.sh "$RUNNER_TEMP/vw-adapter/bw"
+          echo "$RUNNER_TEMP/vw-cli/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/vw-adapter" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/vw-cli/bin/vw" --version
 
       - name: Run Vaultwarden end-to-end migration test
         run: uv run tests/e2e_vaultwarden_test.py

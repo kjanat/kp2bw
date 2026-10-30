@@ -30,7 +30,12 @@ from ._item_sync import (
     sync_stamp_generation,
 )
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
-from .exceptions import BitwardenClientError, BitwardenHttpError, ConversionError
+from .exceptions import (
+    BitwardenClientError,
+    BitwardenHttpError,
+    BitwardenServeExitedError,
+    ConversionError,
+)
 from .uri_mapping import (
     UriMatchValue,
     is_url_attribute_key,
@@ -740,10 +745,8 @@ class BitwardenServeClient:
         # shims so an npm-installed CLI works rather than crashing later.
         self._bw_cmd, self._bw_cwd = resolve_bw_command()
         self._bw_via_shell = len(self._bw_cmd) > 1
-        logger.log(
-            VERBOSE,
-            f"Bitwarden CLI version {bw_cli_version(self._bw_cmd, self._bw_cwd) or 'unknown'}",
-        )
+        self._bw_version = bw_cli_version(self._bw_cmd, self._bw_cwd) or "unknown"
+        logger.log(VERBOSE, f"Bitwarden CLI version {self._bw_version}")
 
         self._port = _find_free_port()
         self._base_url = f"http://127.0.0.1:{self._port}"
@@ -996,6 +999,34 @@ class BitwardenServeClient:
     # Core HTTP helpers
     # ------------------------------------------------------------------
 
+    def _check_serve_process(self, *, after_disconnect: bool = False) -> None:
+        """Abort the migration when the CLI process has exited."""
+        process = getattr(self, "_process", None)
+        if process is None:
+            return
+        code = process.poll()
+        if code is None and after_disconnect:
+            # A dropped socket can arrive just before the OS publishes exit.
+            try:
+                code = process.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                return
+        if code is not None:
+            version = getattr(self, "_bw_version", "unknown")
+            raise BitwardenServeExitedError(
+                f"bw serve exited during migration (CLI {version}, exit {code}); "
+                "stop and use a tested CLI/server pair from "
+                "https://github.com/kjanat/kp2bw#compatibility before rerunning."
+            )
+
+    def _send_guarded(self, send: Callable[[], httpx.Response]) -> httpx.Response:
+        self._check_serve_process()
+        try:
+            return send()
+        except httpx.TransportError:
+            self._check_serve_process(after_disconnect=True)
+            raise
+
     def _request(
         self,
         method: str,
@@ -1017,7 +1048,11 @@ class BitwardenServeClient:
         """
         resp = send_with_rate_limit_retry(
             lambda: send_with_retry(
-                lambda: self._http.request(method, path, json=json_body, params=params),
+                lambda: self._send_guarded(
+                    lambda: self._http.request(
+                        method, path, json=json_body, params=params
+                    )
+                ),
                 method=method,
                 path=path,
                 idempotent=idempotent,
@@ -1155,7 +1190,23 @@ class BitwardenServeClient:
         array is only consulted for upload-if-missing reconciliation, so this
         authoritative fetch is used to avoid creating duplicate attachments.
         """
-        data = self._request("GET", f"/object/item/{item_id}")
+        path = f"/object/item/{item_id}"
+        try:
+            data = self._request("GET", path)
+        except BitwardenHttpError as exc:
+            if not _is_missing_item_error(exc.status_code, str(exc)):
+                raise
+            # The official CLI can temporarily lose an item from its local
+            # cache after a successful upload/sync. Force a fresh server read;
+            # the normal sync can skip fetching based on its revision timestamp.
+            # Retry only this read, once. A still-missing item remains a failure.
+            logger.log(
+                VERBOSE,
+                "Item %s not found in CLI cache; forcing sync and retrying read",
+                item_id,
+            )
+            self._request("POST", "/sync", params={"force": "true"}, idempotent=True)
+            data = self._request("GET", path)
         return cast(BwItemResponse, data)
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
@@ -1604,7 +1655,9 @@ class BitwardenServeClient:
         """
         path = f"/object/attachment/{attachment_id}"
         resp = send_with_rate_limit_retry(
-            lambda: self._http.get(path, params={"itemid": item_id}),
+            lambda: self._send_guarded(
+                lambda: self._http.get(path, params={"itemid": item_id})
+            ),
             method="GET",
             path=path,
             sleep=self._sleep,
@@ -1713,14 +1766,25 @@ class BitwardenServeClient:
         path: str,
     ) -> httpx.Response:
         """Async counterpart of :func:`send_with_rate_limit_retry`."""
-        resp = await send()
+
+        async def guarded_send() -> httpx.Response:
+            self._check_serve_process()
+            try:
+                return await send()
+            except httpx.TransportError:
+                await asyncio.to_thread(
+                    self._check_serve_process, after_disconnect=True
+                )
+                raise
+
+        resp = await guarded_send()
         attempt = 1
         while (
             wait := rate_limit_wait_s(resp.status_code, resp.text, attempt=attempt)
         ) is not None:
             _log_rate_limit_wait(method, path, wait, attempt)
             await self._async_sleep(wait)
-            resp = await send()
+            resp = await guarded_send()
             attempt += 1
         return resp
 
@@ -1779,6 +1843,9 @@ class BitwardenServeClient:
                     keys.append((item_id, filename))
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        for result in results:
+            if isinstance(result, BitwardenServeExitedError):
+                raise result
         failed: list[tuple[str, str]] = []
         for (item_id, filename), result in zip(keys, results, strict=True):
             if isinstance(result, BaseException):
@@ -1821,14 +1888,17 @@ class BitwardenServeClient:
             return failed
         try:
             self.sync()
-        except BitwardenClientError, httpx.HTTPError:
+        except (BitwardenClientError, httpx.HTTPError) as exc:
             logger.error(
-                "Could not sync uploaded attachments for verification; retaining old copies"
+                "Could not sync uploaded attachments for verification (%s); retaining old copies",
+                type(exc).__name__,
             )
             return [*failed, *((item_id, filename) for item_id, filename, _ in pending)]
 
         by_item: dict[str, BwItemResponse | None] = {}
         for item_id, filename, desired in pending:
+            stage = "reading item metadata"
+            reason = "item metadata unavailable"
             try:
                 if item_id not in by_item:
                     # Cache failures too: don't repeat a failing item fetch for
@@ -1846,15 +1916,33 @@ class BitwardenServeClient:
                         and attachment.get("id")
                     ]
                 )
+                stage = "downloading attachment"
+                reason = (
+                    "item metadata unavailable"
+                    if item is None
+                    else "downloaded bytes differ"
+                    if candidates
+                    else "no matching attachment in synced item metadata"
+                )
                 verified = any(
                     self.get_attachment(item_id, attachment_id) == desired
                     for attachment_id in candidates
                 )
-            except BitwardenClientError, httpx.HTTPError:
+            except (BitwardenClientError, httpx.HTTPError) as exc:
+                reason = f"{stage}: {type(exc).__name__}"
+                if isinstance(exc, BitwardenHttpError):
+                    reason += f" HTTP {exc.status_code}"
+                    if _is_missing_item_error(exc.status_code, str(exc)):
+                        reason += " (item not found)"
+                    elif "Vault is locked." in str(exc):
+                        reason += " (vault locked)"
+                    elif "You are not logged in." in str(exc):
+                        reason += " (not logged in)"
                 verified = False
             if not verified:
                 logger.error(
-                    f"Could not verify uploaded attachment {filename!r} on item {item_id}; retaining old copies"
+                    f"Could not verify uploaded attachment {filename!r} on item {item_id} "
+                    f"({reason}); retaining old copies"
                 )
                 failed.append((item_id, filename))
         return failed

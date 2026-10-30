@@ -20,7 +20,6 @@
 		"@actions/github-script": "catalog:actions",
 		"@bitwarden/cli": "catalog:ci",
 		"@types/bun": "catalog:",
-		"dprint": "catalog:",
 		"runner-run": "catalog:",
 		"tombi": "catalog:",
 		"tsc7": "catalog:",
@@ -37,7 +36,7 @@
 	},
 	"catalogs": {
 		"ci": {
-			"@bitwarden/cli": "^2026.8.0"
+			"@bitwarden/cli": "2026.10.1"
 		},
 		"actions": {
 			"@actions/github-script": "github:actions/github-script"

@@ -16,10 +16,10 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 | Stubs package validation  | `tests/stubs_smoke_test.py`         | Verifies `partial` marker + type-check consumption        |
 | Full migration e2e        | `tests/e2e_vaultwarden_test.py`     | Rich seed + idempotency + golden snapshots                |
 | Snapshot normalization    | `tests/_snapshot.py`                | Scrubs volatile fields, hashes attachments, golden diff   |
-| Golden snapshots          | `tests/__snapshots__/*.json`        | Committed expected vault state (pinned bw owns them)      |
+| Golden snapshots          | `tests/__snapshots__/*.json`        | Expected vault state for the official CLI                 |
 | Integration infra         | `tests/docker-compose.yml`          | Vaultwarden + test container orchestration                |
-| Vaultwarden image seeding | `tests/Dockerfile.vaultwarden`      | Pinned image + DB/key fixtures                            |
-| Test runner image         | `tests/Dockerfile.test`             | uv + lockfile-pinned bw CLI + test deps                   |
+| Vaultwarden image seeding | `tests/Dockerfile.vaultwarden`      | Server image + DB/key fixtures                            |
+| Test runner image         | `tests/Dockerfile.test`             | uv + bw CLI from bun.lock + test deps                     |
 | Reusable bw setup         | `.github/actions/setup-bw`          | Installs a chosen `@bitwarden/cli` (matrix-able)          |
 | Fixture retention rules   | `tests/fixtures/.gitignore`         | Allowlist keeps required DB/certs tracked                 |
 
@@ -27,7 +27,11 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 
 - No pytest collection model; scripts use `main()` and `AssertionError` checks.
 - E2E command wrapper redacts sensitive args/output before logging.
+- `vw_bw_adapter.sh` maps the test profile/session to `VW_APPDATA_DIR`/`VW_SESSION` and invokes the published `vw`
+  CLI through the existing `bw` test contract; it must never fall back to the official CLI.
 - Integration expectations include idempotency (second run must not duplicate items).
+- `bw_serve_exit_test.py` terminates a test process during a simulated request and verifies fatal batch abort,
+  attachment-path propagation, and recovery from disconnects while the process remains alive.
 - The Vaultwarden E2E runs focused REF/TOTP/protected-field checks after golden snapshots, so those checks can mutate
   the vault without changing the comprehensive golden fixtures.
 - It also runs `e2e_metadata_test.py` with metadata explicitly enabled: persisted JSON tags/expiry, untouched YAML
@@ -60,9 +64,8 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
   - `vault_after_update.json` -- after the update pass.
 - Idempotency is proven at the snapshot level: pass 1 == pass 2 (and the refreshed state == its idempotent re-run),
   independent of the golden.
-- Golden compare is gated by `KP2BW_SNAPSHOT_GOLDEN=1`; the **pinned**-CLI matrix leg owns it, the `latest` canary leg
-  runs behavioral checks only.
-- The golden is a function of the exact `@bitwarden/cli` (root `package.json` + `bun.lock`) **and** the pinned
+- Golden comparison is gated by `KP2BW_SNAPSHOT_GOLDEN=1` in the official CLI job.
+- The golden depends on the CLI and
   Vaultwarden image (`tests/Dockerfile.vaultwarden`). When Dependabot bumps either, regenerate and review the diff:
 
   ```bash
