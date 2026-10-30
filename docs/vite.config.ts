@@ -1,9 +1,16 @@
+import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-	plugins: [sveltekit()],
+	plugins: [sveltekit({
+		compilerOptions: { runes: true },
+		adapter: adapter({ fallback: '404.html' }),
+		paths: { base: process.argv.includes('dev') ? '' : (process.env.BASE_PATH ?? '') },
+		preprocess: vitePreprocess(),
+	})],
 	test: {
 		expect: { requireAssertions: true },
 		projects: [

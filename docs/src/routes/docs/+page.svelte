@@ -265,16 +265,16 @@
 
 	<div class="docs-layout">
 		<nav aria-label="Documentation sections">
-			<a href={resolve('/docs#usage')}>Usage and modes</a>
-			<a href={resolve('/docs#precedence')}>Environment</a>
-			<a href={resolve('/docs#source')}>KeePass input</a>
-			<a href={resolve('/docs#destination')}>Bitwarden output</a>
-			<a href={resolve('/docs#reruns')}>Reruns and updates</a>
-			<a href={resolve('/docs#uris')}>URI options</a>
-			<a href={resolve('/docs#utilities')}>Utility options</a>
-			<a href={resolve('/docs#mapping')}>Folders vs collections</a>
-			<a href={resolve('/docs#safety')}>Safety and logs</a>
-			<a href={resolve('/docs#examples')}>Examples</a>
+			<a href={resolve('docs#usage')}>Usage and modes</a>
+			<a href={resolve('docs#precedence')}>Environment</a>
+			<a href={resolve('docs#source')}>KeePass input</a>
+			<a href={resolve('docs#destination')}>Bitwarden output</a>
+			<a href={resolve('docs#reruns')}>Reruns and updates</a>
+			<a href={resolve('docs#uris')}>URI options</a>
+			<a href={resolve('docs#utilities')}>Utility options</a>
+			<a href={resolve('docs#mapping')}>Folders vs collections</a>
+			<a href={resolve('docs#safety')}>Safety and logs</a>
+			<a href={resolve('docs#examples')}>Examples</a>
 		</nav>
 
 		<div class="content">
