@@ -3599,6 +3599,7 @@ class Converter:
 
     def _prepare_entries(self) -> None:
         """Build and validate migration payloads without opening a destination."""
+        self._attachment_plans.clear()
         # load keepass data from database
         self._load_keepass_data()
 
