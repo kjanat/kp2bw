@@ -10,7 +10,7 @@ https://github.com/bitwarden/server/tree/cb98b7e81c83145a2ea02d121ecb4da81d3611b
 """
 
 from .bw_types import BwItemCreate
-from .exceptions import ConversionError
+from .exceptions import FieldLimitError
 
 NAME_LIMIT = 1000
 FIELD_VALUE_LIMIT = 5000
@@ -32,7 +32,7 @@ def fits_field(value: str | None, limit: int) -> bool:
 
 def require_field(value: str | None, limit: int, label: str) -> None:
     if not fits_field(value, limit):
-        raise ConversionError(
+        raise FieldLimitError(
             f"{label} exceeds the destination's {limit}-character encrypted limit "
             "under conservative structured-field budgeting. Shorten the source "
             "value before migrating; it has not been truncated."

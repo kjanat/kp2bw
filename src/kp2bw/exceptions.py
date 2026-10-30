@@ -12,3 +12,7 @@ class BitwardenHttpError(BitwardenClientError):
 
 class ConversionError(Exception):
     """Raised when a KeePass to Bitwarden conversion operation fails."""
+
+
+class FieldLimitError(ConversionError):
+    """Raised when a final item exceeds a destination field budget."""

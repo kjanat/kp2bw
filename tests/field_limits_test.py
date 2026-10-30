@@ -8,6 +8,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
+from uuid import UUID
 
 from Cryptodome.Cipher import AES
 from Cryptodome.Util.Padding import pad
@@ -15,7 +16,7 @@ from pykeepass import create_database
 
 from kp2bw._field_limits import encrypted_length, validate_item
 from kp2bw.convert import Converter
-from kp2bw.exceptions import ConversionError
+from kp2bw.exceptions import ConversionError, FieldLimitError
 
 
 def encrypt_fixture(text: str) -> str:
@@ -200,6 +201,44 @@ def main() -> None:
             else:
                 raise AssertionError("Preflight accepted an oversized title")
             write.assert_not_called()
+    # REF-created items must fail preflight just like ordinary items. Exercise
+    # credential mismatch and matching credentials with extra alias content.
+    for member, size in (("title", 688), ("username", 688), ("password", 3696)):
+        for chained in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "refs.kdbx"
+                database = create_database(path, password="synthetic")
+                target = database.add_entry(database.root_group, "Target", "u", "p")
+                reference = f"{{REF:P@I:{target.uuid.hex.upper()}}}"
+                alias = database.add_entry(database.root_group, "Alias", "u", reference)
+                if member == "password":
+                    alias.username = f"{{REF:U@I:{target.uuid.hex.upper()}}}"
+                setattr(alias, member, "x" * size)
+                alias.notes = "Keep this alias separate even with matching credentials."
+                if chained:
+                    parent = database.add_entry(
+                        database.root_group,
+                        "Parent",
+                        "u",
+                        f"{{REF:P@I:{alias.uuid.hex.upper()}}}",
+                    )
+                    # Force the parent to resolve the invalid child recursively.
+                    parent.uuid = UUID(int=1)
+                    alias.uuid = UUID(int=2)
+                    parent.password = f"{{REF:P@I:{alias.uuid.hex.upper()}}}"
+                database.save()
+                conv = converter()
+                conv._keepass_file_path = str(path)
+                with patch.object(
+                    Converter, "_create_bitwarden_items_for_entries"
+                ) as write:
+                    try:
+                        conv.convert()
+                    except FieldLimitError:
+                        pass
+                    else:
+                        raise AssertionError(f"REF {member} failure was swallowed")
+                    write.assert_not_called()
     print("encrypted field boundary and routing tests passed")
 
 

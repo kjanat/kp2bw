@@ -61,7 +61,7 @@ from .bw_types import (
     BwItemResponse,
     BwUri,
 )
-from .exceptions import BitwardenClientError, ConversionError
+from .exceptions import BitwardenClientError, ConversionError, FieldLimitError
 from .otp import OtpMigration, resolve_otp, totp_values_equivalent
 from .uri_mapping import (
     UriMatchValue,
@@ -1204,6 +1204,9 @@ class Converter:
             )
             return canonical
 
+        except FieldLimitError:
+            # Invalid destination payloads must abort preflight, including REF chains.
+            raise
         except ConversionError, KeyError, AttributeError:
             group = kp_entry.group
             group_path = group.path if group is not None else []
