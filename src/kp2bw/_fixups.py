@@ -160,6 +160,13 @@ def _uris(item: BwItemResponse, options: FixupOptions) -> bool:
         for field in legacy
     ):
         raise FixupDataError("URL fields must be nonempty ordinary text fields")
+    modes: dict[str, int | None] = {}
+    for uri in login.get("uris") or []:
+        value = uri["uri"]
+        mode = uri.get("match")
+        if value in modes and modes[value] != mode:
+            raise FixupDataError("Existing URI has incompatible match modes")
+        modes[value] = mode
     for field in legacy:
         _, derived, _ = remap_item_fields_to_uris(
             [field],
@@ -169,6 +176,14 @@ def _uris(item: BwItemResponse, options: FixupOptions) -> bool:
         )
         if not derived:
             raise FixupDataError("URL field has no lossless URI representation")
+        for uri in derived:
+            value = uri["uri"]
+            mode = uri.get("match")
+            if value in modes and modes[value] != mode:
+                raise FixupDataError(
+                    "Legacy URI conflicts with another URI's match mode"
+                )
+            modes[value] = mode
     fields, uris, changed = remap_item_fields_to_uris(
         fields,
         login.get("uris") or [],

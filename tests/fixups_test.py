@@ -68,6 +68,26 @@ def main() -> None:
     hidden = _login("hidden", ["KP2A_URL"], "https://existing.example")
     hidden["fields"][0]["type"] = 1
     bad.append(hidden)
+    collision = _login("uri-collision", [], "https://example.com/app/")
+    collision_login = collision.get("login")
+    assert collision_login is not None
+    collision_login["uris"] = [{"uri": "https://example.com/app/", "match": 3}]
+    collision["fields"] = [
+        {"name": "KP2A_URL", "value": "https://example.com/app/*", "type": 0}
+    ]
+    stamp_content(collision)
+    bad.append(collision)
+    two_fields = copy.deepcopy(collision)
+    two_fields["id"] = "field-collision"
+    two_fields_login = two_fields.get("login")
+    assert two_fields_login is not None
+    two_fields_login["uris"] = []
+    two_fields["fields"] = [
+        {"name": "KP2A_URL", "value": "https://example.com/app/*", "type": 0},
+        {"name": "KP2A_URL_2", "value": "https://example.com/app/", "type": 0},
+    ]
+    stamp_content(two_fields)
+    bad.append(two_fields)
     items = [stamped, modified, unstamped, canonical, org, outside, *bad]
     original = copy.deepcopy(items)
     client = _MigrateClient(items)
