@@ -29,7 +29,8 @@ def main() -> None:
         .decode()
     )
     rules = parse_ssh_rules([
-        {"group": "Work/Servers", "fields": {"privateKey": "Private Key"}}
+        {"group": "Work/Servers", "fields": {"privateKey": "Private Key"}},
+        {"group": "Referenced keys", "fields": {"privateKey": "Password"}},
     ])
     assert rules[0].matches("Work/Servers", None, {})
     assert not rules[0].matches("Servers", None, {})
@@ -56,6 +57,13 @@ def main() -> None:
             "{REF:P@I:" + entry.uuid.hex.upper() + "}",
             url="https://ssh-login.example.test",
         )
+        key_source = db.add_entry(db.root_group, "Key source", "user", private)
+        selected_alias = db.add_entry(
+            db.add_group(db.root_group, "Referenced keys"),
+            "Selected SSH alias",
+            "user",
+            "{REF:P@I:" + key_source.uuid.hex.upper() + "}",
+        )
         db.save()
         converter = Converter(
             str(path),
@@ -75,6 +83,17 @@ def main() -> None:
             assert converter.convert() == 0
         item = converter.unpack_entry(converter.entries[entry.uuid.hex.upper()])[2]
         assert item["type"] == 5 and item.get("sshKey")
+        selected_item = converter.unpack_entry(
+            converter.entries[selected_alias.uuid.hex.upper()]
+        )[2]
+        assert selected_item["type"] == 5 and selected_item.get("sshKey")
+        assert (
+            converter.unpack_entry(converter.entries[key_source.uuid.hex.upper()])[2][
+                "type"
+            ]
+            == 1
+        )
+
         alias_item = converter.unpack_entry(converter.entries[alias.uuid.hex.upper()])[
             2
         ]
@@ -102,6 +121,37 @@ def main() -> None:
         assert ssh is not None
         ssh["publicKey"] += " changed"
         assert converter.is_user_modified(existing)
+        skip_only = Converter(
+            "unused",
+            "unused",
+            None,
+            "unused",
+            None,
+            None,
+            False,
+            0,
+            None,
+            update_existing=False,
+        )
+        skipped_client = MagicMock()
+        fallback_item = converter.create_bw_python_object(
+            "Account", "user", "password", "", "", "", {}
+        )
+        fallback_item["collectionIds"] = ["new-collection"]
+        outcome, uploads, stale = skip_only.reconcile_existing_item(
+            skipped_client,
+            existing,
+            None,
+            fallback_item,
+            [],
+            fixed_coll_id=None,
+            kp_uuid=entry.uuid.hex.upper(),
+        )
+        assert outcome == "collection" and not uploads and not stale
+        assert skipped_client.update_item.call_args.args[1]["type"] == 5
+        assert skipped_client.update_item.call_args.args[1]["sshKey"] == existing.get(
+            "sshKey"
+        )
         client = MagicMock()
         client.require_ssh_supported.side_effect = BitwardenClientError(
             "Organization policy forbids SSH items"
