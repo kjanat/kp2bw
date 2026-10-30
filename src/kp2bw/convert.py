@@ -1086,6 +1086,18 @@ class Converter:
             if _read_entry_custom_properties(source).values.get("_etm_template") == "1"
         }
         for source in entries if self._ssh_rules else []:
+            if (
+                (
+                    not self._include_recyclebin
+                    and self._is_in_recyclebin(source, recyclebin_group)
+                )
+                or (self._skip_expired and source.expired)
+                or (
+                    self._import_tags
+                    and not set(self._import_tags).intersection(source.tags)
+                )
+            ):
+                continue
             props = _read_entry_custom_properties(source).values
             if props.get("_etm_template") == "1":
                 continue
