@@ -22,11 +22,13 @@ from kp2bw._history import (
 )
 from kp2bw._item_sync import (
     content_signature,
+    fields_signature,
     pre_fido2_content_signature,
     stamp_content,
     sync_stamp_matches,
 )
 from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw._ssh_mapping import parse_ssh_rules
 from kp2bw.bw_types import BwItemResponse, BwPasswordHistory
 from kp2bw.convert import Converter
 from kp2bw.exceptions import (
@@ -239,7 +241,71 @@ def check_legacy_ref_history() -> None:
         assert converter._legacy_ref_status(old, identifier) == "diverged"
 
 
+def check_native_legacy_history_names() -> None:
+    for item_type in (2, 3, 4, 5):
+        legacy = _make_existing(type=item_type)
+        legacy["fields"].append({
+            "name": "KP2BW_HISTORY",
+            "value": "ordinary source value",
+            "type": 0,
+        })
+        # Reproduce the old native-item signature independently of the helper.
+        old_content = (
+            item_type,
+            legacy["name"],
+            legacy["notes"] or "",
+            fields_signature(legacy["fields"]),
+            [],
+        )
+        old_stamp = hashlib.sha256(repr(old_content).encode()).hexdigest()
+        legacy["fields"].append({"name": "KP2BW_SYNC", "value": old_stamp, "type": 0})
+        assert sync_stamp_matches(legacy, old_stamp)
+        requested = _make_desired(type=item_type)
+        requested["fields"].append({
+            "name": "KeePass:KP2BW_HISTORY:1",
+            "value": "ordinary source value",
+            "type": 0,
+        })
+        converter = UpdateTestConverter()
+        converter._map_templates = True
+        converter._ssh_rules = parse_ssh_rules([
+            {"group": "Keys", "fields": {"privateKey": "Private Key"}},
+        ])
+        for force in (False, True):
+            converter._force_update_all = force
+            client = MagicMock(spec=BitwardenServeClient)
+            client.get_item.return_value = copy.deepcopy(legacy)
+            outcome, _, _ = converter.reconcile(
+                cast(BitwardenServeClient, client),
+                legacy,
+                None,
+                requested,
+                [],
+                fixed_coll_id=None,
+            )
+            assert outcome == "updated"
+            payload = client.update_item.call_args.args[1]
+            assert payload["type"] == item_type
+            assert requested["fields"][-1] in payload["fields"]
+            assert not any(f["name"] == "KP2BW_HISTORY" for f in payload["fields"])
+        converter._force_update_all = False
+        edited = copy.deepcopy(legacy)
+        edited["notes"] = "destination edit"
+        client.reset_mock()
+        outcome, _, _ = converter.reconcile(
+            cast(BitwardenServeClient, client),
+            edited,
+            None,
+            requested,
+            [],
+            fixed_coll_id=None,
+        )
+        assert outcome == "protected"
+        client.update_item.assert_not_called()
+
+
 def main() -> None:
+    check_native_legacy_history_names()
     check_legacy_ref_history()
     check_native_updates()
     check_review_regressions()

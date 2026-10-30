@@ -96,7 +96,18 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     assert unchanged_fallback["revisionDate"] == fallback["revisionDate"]
     entry.set_custom_property("Private Key", private_key(), protect=True)
     db.save()
-    migrate()
+    _run_migration(
+        source,
+        "synthetic",
+        password,
+        env,
+        extra_args=(
+            "--entry-id",
+            str(entry.uuid),
+            "--item-id",
+            initial["id"],
+        ),
+    )
     rotated, _ = read()
     assert rotated["id"] == initial["id"]
     assert rotated.get("sshKey") != initial.get("sshKey")

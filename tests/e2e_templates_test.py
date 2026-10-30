@@ -11,6 +11,7 @@ from e2e_vaultwarden_test import _login_session, _run, _run_migration
 from pykeepass import Entry, create_database
 
 from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw._item_sync import pre_history_content_signature
 from kp2bw.bw_types import BwItemResponse
 
 
@@ -42,6 +43,7 @@ def main() -> None:
             template.set_custom_property("_etm_template", "1")
             item = db.add_entry(db.root_group, "Native " + title, "", "")
             item.set_custom_property("_etm_template_uuid", template.uuid.hex)
+            item.set_custom_property("KP2BW_HISTORY", "ordinary source value")
             sources[title] = item
         card = sources["Credit Card"]
         card.set_custom_property("Number", "4111 1111 1111 1111")
@@ -133,6 +135,27 @@ def main() -> None:
         assert alias_login is not None and alias_login.get("totp")
         assert any(uri["uri"] == alias.url for uri in alias_login.get("uris") or [])
         assert initial["Secure Note"]["notes"] == "A native secure note"
+        # Reproduce pre-history native imports with an ordinary marker-name field.
+        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            for title in ("Credit Card", "Identity", "Secure Note"):
+                legacy = copy.deepcopy(initial[title])
+                for field in legacy["fields"]:
+                    if field["name"] == "KeePass:KP2BW_HISTORY:1":
+                        field["name"] = "KP2BW_HISTORY"
+                stamp = pre_history_content_signature(legacy)
+                for field in legacy["fields"]:
+                    if field["name"] == "KP2BW_SYNC":
+                        field["value"] = stamp
+                bw.update_item(legacy["id"], legacy)
+        migrate()
+        initial = read()
+        for title in ("Credit Card", "Identity", "Secure Note"):
+            assert any(
+                f["name"] == "KeePass:KP2BW_HISTORY:1" for f in initial[title]["fields"]
+            )
+            assert not any(
+                f["name"] == "KP2BW_HISTORY" for f in initial[title]["fields"]
+            )
         migrate()
         unchanged = read()
         assert {key: value["revisionDate"] for key, value in initial.items()} == {
@@ -142,7 +165,19 @@ def main() -> None:
         sources["Identity"].set_custom_property("First Name", "Grace")
         sources["Secure Note"].notes = "Updated secure note"
         db.save()
-        migrate()
+        for title in ("Credit Card", "Identity", "Secure Note"):
+            _run_migration(
+                source,
+                "synthetic",
+                password,
+                env,
+                extra_args=(
+                    "--entry-id",
+                    str(sources[title].uuid),
+                    "--item-id",
+                    initial[title]["id"],
+                ),
+            )
         changed = read()
         assert (
             changed["Credit Card"]["card"]

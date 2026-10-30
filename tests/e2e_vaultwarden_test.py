@@ -535,6 +535,7 @@ def _run_migration(
     env: dict[str, str],
     *,
     metadata: bool = False,
+    extra_args: tuple[str, ...] = (),
 ) -> str:
     """Run a single kp2bw migration pass against the snapshot."""
     return _run(
@@ -552,6 +553,7 @@ def _run_migration(
             "--metadata" if metadata else "--no-metadata",
             "-y",
             "-v",
+            *extra_args,
         ],
         env=env,
     )
