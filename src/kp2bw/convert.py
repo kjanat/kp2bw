@@ -78,6 +78,7 @@ from .bw_types import (
 from .exceptions import (
     BitwardenAttachmentMissingError,
     BitwardenClientError,
+    BitwardenServeExitedError,
     ConversionError,
 )
 from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
@@ -1591,6 +1592,30 @@ class Converter:
         stamp_content(payload)
         return payload
 
+    @staticmethod
+    def sync_collection_membership(
+        bw: BitwardenServeClient,
+        existing: BwItemResponse,
+        desired: BwItemCreate,
+        fixed_collection: str | None,
+    ) -> Literal["collection", "skipped"]:
+        if fixed_collection:
+            return "skipped"
+        current = existing.get("collectionIds") or []
+        missing = [
+            value
+            for value in desired.get("collectionIds") or []
+            if value not in current
+        ]
+        if not missing:
+            return "skipped"
+        payload = copy.deepcopy(existing)
+        payload["collectionIds"] = [*current, *missing]
+        bw.update_item(existing["id"], payload)
+        if source_id := item_kp2bw_id(existing):
+            bw.update_dedup_entry(source_id, payload)
+        return "collection"
+
     def _reconcile_existing_item(
         self,
         bw: BitwardenServeClient,
@@ -1645,6 +1670,19 @@ class Converter:
                 f"-- Entry {name!r}: matched a non-login item, skipping",
             )
             return outcome, [], {}
+
+        if not self._update_existing:
+            try:
+                return (
+                    self.sync_collection_membership(
+                        bw, existing, bw_item, fixed_coll_id
+                    ),
+                    [],
+                    {},
+                )
+            except BitwardenClientError:
+                logger.warning("Collection synchronization failed for item %s", item_id)
+                return "failed", [], {}
 
         if any(is_record_field(field) for field in existing.get("fields") or []) and (
             not item_kp2bw_sync(existing)
@@ -1808,6 +1846,8 @@ class Converter:
                     for source in plan.uploads
                     if source.source_id in plan.stale
                 }
+            except BitwardenServeExitedError:
+                raise
             except (BitwardenClientError, ConversionError) as exc:
                 logger.warning(
                     "Could not safely associate attachments on item %s (%s); leaving its files unchanged",
@@ -2275,6 +2315,32 @@ class Converter:
             raise ConversionError("Item changed while saving attachment associations")
         records = dict(plan.records)
         verified: list[CheckpointRecord] = []
+        # Recheck adopted bytes against fresh metadata before persisting an ID.
+        # These files were uploaded on an earlier attempt, not in this batch.
+        for source in plan.sources:
+            record = records.get(source.source_id)
+            if record is None or record == plan.previous_records.get(source.source_id):
+                continue
+            metadata = next(
+                (
+                    att
+                    for att in full.get("attachments") or []
+                    if att["id"] == record.attachment_id
+                ),
+                None,
+            )
+            if (
+                metadata is None
+                or hashlib.sha256(metadata["fileName"].encode()).hexdigest()
+                != record.name_digest
+                or hashlib.sha256(
+                    bw.get_attachment(item_id, record.attachment_id)
+                ).hexdigest()
+                != record.digest
+            ):
+                raise ConversionError(
+                    "Recovered attachment changed before its association could be saved"
+                )
         for source in plan.uploads:
             if (item_id, source.filename) in failed:
                 continue
@@ -2434,7 +2500,7 @@ class Converter:
                     adopted = existing is not None
                 if existing is not None:
                     item_id = existing["id"]
-                    outcome, upload_atts, stale_by_name = self._reconcile_existing_item(
+                    outcome, upload_atts, _ = self._reconcile_existing_item(
                         bw,
                         existing,
                         folder,
@@ -2467,9 +2533,6 @@ class Converter:
                         if pair not in queued_atts:
                             queued_atts.add(pair)
                             unique_atts.append(att)
-                            old_id = stale_by_name.get(fname)
-                            if old_id is not None:
-                                pending_deletes.append((item_id, old_id, fname))
                     if unique_atts:
                         existing_uploads.append((item_id, unique_atts))
                     progress.advance(task1)
@@ -2580,6 +2643,13 @@ class Converter:
             for item_id, plan in self._attachment_plans.items():
                 try:
                     self._persist_attachment_plan(bw, item_id, plan, failed_uploads)
+                    pending_deletes.extend(
+                        (item_id, plan.stale[source.source_id], source.filename)
+                        for source in plan.sources
+                        if source.source_id in plan.stale
+                    )
+                except BitwardenServeExitedError:
+                    raise
                 except (BitwardenClientError, ConversionError) as exc:
                     n_update_failed += 1
                     failed_uploads.update(

@@ -229,14 +229,69 @@ def plan_attachments(
             filename = available_name(source) if name in allocated else name
             selected = replace(source, filename=filename)
             if current != source.data or filename != name:
-                uploads.append(selected)
+                candidates = [
+                    attachment_id
+                    for attachment_id in by_name.get(filename, [])
+                    if attachment_id not in claimed
+                    and content(attachment_id) == source.data
+                ]
+                if len(candidates) > 1:
+                    raise ConversionError(
+                        "Pending replacement has ambiguous attachment IDs; no files were changed"
+                    )
+                if candidates:
+                    attachment_id = candidates[0]
+                    associated[source.source_id] = FileRecord(
+                        attachment_id,
+                        hashlib.sha256(filename.encode()).hexdigest(),
+                        source.digest,
+                    )
+                    claimed.add(attachment_id)
+                else:
+                    uploads.append(selected)
                 stale[source.source_id] = record.attachment_id
         else:
             filename = source.original_name
             if filename in allocated or filename in by_name:
                 filename = available_name(source)
+            path = PurePosixPath(source.original_name)
+            suffix = path.suffix
+            stem = (
+                source.original_name[: -len(suffix)] if suffix else source.original_name
+            )
+            allocated_pattern = re.compile(
+                re.escape(f"{stem} (kp2bw-{source.source_id[:16]}")
+                + r"(?:-[1-9][0-9]*)?"
+                + re.escape(f"){suffix}")
+            )
+            candidates = [
+                (attachment_id, name)
+                for attachment_id, name in remote
+                if attachment_id not in claimed
+                and name not in allocated
+                and (
+                    (name == source.original_name and desired_counts[name] == 1)
+                    or (
+                        allocated_pattern.fullmatch(name) and name not in desired_counts
+                    )
+                )
+                and content(attachment_id) == source.data
+            ]
+            if len(candidates) > 1:
+                raise ConversionError(
+                    "Pending upload has ambiguous attachment IDs; no files were changed"
+                )
+            if candidates:
+                attachment_id, filename = candidates[0]
+                associated[source.source_id] = FileRecord(
+                    attachment_id,
+                    hashlib.sha256(filename.encode()).hexdigest(),
+                    source.digest,
+                )
+                claimed.add(attachment_id)
             selected = replace(source, filename=filename)
-            uploads.append(selected)
+            if not candidates:
+                uploads.append(selected)
         planned.append(selected)
         allocated.add(selected.filename)
     return AttachmentPlan(planned, associated, dict(records), uploads, stale)
