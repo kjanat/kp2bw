@@ -152,7 +152,7 @@ def item_kp2bw_sync(item: BwItemResponse) -> str | None:
     return None
 
 
-def _item_revision(item: Mapping[str, object]) -> str | None:
+def item_revision(item: Mapping[str, object]) -> str | None:
     """Return a usable conditional-write revision from an API item."""
     revision = item.get("revisionDate")
     return revision if isinstance(revision, str) and revision else None
@@ -1524,7 +1524,7 @@ class BitwardenServeClient:
         :meth:`update_dedup_entry`.
         """
         self.validate_item_update(item_id, item)
-        body = self._item_update_body(item)
+        body = self.item_update_body(item)
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
         if has_managed_history(item):
             self._verify_history(item_id, item)
@@ -1535,7 +1535,7 @@ class BitwardenServeClient:
     ) -> None:
         """Replace an item only if the server still knows the observed revision."""
         self.validate_item_update(item_id, item)
-        body = self._item_update_body(item, expected_revision=expected_revision)
+        body = self.item_update_body(item, expected_revision=expected_revision)
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
         if has_managed_history(item):
             self._verify_history(item_id, item)
@@ -1612,7 +1612,7 @@ class BitwardenServeClient:
             )
 
     @staticmethod
-    def _item_update_body(
+    def item_update_body(
         item: BwItemResponse, *, expected_revision: str | None = None
     ) -> dict[str, Any]:
         """Return the full request body used to replace *item*."""
@@ -1757,15 +1757,13 @@ class BitwardenServeClient:
             login["uris"] = new_uris
             stamp_content(item)
             latest_item = self.get_item(item["id"])
-            if self._item_update_body(latest_item) != self._item_update_body(
-                fresh_item
-            ):
+            if self.item_update_body(latest_item) != self.item_update_body(fresh_item):
                 logger.warning(
                     f"Skipping {item.get('name', '?')!r}: changed during URI migration"
                 )
                 protected += 1
                 continue
-            latest_revision = _item_revision(latest_item)
+            latest_revision = item_revision(latest_item)
             if latest_revision is None:
                 logger.warning(
                     f"Skipping {item.get('name', '?')!r}: Bitwarden returned no "
@@ -1782,12 +1780,10 @@ class BitwardenServeClient:
                     raise
                 self.sync()
                 resolved_item = self.get_item(item["id"])
-                if self._item_update_body(resolved_item) == self._item_update_body(
-                    item
-                ):
+                if self.item_update_body(resolved_item) == self.item_update_body(item):
                     migrated += 1
                     continue
-                resolved_revision = _item_revision(resolved_item)
+                resolved_revision = item_revision(resolved_item)
                 if resolved_revision is None or resolved_revision == latest_revision:
                     raise
                 logger.warning(

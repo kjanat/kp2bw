@@ -139,7 +139,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 [--include-oversize-secrets] [--folder | --no-folder] [--uri-match MODE]
 [--totp-pps | --no-totp-pps]
 [--interpret-uri-syntax | --no-interpret-uri-syntax]
-[--migrate-uris] [--report-uris SOURCE] [--strip-ids] [-y] [-v] [-d]
+[--fixup] [--migrate-uris] [--report-uris SOURCE] [--strip-ids] [-y] [-v] [-d]
 [FILE]
 ```
 
@@ -178,6 +178,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--redact`                               | With `--doctor`: mask the server URL and home-anchored paths so the report is safe to paste in a public issue                                                                                       | -                                     |
 | `--entry-id UUID`                        | Sync only this KeePass entry; intersects existing import and destination filters                                                                                                                    | —                                     |
 | `--item-id UUID`                         | Sync only this existing Bitwarden item using its KeePass UUID stamp                                                                                                                                 | —                                     |
+| `--fixup`                                | Upgrade known legacy URI fields and YAML metadata in Bitwarden without reading KeePass                                                                                                              | `KP2BW_FIXUP`                         |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 
@@ -230,6 +231,12 @@ items are updated in place), or — if you don't want to re-import — run `kp2b
 pass that re-folds the legacy fields into URIs on every existing item. Both honour
 `--uri-match`/`--interpret-uri-syntax` and `-o`/`-c`. The one-shot pass preserves stamped items edited in Bitwarden and
 establishes or refreshes `KP2BW_SYNC` on each migrated item.
+
+`kp2bw --fixup` upgrades both legacy URL/app fields and YAML `KP2BW_META` to JSON without reading KeePass. It defaults
+to your personal vault; use `-o <org>` and optionally `-c <collection>` for an organization scope. Modified stamped
+items are preserved. Recognized unstamped fields are upgraded and stamped; malformed or ambiguous data stays untouched
+with a warning. The summary reports scanned, migrated, skipped and failed items; failures return exit code 1. Repeated
+runs write nothing once eligible items are upgraded. `--migrate-uris` remains URI-only.
 
 Too many subdomains autofilling together? Under base-domain matching, every login under `*.example.com` surfaces on any
 `example.com` subdomain. `kp2bw --report-uris keepass` (or `bitwarden`) prints a read-only collision report —

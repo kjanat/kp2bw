@@ -104,6 +104,25 @@ def check_checkpoint_snapshot() -> None:
 
 
 def main() -> None:
+    for arguments in (
+        ["--preview", "--fixup"],
+        ["--entry-id", "00000000-0000-0000-0000-000000000001", "--fixup"],
+    ):
+        with (
+            patch("sys.argv", ["kp2bw", *arguments]),
+            patch("kp2bw.cli._load_dotenv", return_value=None),
+            patch("kp2bw.cli._configure_logging", return_value=None),
+            patch(
+                "kp2bw.cli.ensure_bw_available",
+                side_effect=AssertionError("Invalid modes opened Bitwarden"),
+            ),
+        ):
+            try:
+                cli_main()
+            except SystemExit as exc:
+                assert exc.code == 2
+            else:
+                raise AssertionError("Preview/selection accepted a mutation-only mode")
     check_checkpoint_snapshot()
     native = _make_desired(type=3, card={"number": "private-card-number"})
     native_report = PreviewEntry("source", "planned")

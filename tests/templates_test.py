@@ -193,7 +193,7 @@ def main() -> None:
     assert not conv._content_differs(existing, item), (
         "Wire format must retain the same signature"
     )
-    assert "login" not in BitwardenServeClient._item_update_body(existing)
+    assert "login" not in BitwardenServeClient.item_update_body(existing)
     stamp = content_signature(existing)
     assert sync_stamp_matches(existing, stamp)
     assert existing["card"] is not None

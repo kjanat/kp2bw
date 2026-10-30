@@ -125,3 +125,7 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 - `item_selection_test.py` verifies selector identity, scope, REF dependencies and preflight rejection.
   `e2e_item_selection_test.py` checks selected creation, updates, forced overwrite, attachments and unchanged controls
   with both supported CLIs.
+
+- `fixups_test.py` covers metadata schema validation, atomic per-item upgrades, sync stamps, races, personal/org/collection
+  scope and CLI routing without KeePass. `e2e_fixups_test.py` verifies persisted JSON and URI values, protected controls,
+  unchanged reruns and the URI-only command with both CLIs.

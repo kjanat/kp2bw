@@ -207,3 +207,7 @@ def test_field_limits_script() -> None:
 
 def test_item_selection_script() -> None:
     _run_script_main("item_selection_test.py")
+
+
+def test_fixups_script() -> None:
+    _run_script_main("fixups_test.py")

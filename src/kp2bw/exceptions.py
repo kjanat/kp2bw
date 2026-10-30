@@ -28,3 +28,7 @@ class BitwardenServeExitedError(ConversionError):
 
 class HistoryConversionError(ConversionError):
     """History cannot be preserved under the requested migration policy."""
+
+
+class FixupDataError(ConversionError):
+    """A legacy item representation cannot be upgraded losslessly."""

@@ -2147,6 +2147,8 @@ class Converter:
                     [],
                     {},
                 )
+            except BitwardenServeExitedError:
+                raise
             except BitwardenClientError:
                 logger.warning("Collection synchronization failed for item %s", item_id)
                 return "failed", [], {}

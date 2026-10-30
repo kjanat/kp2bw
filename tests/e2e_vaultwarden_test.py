@@ -1187,6 +1187,10 @@ def main() -> None:
     from e2e_item_selection_test import main as run_item_selection_test
 
     run_item_selection_test()
+
+    from e2e_fixups_test import main as run_fixups_test
+
+    run_fixups_test()
     print("vaultwarden end-to-end integration test passed")
 
 

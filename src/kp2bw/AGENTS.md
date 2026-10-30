@@ -236,3 +236,10 @@ src/kp2bw/
 
 - Historical REF recognition reconstructs the former plaintext field/notes cutoff independently of current encrypted budgets.
   Untouched old imports remain eligible for automatic upgrade; edits to their old inline fields stay protected.
+
+- `_fixups.py` registers field-local upgrades for `--fixup`: URI fields and legacy YAML metadata. It validates every
+  transformation on a copy, checks current/legacy sync stamps, rereads the complete update body, then issues one
+  revision-conditional PUT. Personal scope explicitly excludes organization items. Unknown/ambiguous data fails per
+  item without exposing field values; changed stamps are skipped. The existing URI-only command remains separate.
+
+- URI fixups reject collisions between existing and derived URIs with different match modes before removing any fields.
