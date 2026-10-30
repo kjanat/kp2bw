@@ -659,7 +659,7 @@ def _configure_logging(*, verbose: bool, debug: bool) -> Path | None:
 
     Console verbosity follows the flags (INFO default, VERBOSE with ``-v``, full
     DEBUG with ``-d``).  A file handler is *always* attached at DEBUG, and the
-    transport loggers (``httpx``/``httpcore``) are pinned to DEBUG too, so the
+    transport loggers (``httpx``/``httpcore``) use DEBUG too, so the
     file captures a complete trace -- per-entry detail plus full request and
     connection logs -- regardless of console verbosity.  The console stays clean
     because each console handler filters that noise out itself

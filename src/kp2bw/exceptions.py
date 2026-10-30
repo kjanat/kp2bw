@@ -16,3 +16,7 @@ class ConversionError(Exception):
 
 class FieldLimitError(ConversionError):
     """Raised when a final item exceeds a destination field budget."""
+
+
+class BitwardenServeExitedError(ConversionError):
+    """Fatal transport loss; per-item failure handlers must not swallow it."""
