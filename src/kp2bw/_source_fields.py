@@ -5,7 +5,12 @@ from urllib.parse import quote, unquote
 from ._attachments import ATTACHMENT_FIELD_PREFIX
 
 SOURCE_FIELD_PREFIX = "KeePass:"
-RESERVED_FIELD_NAMES = frozenset({"KP2BW_ID", "KP2BW_SYNC", "KP2BW_META"})
+RESERVED_FIELD_NAMES = frozenset({
+    "KP2BW_ID",
+    "KP2BW_SYNC",
+    "KP2BW_META",
+    "KP2BW_HISTORY",
+})
 
 
 def source_field_name(name: str, occurrence: int = 1) -> str:

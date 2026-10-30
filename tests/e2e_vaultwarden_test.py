@@ -1159,6 +1159,10 @@ def main() -> None:
     from e2e_templates_test import main as run_templates_test
 
     run_templates_test()
+
+    from e2e_history_archive_test import main as run_history_archive_test
+
+    run_history_archive_test()
     print("vaultwarden end-to-end integration test passed")
 
 

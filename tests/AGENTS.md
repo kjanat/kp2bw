@@ -25,6 +25,10 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 
 ## CONVENTIONS
 
+- `history_test.py` covers historical password transitions and archive recovery, including saved/reopened KDBX files.
+  `e2e_history_archive_test.py` verifies the opt-in archive through both CLIs, including filename collisions, binary
+  recovery, replacement and unchanged reruns.
+
 - No pytest collection model; scripts use `main()` and `AssertionError` checks.
 - E2E command wrapper redacts sensitive args/output before logging.
 - `vw_bw_adapter.sh` maps the test profile/session to `VW_APPDATA_DIR`/`VW_SESSION` and invokes the published `vw`

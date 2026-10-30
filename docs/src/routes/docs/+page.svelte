@@ -113,6 +113,20 @@
 			detail:
 				'Allow oversized hidden OTP, passkey, and KeePass-protected fields to become plaintext .txt attachments. Without consent they are warned about and dropped, not exposed.',
 		},
+		{
+			flag: '--archive-history',
+			env: 'KP2BW_ARCHIVE_HISTORY',
+			default: 'Off',
+			detail:
+				'Archive full historical records, including old passwords, protected fields, source timestamps and available attachment bytes. Generated filenames avoid collisions with your files.',
+		},
+		{
+			flag: '--password-history, --no-password-history',
+			env: 'KP2BW_PASSWORD_HISTORY',
+			default: 'On',
+			detail:
+				'Import up to five distinct previous passwords. Preserve unrelated destination history and verify writes. Native history updates require the Vaultwarden CLI through a bw adapter.',
+		},
 	];
 
 	const rerunOptions: Option[] = [

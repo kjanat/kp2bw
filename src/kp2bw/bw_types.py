@@ -37,6 +37,7 @@ __all__ = [
     "BwItemCreate",
     "BwItemLogin",
     "BwItemResponse",
+    "BwPasswordHistory",
     "BwSshKey",
     "BwUri",
     "Group",
@@ -147,6 +148,13 @@ class BwSshKey(TypedDict):
     keyFingerprint: str
 
 
+class BwPasswordHistory(TypedDict):
+    """Previous password and the instant it stopped being current."""
+
+    password: str
+    lastUsedDate: str | None
+
+
 class _BwItemCommon(TypedDict):
     """Fields shared across both the create payload and every API response.
 
@@ -174,6 +182,8 @@ class _BwItemCommon(TypedDict):
     card: ItemCard | None
     identity: ItemIdentity | None
     sshKey: NotRequired[BwSshKey | None]
+
+    passwordHistory: NotRequired[list[BwPasswordHistory] | None]
 
 
 class BwItemCreate(_BwItemCommon):
