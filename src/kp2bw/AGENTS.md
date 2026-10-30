@@ -68,6 +68,9 @@ src/kp2bw/
   Its opt-in archive preserves complete historical XML and available referenced binary bytes. Treat archive data as
   secret. `--archive-history` adds a `SourceFile` of kind `history`, so existing attachment identity handling protects
   filename collisions and unchanged reruns. REF aliases with archived history stay separate.
+  History conversion errors propagate through REF resolution before destination writes. A valid pre-history stamp
+  authenticates a legacy source field named `KP2BW_HISTORY`; it is escaped before adding managed history. Conditional
+  updates use the payload's original revision, and `--no-update` bypasses history merging while retaining collection sync.
 
 - Maintain behavior parity for `kp2bw.cli:main` and `python -m kp2bw`.
 - Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on, `Converter(update_existing=...)`):

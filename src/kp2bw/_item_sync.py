@@ -26,7 +26,7 @@ _UUID_CREDENTIAL_ID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
 
-type SyncStampGeneration = Literal["current", "pre_fido2", "legacy"]
+type SyncStampGeneration = Literal["current", "pre_history", "pre_fido2", "legacy"]
 type Fido2CredentialSignature = tuple[str, str, str, str, str, str, str]
 type Fido2Signature = list[Fido2CredentialSignature]
 
@@ -176,6 +176,23 @@ def pre_fido2_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def is_legacy_history_source(item: BwItemResponse | BwItemCreate) -> bool:
+    """An authenticated pre-history stamp treats the marker name as source data."""
+    if not has_managed_history(item):
+        return False
+    stamps = [
+        field.get("value")
+        for field in item.get("fields") or []
+        if field.get("name") == KP2BW_SYNC_FIELD_NAME
+    ]
+    parts = _content_parts(item)
+    fido2 = fido2_signature(item.get("login"))
+    previous = hashlib.sha256(
+        repr((*parts, fido2) if fido2 else parts).encode("utf-8")
+    ).hexdigest()
+    return stamps == [previous]
+
+
 def legacy_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     """Return the pre-3.8.1 signature for compatibility with existing stamps."""
     blob = repr((
@@ -194,7 +211,7 @@ def sync_stamp_generation(
     if stamp == content_signature(item):
         return "current"
     if has_managed_history(item):
-        return None
+        return "pre_history" if is_legacy_history_source(item) else None
     if stamp == pre_fido2_content_signature(item):
         return "pre_fido2"
     if stamp == legacy_content_signature(item):
