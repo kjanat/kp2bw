@@ -177,3 +177,8 @@ src/kp2bw/
   `tests/bw_serve_upload_batch_test.py`, `tests/e2e_attachment_batch_test.py`.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.
+
+- `--entry-id` / `--item-id` resolve one stable source/destination association before writes. Selection checks all visible
+  stamps for ambiguity and intersects destination scope; it never uses legacy title adoption. Only the selected source
+  and its REF dependencies are parsed, and only the selected source is written. A selected alias stays separate.
+  Import filters apply to the selected source; references may read excluded dependencies without writing them.

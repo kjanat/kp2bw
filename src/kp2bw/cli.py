@@ -8,6 +8,7 @@ from argparse import ArgumentParser, BooleanOptionalAction, HelpFormatter, Names
 from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
+from uuid import UUID
 
 from dotenv import dotenv_values, find_dotenv
 from rich.logging import RichHandler
@@ -291,6 +292,18 @@ def _argparser() -> MyArgParser:
         help="Update matching Bitwarden items (default: on).",
         action=BooleanOptionalAction,
         default=None,
+    )
+    parser.add_argument(
+        "--entry-id",
+        metavar="UUID",
+        type=lambda value: str(UUID(value)),
+        help="Sync only this KeePass entry UUID.",
+    )
+    parser.add_argument(
+        "--item-id",
+        metavar="UUID",
+        type=lambda value: str(UUID(value)),
+        help="Sync only this existing Bitwarden item UUID.",
     )
     parser.add_argument(
         "--force-update",
@@ -726,6 +739,8 @@ def main() -> None:
 
     args: Namespace = _argparser().parse_args()
 
+    if (args.entry_id or args.item_id) and args.doctor:
+        _argparser().error("Item selection cannot be combined with --doctor")
     if args.doctor:
         report = collect_report()
         if args.redact:
@@ -824,6 +839,8 @@ def main() -> None:
 
     # Bitwarden-only modes read no KeePass database, so the path requirement
     # (and the KeePass password prompt below) is skipped for them.
+    if (args.entry_id or args.item_id) and (strip_ids or migrate_uris or report_uris):
+        _argparser().error("Item selection is only available for migration")
     bitwarden_only = strip_ids or migrate_uris or report_uris == "bitwarden"
     if not bitwarden_only and not args.keepass_file:
         _ = sys.stderr.write(
@@ -966,6 +983,8 @@ def main() -> None:
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,
         totp_pps=totp_pps,
+        entry_id=args.entry_id,
+        item_id=args.item_id,
     )
     try:
         failures = c.convert()

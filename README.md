@@ -133,6 +133,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
+       [--entry-id UUID] [--item-id UUID]
        [--metadata | --no-metadata] [--update | --no-update] [--force-update]
        [--include-oversize-secrets] [--folder | --no-folder] [--uri-match MODE]
        [--totp-pps | --no-totp-pps]
@@ -157,6 +158,8 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--include-recycle-bin`                | Include Recycle Bin entries (excluded by default)                                                                                                                                                   | `KP2BW_INCLUDE_RECYCLE_BIN`           |
 | `--metadata` / `--no-metadata`         | Toggle KeePass tags/expiry as a `KP2BW_META` field (default: on)                                                                                                                                    | `KP2BW_MIGRATE_METADATA`              |
 | `--update` / `--no-update`             | Update existing entries changed in KeePass (default: on)                                                                                                                                            | `KP2BW_UPDATE`                        |
+| `--entry-id UUID`                      | Sync only this KeePass entry; intersects existing import and destination filters                                                                                                                    | —                                     |
+| `--item-id UUID`                       | Sync only this existing Bitwarden item using its KeePass UUID stamp                                                                                                                                 | —                                     |
 | `--force-update`                       | Overwrite items even if edited in Bitwarden since the last run (default: protect such edits)                                                                                                        | `KP2BW_FORCE_UPDATE`                  |
 | `--include-oversize-secrets`           | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off)                                                                                           | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
 | `--uri-match MODE`                     | Match mode for plain URLs: `default`(default, account default)/`domain`/`host`/`startswith`/`exact`/`regex`/`never`                                                                                 | `KP2BW_URI_MATCH`                     |
@@ -214,6 +217,13 @@ signature, and a re-run that finds an item's current content no longer matching 
 (kp2bw's own writes restamp, so they never self-trip) and **preserves your edit**, listing it as `protected` in the
 summary. Pass `--force-update` (env `KP2BW_FORCE_UPDATE`) to make KeePass win regardless. Unchanged re-runs stay
 idempotent, and items imported before this existed are adopted normally on their first re-run.
+
+To retry just one item, use `kp2bw vault.kdbx --entry-id <KeePass-UUID>` or `--item-id <Bitwarden-UUID>`. Add
+`--force-update` to overwrite an edit on that item alone. When both IDs are supplied, they must identify the same
+source. Unknown, ambiguous or excluded IDs stop before writes. A new source selected by UUID can be created, but
+selection never adopts another item by title. A selected REF alias is imported separately; its referenced entries are
+read without being written. `--no-update` still preserves existing content and attachments; collection membership may
+sync. Selectors apply only to migration, not maintenance modes.
 
 Every migrated item carries a plain-text `KP2BW_ID` custom field — the KeePass UUID kp2bw uses to match entries on
 re-runs so nothing duplicates. Once you're satisfied the migration is complete and you're ready to fully adopt

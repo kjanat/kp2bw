@@ -92,3 +92,7 @@ uv run python tests/e2e_vaultwarden_test.py
 docker compose -f tests/docker-compose.yml build
 docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-code-from test
 ```
+
+- `item_selection_test.py` verifies selector identity, scope, REF dependencies and preflight rejection.
+  `e2e_item_selection_test.py` checks selected creation, updates, forced overwrite, attachments and unchanged controls
+  with both supported CLIs.
