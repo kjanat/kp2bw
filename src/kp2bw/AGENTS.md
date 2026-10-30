@@ -189,3 +189,6 @@ src/kp2bw/
   to marked templates are classified. Native card/identity/secure-note fields enter content signatures; old login-only
   stamp algorithms cannot authenticate them. Internal parsed source login data remains available for provenance but is
   omitted by HTTP create/update for native items. Its nonempty values are retained in a custom field.
+
+- Template mapping resolves escaped source-field names before matching overrides and excludes migration bookkeeping.
+  Conflicting duplicate values remain custom fields. Login REF aliases remain separate when their target maps to a native non-login item.

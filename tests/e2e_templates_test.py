@@ -1,6 +1,7 @@
 """Native templates survive real CLI creation, updates and unchanged reruns."""
 
 import copy
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -50,6 +51,41 @@ def main() -> None:
         sources["Identity"].set_custom_property("First Name", "Ada")
         sources["Identity"].set_custom_property("Last Name", "Example")
         sources["Secure Note"].notes = "A native secure note"
+        alias = db.add_entry(
+            db.root_group,
+            "Native target alias",
+            "",
+            f"{{REF:P@I:{card.uuid.hex.upper()}}}",
+        )
+        alias.url = "https://native-alias.example.test"
+        alias.otp = "otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP"
+        sources["Alias"] = alias
+        identity_source = sources["Identity"]
+        identity_source.set_custom_property("KP2BW_ID", "source-username")
+        mapping = tmp / "template-map.json"
+        mapping.write_text(
+            json.dumps({
+                identity_source.get_custom_property("_etm_template_uuid"): {
+                    "type": "identity",
+                    "fields": {"KP2BW_ID": "username"},
+                }
+            }),
+            encoding="utf-8",
+        )
+        conflict = db.add_entry(db.root_group, "Conflicting Card", "", "")
+        conflict.set_custom_property(
+            "_etm_template_uuid", card.get_custom_property("_etm_template_uuid") or ""
+        )
+        conflict.set_custom_property("Number", "4111111111111111")
+        sources["Conflicting Card"] = conflict
+        number_node = conflict._element.find("./String[Key='Number']")
+        assert number_node is not None
+        duplicate_node = copy.deepcopy(number_node)
+        number_value = duplicate_node.find("Value")
+        assert number_value is not None
+        number_value.text = "5555555555554444"
+        conflict._element.append(duplicate_node)
+        env["KP2BW_TEMPLATE_MAP"] = str(mapping)
         db.save()
 
         def migrate() -> None:
@@ -66,7 +102,14 @@ def main() -> None:
 
         migrate()
         initial = read()
-        assert [initial[key]["type"] for key in sources] == [3, 4, 2]
+        assert [initial[key]["type"] for key in sources] == [3, 4, 2, 1, 3]
+        conflict_card = initial["Conflicting Card"]["card"]
+        assert conflict_card is not None and not conflict_card.get("number")
+        assert {
+            field["value"]
+            for field in initial["Conflicting Card"]["fields"]
+            if "Number" in field["name"]
+        } == {"4111111111111111", "5555555555554444"}
         native_card = initial["Credit Card"]["card"]
         assert (
             native_card is not None and native_card.get("number") == "4111111111111111"
@@ -80,6 +123,15 @@ def main() -> None:
         )
         identity = initial["Identity"]["identity"]
         assert identity is not None and identity.get("firstName") == "Ada"
+        assert identity.get("username") == "source-username"
+        assert any(
+            field["name"] == "KP2BW_ID"
+            and field["value"] == identity_source.uuid.hex.upper()
+            for field in initial["Identity"]["fields"]
+        )
+        alias_login = initial["Alias"].get("login")
+        assert alias_login is not None and alias_login.get("totp")
+        assert any(uri["uri"] == alias.url for uri in alias_login.get("uris") or [])
         assert initial["Secure Note"]["notes"] == "A native secure note"
         migrate()
         unchanged = read()

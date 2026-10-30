@@ -1230,6 +1230,13 @@ class Converter:
                 separate_reason = self._ref_separate_item_reason(
                     kp_entry, custom_property_data.values, otp_result
                 )
+                target_id = self._item_field_value(ref_item, KP2BW_ID_FIELD_NAME)
+                rule = self._entry_templates.get(target_id or "")
+                if self._map_templates and rule is not None:
+                    planned_target = copy.deepcopy(ref_item)
+                    apply_template(planned_target, rule)
+                    if planned_target["type"] != BW_ITEM_TYPE_LOGIN:
+                        separate_reason = "a reference to a native non-login item"
                 existing_totp = ref_item["login"]["totp"]
                 if (
                     separate_reason is None
