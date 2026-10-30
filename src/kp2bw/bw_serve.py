@@ -1188,7 +1188,23 @@ class BitwardenServeClient:
         array is only consulted for upload-if-missing reconciliation, so this
         authoritative fetch is used to avoid creating duplicate attachments.
         """
-        data = self._request("GET", f"/object/item/{item_id}")
+        path = f"/object/item/{item_id}"
+        try:
+            data = self._request("GET", path)
+        except BitwardenHttpError as exc:
+            if not _is_missing_item_error(exc.status_code, str(exc)):
+                raise
+            # The official CLI can temporarily lose an item from its local
+            # cache after a successful upload/sync. Force a fresh server read;
+            # the normal sync can skip fetching based on its revision timestamp.
+            # Retry only this read, once. A still-missing item remains a failure.
+            logger.log(
+                VERBOSE,
+                "Item %s not found in CLI cache; forcing sync and retrying read",
+                item_id,
+            )
+            self._request("POST", "/sync", params={"force": "true"}, idempotent=True)
+            data = self._request("GET", path)
         return cast(BwItemResponse, data)
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
