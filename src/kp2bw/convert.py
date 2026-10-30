@@ -78,6 +78,7 @@ from ._item_sync import (
     KP2BW_SYNC_FIELD_NAME,
     content_signature,
     fields_signature,
+    is_legacy_history_source,
     legacy_extensions_differ,
     login_signature,
     mark_credential_id,
@@ -115,8 +116,10 @@ from .bw_types import (
 from .exceptions import (
     BitwardenAttachmentMissingError,
     BitwardenClientError,
+    BitwardenServeExitedError,
     ConversionError,
     FieldLimitError,
+    HistoryConversionError,
 )
 from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
 from .uri_mapping import (
@@ -1606,8 +1609,7 @@ class Converter:
             )
             return canonical
 
-        except FieldLimitError:
-            # Invalid destination payloads must abort preflight, including REF chains.
+        except FieldLimitError, HistoryConversionError:
             raise
         except ConversionError, KeyError, AttributeError:
             group = kp_entry.group
@@ -1945,10 +1947,18 @@ class Converter:
         payload["login"] = desired_login
 
         if has_managed_history(desired):
+            history_existing = existing
+            if is_legacy_history_source(existing):
+                history_existing = copy.deepcopy(existing)
+                history_existing["fields"] = [
+                    field
+                    for field in history_existing["fields"]
+                    if field.get("name") != HISTORY_FIELD_NAME
+                ]
             apply_native_history(
-                payload, desired.get("passwordHistory") or [], existing=existing
+                payload, desired.get("passwordHistory") or [], existing=history_existing
             )
-        elif has_managed_history(existing):
+        elif has_managed_history(existing) and not is_legacy_history_source(existing):
             payload["fields"].extend(
                 copy.copy(field)
                 for field in existing["fields"]
@@ -2004,6 +2014,30 @@ class Converter:
         if os.name == "nt":
             return "& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in args)
         return shlex.join(args)
+
+    @staticmethod
+    def sync_collection_membership(
+        bw: BitwardenServeClient,
+        existing: BwItemResponse,
+        desired: BwItemCreate,
+        fixed_collection: str | None,
+    ) -> Literal["collection", "skipped"]:
+        if fixed_collection:
+            return "skipped"
+        current = existing.get("collectionIds") or []
+        missing = [
+            value
+            for value in desired.get("collectionIds") or []
+            if value not in current
+        ]
+        if not missing:
+            return "skipped"
+        payload = copy.deepcopy(existing)
+        payload["collectionIds"] = [*current, *missing]
+        bw.update_item(existing["id"], payload)
+        if source_id := item_kp2bw_id(existing):
+            bw.update_dedup_entry(source_id, payload)
+        return "collection"
 
     def _reconcile_existing_item(
         self,
@@ -2068,6 +2102,19 @@ class Converter:
             )
             return outcome, [], {}
 
+        if not self._update_existing:
+            try:
+                return (
+                    self.sync_collection_membership(
+                        bw, existing, bw_item, fixed_coll_id
+                    ),
+                    [],
+                    {},
+                )
+            except BitwardenClientError:
+                logger.warning("Collection synchronization failed for item %s", item_id)
+                return "failed", [], {}
+
         if any(is_record_field(field) for field in existing.get("fields") or []) and (
             not item_kp2bw_sync(existing)
             or (self._is_user_modified(existing) and not self._force_update_all)
@@ -2106,7 +2153,11 @@ class Converter:
                 if sync_stamp is None
                 else sync_stamp_generation(existing, sync_stamp)
             )
-            legacy_sync_stamp = stamp_generation in {"pre_fido2", "legacy"}
+            legacy_sync_stamp = stamp_generation in {
+                "pre_history",
+                "pre_fido2",
+                "legacy",
+            }
             ambiguous_legacy_edit = (
                 legacy_sync_stamp
                 and content_differs
@@ -2160,7 +2211,9 @@ class Converter:
                             )
                 if has_managed_history(payload):
                     fresh = bw.get_item(item_id)
-                    if self._content_signature(fresh) != self._content_signature(
+                    if fresh.get("revisionDate") != existing.get(
+                        "revisionDate"
+                    ) or self._content_signature(fresh) != self._content_signature(
                         existing
                     ):
                         logger.warning(
@@ -2209,6 +2262,8 @@ class Converter:
                         f"-- Entry {name!r}: added to {len(missing)} collection(s)",
                     )
                     outcome = "collection"
+        except BitwardenServeExitedError:
+            raise
         except (BitwardenClientError, ConversionError) as exc:
             logger.warning(
                 f"-- Entry {name!r}: update failed; no further changes attempted: {exc}"
@@ -2260,6 +2315,8 @@ class Converter:
                     for source in plan.uploads
                     if source.source_id in plan.stale
                 }
+            except BitwardenServeExitedError:
+                raise
             except (BitwardenClientError, ConversionError) as exc:
                 logger.warning(
                     "Could not safely associate attachments on item %s (%s); leaving its files unchanged",
@@ -3022,6 +3079,8 @@ class Converter:
             for item_id, plan in self._attachment_plans.items():
                 try:
                     self._persist_attachment_plan(bw, item_id, plan, failed_uploads)
+                except BitwardenServeExitedError:
+                    raise
                 except (BitwardenClientError, ConversionError) as exc:
                     n_update_failed += 1
                     failed_uploads.update(

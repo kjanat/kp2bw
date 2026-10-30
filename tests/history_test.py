@@ -20,11 +20,21 @@ from kp2bw._history import (
     history_archive,
     native_password_history,
 )
-from kp2bw._item_sync import content_signature, stamp_content, sync_stamp_matches
+from kp2bw._item_sync import (
+    content_signature,
+    pre_fido2_content_signature,
+    stamp_content,
+    sync_stamp_matches,
+)
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse, BwPasswordHistory
 from kp2bw.convert import Converter
-from kp2bw.exceptions import BitwardenClientError, ConversionError
+from kp2bw.exceptions import (
+    BitwardenClientError,
+    BitwardenServeExitedError,
+    ConversionError,
+    HistoryConversionError,
+)
 
 
 def check_native_updates() -> None:
@@ -172,6 +182,7 @@ def check_native_updates() -> None:
 
 def main() -> None:
     check_native_updates()
+    check_review_regressions()
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "history.kdbx"
         db = create_database(path, password="test")
@@ -371,6 +382,141 @@ def main() -> None:
         for value in archive_only._entries.values():
             assert "passwordHistory" not in archive_only._unpack_entry(value)[2]
     print("password history extraction and archive round trips passed")
+
+
+def check_review_regressions() -> None:
+    source: list[BwPasswordHistory] = [
+        {"password": "previous", "lastUsedDate": "2020-01-01T00:00:00Z"}
+    ]
+    existing = _make_existing(revisionDate="before")
+    desired = _make_desired()
+    apply_native_history(desired, source)
+    bw = MagicMock(spec=BitwardenServeClient)
+    for field in ("favorite", "folderId"):
+        raced = copy.deepcopy(existing)
+        raced["revisionDate"] = "after"
+        if field == "favorite":
+            raced["favorite"] = False
+        else:
+            raced["folderId"] = "moved"
+        bw.get_item.return_value = raced
+        outcome, _, _ = UpdateTestConverter().reconcile(
+            cast(BitwardenServeClient, bw),
+            existing,
+            None,
+            desired,
+            [],
+            fixed_coll_id=None,
+        )
+        assert outcome == "protected"
+        bw.update_item_if_revision.assert_not_called()
+    bw.get_item.return_value = copy.deepcopy(existing)
+    bw.update_item_if_revision.side_effect = BitwardenServeExitedError(
+        "synthetic serve exit"
+    )
+    try:
+        UpdateTestConverter().reconcile(
+            cast(BitwardenServeClient, bw),
+            existing,
+            None,
+            desired,
+            [],
+            fixed_coll_id=None,
+        )
+    except BitwardenServeExitedError:
+        pass
+    else:
+        raise AssertionError("Fatal serve exit became a recoverable history failure")
+    bw = MagicMock(spec=BitwardenServeClient)
+    existing["passwordHistory"] = [
+        {"password": str(i), "lastUsedDate": "2019-01-01T00:00:00Z"} for i in range(5)
+    ]
+    desired["collectionIds"] = ["new-collection"]
+    outcome, _, _ = UpdateTestConverter(update_existing=False).reconcile(
+        cast(BitwardenServeClient, bw), existing, None, desired, [], fixed_coll_id=None
+    )
+    assert outcome == "collection"
+    assert (
+        bw.update_item.call_args.args[1]["passwordHistory"]
+        == existing["passwordHistory"]
+    )
+    bw.update_item_if_revision.assert_not_called()
+    for native in (False, True):
+        legacy = _make_existing()
+        legacy["fields"].append({
+            "name": "KP2BW_HISTORY",
+            "value": "ordinary source value",
+            "type": 0,
+        })
+        legacy["fields"].append({
+            "name": "KP2BW_SYNC",
+            "value": pre_fido2_content_signature(legacy),
+            "type": 0,
+        })
+        requested = _make_desired()
+        requested["fields"].append({
+            "name": "KeePass:KP2BW_HISTORY:1",
+            "value": "ordinary source value",
+            "type": 0,
+        })
+        if native:
+            apply_native_history(requested, source)
+        client = MagicMock(spec=BitwardenServeClient)
+        client.get_item.return_value = copy.deepcopy(legacy)
+        outcome, _, _ = UpdateTestConverter().reconcile(
+            cast(BitwardenServeClient, client),
+            legacy,
+            None,
+            requested,
+            [],
+            fixed_coll_id=None,
+        )
+        assert outcome == "updated"
+        write = client.update_item_if_revision if native else client.update_item
+        payload = write.call_args.args[1]
+        assert {
+            "name": "KeePass:KP2BW_HISTORY:1",
+            "value": "ordinary source value",
+            "type": 0,
+        } in payload["fields"]
+        assert any(f["name"] == "KP2BW_HISTORY" for f in payload["fields"]) is native
+        legacy["fields"][1]["value"] = "destination edit"
+        client.reset_mock()
+        outcome, _, _ = UpdateTestConverter().reconcile(
+            cast(BitwardenServeClient, client),
+            legacy,
+            None,
+            requested,
+            [],
+            fixed_coll_id=None,
+        )
+        assert outcome == "protected"
+        client.update_item.assert_not_called()
+        client.update_item_if_revision.assert_not_called()
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "ref-history.kdbx"
+        db = create_database(path, password="synthetic")
+        target = db.add_entry(db.root_group, "Target", "user", "pw")
+        alias = db.add_entry(
+            db.root_group,
+            "Alias",
+            f"{{REF:U@I:{target.uuid.hex}}}",
+            f"{{REF:P@I:{target.uuid.hex}}}",
+        )
+        alias.save_history()
+        alias.password = "changed"
+        db.save()
+        converter = Converter(
+            str(path), "synthetic", None, "", None, None, False, 999, None
+        )
+        with patch.object(converter, "_create_bitwarden_items_for_entries") as writes:
+            try:
+                converter.convert()
+            except HistoryConversionError as exc:
+                assert "--no-password-history" in str(exc)
+            else:
+                raise AssertionError("REF history failure silently omitted an entry")
+            writes.assert_not_called()
 
 
 if __name__ == "__main__":

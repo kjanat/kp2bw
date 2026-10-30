@@ -14,7 +14,7 @@ from lxml import etree
 from pykeepass.entry import Entry
 
 from .bw_types import BwField, BwItemCreate, BwItemResponse, BwPasswordHistory
-from .exceptions import ConversionError
+from .exceptions import HistoryConversionError
 
 HISTORY_FIELD_NAME = "KP2BW_HISTORY"
 
@@ -31,7 +31,9 @@ def _history_time(value: str | None) -> str | None:
     try:
         return _timestamp(datetime.fromisoformat(value))
     except (ValueError, TypeError) as exc:
-        raise ConversionError("Password history contains an invalid timestamp") from exc
+        raise HistoryConversionError(
+            "Password history contains an invalid timestamp"
+        ) from exc
 
 
 def history_signature(
@@ -62,23 +64,23 @@ def _managed_records(item: BwItemCreate | BwItemResponse) -> set[str]:
         or fields[0].get("type") != 1
         or fields[0].get("linkedId") is not None
     ):
-        raise ConversionError("Ambiguous password history metadata")
+        raise HistoryConversionError("Ambiguous password history metadata")
     try:
         metadata = json.loads(fields[0].get("value") or "")
     except ValueError as exc:
-        raise ConversionError("Invalid password history metadata") from exc
+        raise HistoryConversionError("Invalid password history metadata") from exc
     if not isinstance(metadata, dict):
-        raise ConversionError("Invalid password history metadata")
+        raise HistoryConversionError("Invalid password history metadata")
     metadata = cast(dict[str, object], metadata)
     if (
         set(metadata) != {"version", "records"}
         or type(metadata["version"]) is not int
         or metadata["version"] != 1
     ):
-        raise ConversionError("Unknown password history metadata")
+        raise HistoryConversionError("Unknown password history metadata")
     records = metadata["records"]
     if not isinstance(records, list):
-        raise ConversionError("Invalid password history record identities")
+        raise HistoryConversionError("Invalid password history record identities")
     records = cast(list[object], records)
     if len(records) > 5 or any(
         not isinstance(value, str)
@@ -86,7 +88,7 @@ def _managed_records(item: BwItemCreate | BwItemResponse) -> set[str]:
         or any(char not in "0123456789abcdef" for char in value)
         for value in records
     ):
-        raise ConversionError("Invalid password history record identities")
+        raise HistoryConversionError("Invalid password history record identities")
     return {value for value in records if isinstance(value, str)}
 
 
@@ -121,7 +123,7 @@ def apply_native_history(
         if record["password"] not in unrelated_passwords
     ]
     if len(imported) + len(unrelated) > 5:
-        raise ConversionError(
+        raise HistoryConversionError(
             "Native history has only five slots; preserving unrelated Bitwarden history"
         )
     item["passwordHistory"] = [*imported, *unrelated]
@@ -148,9 +150,9 @@ def imported_history_count(item: BwItemCreate | BwItemResponse) -> int:
 
 def _utc(value: datetime | None) -> datetime:
     if value is None:
-        raise ConversionError("History timestamp is missing")
+        raise HistoryConversionError("History timestamp is missing")
     if value.tzinfo is None:
-        raise ConversionError("History timestamp has no timezone")
+        raise HistoryConversionError("History timestamp has no timezone")
     return value.astimezone(UTC)
 
 
@@ -172,14 +174,14 @@ def native_password_history(entry: Entry) -> list[BwPasswordHistory]:
     if not versions:
         return []
     if _utc(versions[-1].mtime) > _utc(entry.mtime):
-        raise ConversionError("Entry history is newer than the current entry")
+        raise HistoryConversionError("Entry history is newer than the current entry")
     versions.append(entry)
     previous: list[BwPasswordHistory] = []
     seen = {entry.password or ""}
     for older, newer in reversed(list(pairwise(versions))):
         password = older.password or ""
         if "{REF:" in password.upper():
-            raise ConversionError(
+            raise HistoryConversionError(
                 "Historical password references cannot be resolved at their original time; use --no-password-history --archive-history to retain their records"
             )
         if password == (newer.password or "") or password in seen:
@@ -218,7 +220,7 @@ def history_archive(entry: Entry, binaries: Sequence[bytes]) -> HistoryArchive |
             if ref is None:
                 continue  # Inline data remains intact in the XML record.
             if not ref.isascii() or not ref.isdecimal():
-                raise ConversionError(
+                raise HistoryConversionError(
                     "Historical attachment has an invalid binary reference"
                 )
             references.add(int(ref))
