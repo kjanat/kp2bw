@@ -196,6 +196,5 @@ src/kp2bw/
   these policies and server capability before conversion creates folders, collections or items. Missing metadata fails
   closed. Native SSH fields participate in content signatures, including manual-edit protection.
 
-
 - Template mapping resolves escaped source-field names before matching overrides and excludes migration bookkeeping.
   Conflicting duplicate values remain custom fields. Login REF aliases remain separate when their target maps to a native non-login item.

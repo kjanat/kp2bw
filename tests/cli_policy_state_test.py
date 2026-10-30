@@ -46,6 +46,30 @@ def main() -> None:
         )
         assert not metadata.organizations and not metadata.policies
         assert "must-not-be-returned" not in repr(metadata)
+        millisecond = "2026-01-01T00:00:01.001Z"
+        precise_status = {**status, "lastSync": millisecond}
+        precise_state = copy.deepcopy(state)
+        precise_state[
+            "user_user_sync_lastSync" if kind == "bitwarden" else "lastSync"
+        ] = millisecond
+        assert (
+            parse_policy_state(
+                precise_state,
+                precise_status,
+                synced_after=datetime(2026, 1, 1, 0, 0, 1, 1999, tzinfo=UTC),
+            ).kind
+            == kind
+        )
+        try:
+            parse_policy_state(
+                precise_state,
+                precise_status,
+                synced_after=datetime(2026, 1, 1, 0, 0, 1, 2000, tzinfo=UTC),
+            )
+        except BitwardenClientError:
+            pass
+        else:
+            raise AssertionError("A preceding millisecond was accepted as a fresh sync")
         for changed in (
             {"userId": "other"},
             {"serverUrl": "https://other.example.test"},

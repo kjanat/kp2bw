@@ -75,7 +75,13 @@ def parse_policy_state(
     ):
         raise BitwardenClientError("Cannot verify SSH policy: no unlocked CLI account")
     live_sync = _timestamp(status.get("lastSync"))
-    if live_sync < synced_after:
+    # JavaScript Date records milliseconds; Python's clock includes microseconds.
+    # A sync starting within the same millisecond must not look older solely
+    # because the CLI truncated that fractional precision.
+    earliest_sync = synced_after.replace(
+        microsecond=(synced_after.microsecond // 1000) * 1000
+    )
+    if live_sync < earliest_sync:
         raise BitwardenClientError(
             "Cannot verify SSH policy: the CLI did not finish a fresh sync"
         )
