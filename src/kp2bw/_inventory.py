@@ -7,7 +7,7 @@ from typing import cast
 from .exceptions import BitwardenClientError
 
 
-def inventory_signature(value: object) -> str:
+def inventory_signature(value: object, *, kind: str = "items") -> str:
     if not isinstance(value, list):
         raise BitwardenClientError("CLI inventory is not a list")
     rows: dict[str, dict[str, object]] = {}
@@ -24,6 +24,16 @@ def inventory_signature(value: object) -> str:
         key = str(identifier)
         if key in rows:
             raise BitwardenClientError("CLI inventory contains duplicate identities")
-        rows[key] = row
+        # vw's HTTP org-collection response includes users/groups and a distinct
+        # object discriminator; its CLI list projects the shared collection
+        # model. Compare all identities/names, not transport-only details.
+        rows[key] = (
+            {
+                name: row.get(name)
+                for name in ("id", "organizationId", "name", "externalId")
+            }
+            if kind == "org-collections"
+            else row
+        )
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
