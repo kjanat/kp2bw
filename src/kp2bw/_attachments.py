@@ -309,19 +309,31 @@ def plan_attachments(
             if filename in allocated or filename in by_name:
                 filename = available_name(source)
             allocated_pattern = allocated_name_pattern(source)
+            remaining_matches = sum(
+                candidate.source_id not in associated
+                and candidate.original_name == source.original_name
+                and candidate.data == source.data
+                for candidate in sources
+            )
             candidates = [
                 (attachment_id, name)
                 for attachment_id, name in remote
                 if attachment_id not in claimed
                 and name not in allocated
                 and (
-                    (name == source.original_name and desired_counts[name] == 1)
+                    (name == source.original_name)
                     or (
                         allocated_pattern.fullmatch(name) and name not in desired_counts
                     )
                 )
                 and content(attachment_id) == source.data
             ]
+            if remaining_matches > 1 and any(
+                name == source.original_name for _, name in candidates
+            ):
+                raise ConversionError(
+                    "Pending upload matches multiple source files; no files were changed"
+                )
             if len(candidates) > 1:
                 raise ConversionError(
                     "Pending upload has ambiguous attachment IDs; no files were changed"
