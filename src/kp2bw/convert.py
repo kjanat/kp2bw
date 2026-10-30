@@ -1992,7 +1992,7 @@ class Converter:
             *[copy.copy(field) for field in desired["fields"]],
             *[
                 copy.copy(field)
-                for field in existing["fields"]
+                for field in existing.get("fields") or []
                 if is_record_field(field)
             ],
         ]
@@ -2281,7 +2281,7 @@ class Converter:
                 if repair_sync_stamp:
                     payload = copy.copy(existing)
                     payload["fields"] = [
-                        copy.copy(field) for field in existing["fields"]
+                        copy.copy(field) for field in existing.get("fields") or []
                     ]
                     self._stamp_content(payload)
                 else:
