@@ -2840,6 +2840,7 @@ class Converter:
         if current != plan.previous_records or self._is_user_modified(full):
             raise ConversionError("Item changed while saving attachment associations")
         records = dict(plan.records)
+
         # Recheck adopted bytes against fresh metadata before persisting an ID.
         # These files were uploaded on an earlier attempt, not in this batch.
         for source in plan.sources:
