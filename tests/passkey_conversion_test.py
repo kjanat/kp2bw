@@ -1,10 +1,15 @@
 """Regression checks for KeePassXC-to-Bitwarden passkey conversion."""
 
+import base64
 import copy
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from pykeepass import Entry
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+from pykeepass import Entry, PyKeePass, create_database
 
 from kp2bw._item_sync import (
     BW_B64_CREDENTIAL_ID_PREFIX,
@@ -47,9 +52,7 @@ def _credential_id(converted_id: str) -> str:
         entry,
         {
             "KPEX_PASSKEY_CREDENTIAL_ID": converted_id,
-            "KPEX_PASSKEY_PRIVATE_KEY_PEM": (
-                "-----BEGIN PRIVATE KEY-----\nAAE=\n-----END PRIVATE KEY-----"
-            ),
+            "KPEX_PASSKEY_PRIVATE_KEY_PEM": (supported_pem()),
             "KPEX_PASSKEY_RELYING_PARTY": "example.com",
             "KPEX_PASSKEY_USER_HANDLE": "dXNlci1oYW5kbGU",
             "KPEX_PASSKEY_USERNAME": "alice",
@@ -271,8 +274,152 @@ def assert_strict_signature_ignores_marker() -> None:
         raise AssertionError("credential ID marker changed the strict REF signature")
 
 
+def supported_pem() -> str:
+    """Deterministic synthetic P-256 fixture, never a real credential."""
+    return (
+        ec
+        .derive_private_key(1, ec.SECP256R1())
+        .private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        .decode()
+    )
+
+
+def source_properties() -> dict[str, str]:
+    return {
+        "KPEX_PASSKEY_CREDENTIAL_ID": SOURCE_ID,
+        "KPEX_PASSKEY_PRIVATE_KEY_PEM": supported_pem(),
+        "KPEX_PASSKEY_RELYING_PARTY": "example.com",
+        "KPEX_PASSKEY_USER_HANDLE": "dXNlci1oYW5kbGU",
+        "KPEX_PASSKEY_USERNAME": "alice",
+    }
+
+
+def verify_native_key(credential: BwFido2Credential) -> None:
+    encoded = credential["keyValue"]
+    key = serialization.load_der_private_key(
+        base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)), password=None
+    )
+    assert isinstance(key, ec.EllipticCurvePrivateKey)
+    assert isinstance(key.curve, ec.SECP256R1)
+    challenge = b"kp2bw synthetic passkey round-trip"
+    signature = key.sign(challenge, ec.ECDSA(hashes.SHA256()))
+    ec.derive_private_key(1, ec.SECP256R1()).public_key().verify(
+        signature, challenge, ec.ECDSA(hashes.SHA256())
+    )
+
+
+def assert_final_items_validate_and_preserve_sources() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "passkeys.kdbx"
+        create_database(str(path), password="synthetic")
+        database = PyKeePass(str(path), password="synthetic")
+
+        def convert(
+            properties: dict[str, str], *, oversize: bool = False
+        ) -> tuple[BwItemCreate, list[object]]:
+            entry = database.add_entry(
+                database.root_group,
+                f"Passkey {len(database.entries)}",
+                "alice",
+                "synthetic",
+            )
+            for index, (name, value) in enumerate(properties.items()):
+                entry.set_custom_property(name, value, protect=index % 2 == 0)
+            converter = _converter()
+            converter._include_oversize_secrets = oversize
+            converter._add_bw_entry_to_entries_dict(entry)
+            result = next(iter(converter._entries.values()))
+            return result[2], list(result[3])
+
+        item, attachments = convert(source_properties())
+        assert item["login"] is not None
+        credentials = item["login"].get("fido2Credentials")
+        assert credentials and credentials[0]["credentialId"] == MARKED_ID
+        verify_native_key(credentials[0])
+        assert not attachments
+        assert not any(
+            field["name"].startswith("KPEX_PASSKEY_") for field in item["fields"]
+        )
+
+        bad_properties: list[dict[str, str]] = []
+        for name in (
+            "KPEX_PASSKEY_CREDENTIAL_ID",
+            "KPEX_PASSKEY_PRIVATE_KEY_PEM",
+            "KPEX_PASSKEY_RELYING_PARTY",
+            "KPEX_PASSKEY_USER_HANDLE",
+        ):
+            props = source_properties()
+            del props[name]
+            bad_properties.append(props)
+        invalid_keys = [
+            "-----BEGIN PRIVATE KEY-----\nAAE=\n-----END PRIVATE KEY-----",
+            "a",
+            supported_pem().replace("END PRIVATE KEY", "END PUBLIC KEY"),
+            supported_pem().replace("PRIVATE KEY", "EC PRIVATE KEY"),
+            ec
+            .generate_private_key(ec.SECP384R1())
+            .private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            .decode(),
+            ed25519.Ed25519PrivateKey
+            .generate()
+            .private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            .decode(),
+        ]
+        replacements = [
+            ("KPEX_PASSKEY_PRIVATE_KEY_PEM", value) for value in invalid_keys
+        ]
+        replacements += [
+            ("KPEX_PASSKEY_CREDENTIAL_ID", value)
+            for value in ("a", "not an ID", "b64.", "AB")
+        ]
+        replacements += [
+            ("KPEX_PASSKEY_USER_HANDLE", "a"),
+            ("KPEX_PASSKEY_USER_HANDLE", "YQ" * 100),
+            ("KPEX_PASSKEY_RELYING_PARTY", "https://example.com"),
+        ]
+        for name, value in replacements:
+            bad_properties.append(source_properties() | {name: value})
+        for props in bad_properties:
+            item, attachments = convert(props)
+            assert item["login"] is not None
+            assert not item["login"].get("fido2Credentials")
+            recovered = {
+                field["name"]: field
+                for field in item["fields"]
+                if field["name"] in props
+            }
+            assert {name: field["value"] for name, field in recovered.items()} == props
+            assert all(field["type"] == 1 for field in recovered.values())
+            assert not attachments
+
+        large = source_properties() | {"KPEX_PASSKEY_PRIVATE_KEY_PEM": "x" * 10001}
+        item, attachments = convert(large)
+        assert not attachments
+        assert not any(
+            field["name"] == "KPEX_PASSKEY_PRIVATE_KEY_PEM" for field in item["fields"]
+        )
+        _, attachments = convert(large, oversize=True)
+        assert (
+            "KPEX_PASSKEY_PRIVATE_KEY_PEM",
+            large["KPEX_PASSKEY_PRIVATE_KEY_PEM"],
+        ) in attachments
+
+
 def main() -> None:
     """Run the script-style assertions and report success."""
+    assert_final_items_validate_and_preserve_sources()
     assert_base64url_credential_id_uses_bitwarden_marker()
     assert_existing_bitwarden_marker_is_preserved()
     assert_rerun_repairs_unmarked_credential_id()

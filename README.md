@@ -25,7 +25,7 @@ with advantages over the built-in Bitwarden importer:
   </details>
 - <details open>
     <summary><b>Passkey migration</b></summary>
-    KeePassXC FIDO2/passkey credentials (<code>KPEX_PASSKEY_*</code>) are converted to Bitwarden <code>fido2Credentials</code>.
+    Valid KeePassXC P-256 passkeys (<code>KPEX_PASSKEY_*</code>) are converted to Bitwarden <code>fido2Credentials</code>. If conversion fails, source attributes remain as hidden fields; oversized secrets still require explicit opt-in.
   </details>
 - <details>
     <summary><b>Custom properties &amp; attachments</b></summary>
