@@ -58,7 +58,21 @@ jobs:
                 Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             }
           }
-          $matrix = @{ include = $include } | ConvertTo-Json -Compress -Depth 4
+          $groups = [ordered]@{
+            core = @('e2e_vaultwarden_test.py')
+            attachments = @('e2e_attachment_batch_test.py', 'e2e_attachment_identity_test.py')
+            formats = @('e2e_templates_test.py', 'e2e_history_archive_test.py', 'e2e_field_limits_test.py')
+            scope = @('e2e_scope_test.py', 'e2e_item_selection_test.py', 'e2e_fixups_test.py')
+          }
+          $jobs = @(foreach ($row in $include) {
+            foreach ($group in $groups.Keys) {
+              $job = $row.Clone()
+              $job.group = $group
+              $job.scripts = $groups[$group]
+              $job
+            }
+          })
+          $matrix = @{ include = $jobs } | ConvertTo-Json -Compress -Depth 6
           "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Matrix:"; $matrix | yq . -P
 
@@ -74,12 +88,13 @@ jobs:
       - run: uv run pytest -q tests/test_script_adapters.py
 
   e2e:
-    name: e2e (${{ matrix.lane }}, ${{ matrix.cli-package }} ${{ matrix.bw-version }}, Vaultwarden ${{ matrix.server-version }})
+    name: e2e (${{ matrix.lane }}, ${{ matrix.group }}, ${{ matrix.cli-package }} ${{ matrix.bw-version }}, Vaultwarden ${{ matrix.server-version }})
     needs: [config, unit]
     runs-on: ubuntu-latest
     permissions: { contents: read }
-    timeout-minutes: 60
+    timeout-minutes: 40
     env:
+      KP2BW_E2E_CORE_ONLY: "1"
       KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
       BW_SERVER_URL: https://localhost:18443
       KP2BW_E2E_VAULTWARDEN_CONTAINER: vaultwarden
@@ -140,8 +155,19 @@ jobs:
           echo "$RUNNER_TEMP/vw-adapter" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/vw-cli/bin/vw" --version
 
-      - name: Run Vaultwarden end-to-end migration test
-        run: uv run tests/e2e_vaultwarden_test.py
+      - name: Run end-to-end group (${{ matrix.group }})
+        env: { E2E_SCRIPTS: "${{ toJson(matrix.scripts) }}" }
+        run: |
+          foreach ($script in ($env:E2E_SCRIPTS | ConvertFrom-Json)) {
+            Write-Host "::group::$script"
+            $timer = [System.Diagnostics.Stopwatch]::StartNew()
+            uv run "tests/$script"
+            $code = $LASTEXITCODE
+            $timer.Stop()
+            Write-Host "$script completed in $($timer.Elapsed), exit $code"
+            Write-Host '::endgroup::'
+            if ($code -ne 0) { exit $code }
+          }
 
       - name: Show Vaultwarden logs on failure
         if: failure() || cancelled()
