@@ -144,8 +144,8 @@ def main() -> None:
             converter.entries[selected_alias.uuid.hex.upper()]
         )[2]
         assert selected_item["type"] == 5 and selected_item.get("sshKey")
-        chained_item = converter._unpack_entry(
-            converter._entries[chained_alias.uuid.hex.upper()]
+        chained_item = converter.unpack_entry(
+            converter.entries[chained_alias.uuid.hex.upper()]
         )[2]
         assert chained_item["type"] == 1
         assert chained_item["login"]["username"] == "user"
