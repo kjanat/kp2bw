@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from typing import Literal, cast
 from uuid import UUID
 
+from ._attachments import ATTACHMENT_FIELD_PREFIX
 from ._item_sync import stamp_content
+from ._source_fields import RESERVED_FIELD_NAMES, source_field_origin
 from .bw_types import BwField, BwItemCreate, ItemCard, ItemIdentity
 from .exceptions import ConversionError
 
@@ -211,10 +213,14 @@ def plan_template(rule: TemplateRule, fields: Mapping[str, str | None]) -> Templ
     warnings: list[str] = []
     aliases = _aliases(rule.kind)
     for source, raw in fields.items():
-        if raw is None or not raw or source.startswith("_etm_"):
+        if source in RESERVED_FIELD_NAMES or source.startswith(ATTACHMENT_FIELD_PREFIX):
+            continue
+        origin = source_field_origin(source)
+        original_name = origin[0] if origin is not None else source
+        if raw is None or not raw or original_name.startswith("_etm_"):
             continue
         targets: dict[str, str] = {}
-        target = rule.fields.get(source) or aliases.get(_key(source))
+        target = rule.fields.get(original_name) or aliases.get(_key(original_name))
         if target:
             converted = _value(target, raw)
             if converted is not None:
@@ -223,7 +229,7 @@ def plan_template(rule: TemplateRule, fields: Mapping[str, str | None]) -> Templ
                 warnings.append(
                     "A template value could not be parsed; its custom field was retained"
                 )
-        elif rule.kind == "card" and _key(source) in {
+        elif rule.kind == "card" and _key(original_name) in {
             "expiration",
             "expiry",
             "validthru",
