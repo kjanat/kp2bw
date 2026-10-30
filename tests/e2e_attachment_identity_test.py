@@ -17,7 +17,7 @@ from kp2bw.exceptions import BitwardenClientError
 
 
 def check_legacy_collision_retry(
-    bw: BitwardenServeClient, converter: Converter
+    bw: BitwardenServeClient, converter: Converter, *, partial: bool = False
 ) -> None:
     sources = [
         source_file("original", "legacy.txt", index, "legacy.txt", data)
@@ -46,6 +46,39 @@ def check_legacy_collision_retry(
         )
     )
     try:
+        if partial:
+            initial = plan_attachments(sources, {}, [], lambda _: b"")
+            assert not bw.upload_attachments([
+                (
+                    item_id,
+                    [(source.filename, source.data) for source in initial.uploads],
+                )
+            ])
+            bw.sync(force=True)
+            converter.persist_attachment_plan(
+                bw, item_id, initial, {(item_id, initial.sources[0].filename)}
+            )
+            full = bw.get_item(item_id)
+            records = records_from_fields(full["fields"])
+            assert set(records) == {sources[1].source_id}
+            remote = [(a["id"], a["fileName"]) for a in full.get("attachments") or []]
+            assert len(remote) == 2
+            recovered = plan_attachments(
+                sources, records, remote, lambda aid: bw.get_attachment(item_id, aid)
+            )
+            assert not recovered.uploads and not recovered.stale
+            converter.persist_attachment_plan(bw, item_id, recovered, set())
+            full = bw.get_item(item_id)
+            assert [
+                (a["id"], a["fileName"]) for a in full.get("attachments") or []
+            ] == remote
+            records = records_from_fields(full["fields"])
+            assert set(records) == {source.source_id for source in sources}
+            unchanged = plan_attachments(
+                sources, records, remote, lambda aid: bw.get_attachment(item_id, aid)
+            )
+            assert not unchanged.uploads and not unchanged.stale
+            return
         assert not bw.upload_attachments([
             (item_id, [(source.original_name, source.data) for source in sources])
         ])
@@ -303,6 +336,7 @@ def main() -> None:
             assert converter.convert() == 0
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
             check_legacy_collision_retry(bw, converter)
+            check_legacy_collision_retry(bw, converter, partial=True)
             item = bw.get_item_by_uuid(entry.uuid.hex.upper())
             assert item is not None
             bw.request("DELETE", f"/object/item/{item['id']}")
