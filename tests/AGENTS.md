@@ -37,6 +37,8 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - It then runs `e2e_scope_test.py`: `_scope_fixture.py` creates an ephemeral organization via the disposable server's
   API, and the official CLI verifies fixed-collection import, URI reporting/migration, finalization, outside controls,
   and unchanged reruns. This fixture uses the test account's PBKDF2 configuration and keeps generated keys in memory.
+- Reserved-field regressions cover protected/plain duplicates, escape-namespace collisions, historical imports,
+  edit protection and finalization. `e2e_reserved_fields_test.py` checks preservation and unchanged reruns after goldens.
 - Fixtures are contract data; path and naming changes require docker + test updates together.
 - The final live attachment batch regression verifies four distinct files on each of two items, unchanged reruns,
   replacement and a falsely acknowledged upload that must fail without deleting the old copy.

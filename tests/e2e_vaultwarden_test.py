@@ -1135,6 +1135,10 @@ def main() -> None:
 
         run_metadata_test(tmp, env, bw_password)
 
+        from e2e_reserved_fields_test import run_reserved_fields_test
+
+        run_reserved_fields_test(tmp, env, bw_password)
+
     # Scope fixtures run last so their org items do not enter personal goldens.
     from e2e_scope_test import main as run_scope_test
 

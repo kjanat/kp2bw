@@ -193,6 +193,11 @@ _ALL_SECRET_KEYS: frozenset[str] = (
 )
 
 
+def is_otp_secret_field(name: str) -> bool:
+    """Identify source secrets even when duplicate fields need escaped names."""
+    return name in _ALL_SECRET_KEYS
+
+
 @dataclass(frozen=True)
 class _TotpConfig:
     """Resolved TOTP parameters, already mapped to otpauth tokens."""

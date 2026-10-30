@@ -130,6 +130,11 @@ src/kp2bw/
   `TOTPSecret` field without it) is carried over as a **hidden** field instead of a visible one, upholding the module
   invariant that no OTP secret is ever written in the clear. Config keys (`*-Length`/`Digits`, `*-Period`,
   `TimeOtp-Algorithm`) hold no secret, so the inactive scheme's stay ordinary custom fields. Tests: `tests/otp_test.py`.
+- Source fields named `KP2BW_ID`, `KP2BW_SYNC`, `KP2BW_META`, names beginning `KeePass:`, and duplicate custom
+  names are escaped by `_source_fields.py`. The format is `KeePass:<percent-encoded original>:<occurrence>`, with
+  one-based occurrences in XML order. Only exact metadata names are bookkeeping; escaped fields remain in content
+  signatures and survive `--strip-ids`. Existing valid sync stamps allow one repair from the original KeePass source;
+  target-side edits remain protected. Historical REF recognition replays the former field behaviour separately.
 - Custom properties are read by `convert._read_entry_custom_properties()` directly from each entry's `<String>`
   children. Do not replace this with `Entry.custom_properties` or dynamic XPath: supported PyKeePass versions
   interpolate custom keys into XPath. The single traversal returns both values and `Protected=True` keys so normal and

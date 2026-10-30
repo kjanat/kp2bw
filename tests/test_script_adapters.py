@@ -147,3 +147,7 @@ def test_e2e_vaultwarden_script() -> None:
     if os.environ.get("KP2BW_RUN_E2E_TESTS") != "1":
         pytest.skip("set KP2BW_RUN_E2E_TESTS=1 to run vaultwarden e2e")
     _run_script_main("e2e_vaultwarden_test.py")
+
+
+def test_reserved_fields_script() -> None:
+    _run_script_main("reserved_fields_test.py")

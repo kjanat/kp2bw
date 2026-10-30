@@ -41,6 +41,7 @@ from ._item_sync import (
     sync_stamp_generation,
     sync_stamp_matches,
 )
+from ._source_fields import source_field_name, source_field_origin
 from .bw_serve import (
     BitwardenServeClient,
     item_kp2bw_sync,
@@ -54,7 +55,7 @@ from .bw_types import (
     BwUri,
 )
 from .exceptions import BitwardenClientError, ConversionError
-from .otp import OtpMigration, resolve_otp, totp_values_equivalent
+from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
 from .uri_mapping import (
     UriMatchValue,
     build_login_uris,
@@ -132,18 +133,27 @@ def _read_entry_custom_properties(entry: Entry) -> _EntryCustomProperties:
     """Read custom fields without placing attacker-controlled keys in XPath."""
     values: dict[str, str | None] = {}
     protected_keys: set[str] = set()
+    occurrences: dict[str, int] = {}
 
     for string_element in entry._element.findall("String"):
         key_element = string_element.find("Key")
         key = key_element.text if key_element is not None else None
-        if key is None or key in _KEEPASS_RESERVED_STRING_KEYS or key in values:
+        if key is None or key in _KEEPASS_RESERVED_STRING_KEYS:
             continue
 
+        occurrences[key] = occurrences.get(key, 0) + 1
+        original_key = key
+        key = source_field_name(key, occurrences[key])
         value_element = string_element.find("Value")
         values[key] = value_element.text if value_element is not None else None
         if (
             value_element is not None
             and value_element.attrib.get("Protected", "False") == "True"
+        ):
+            protected_keys.add(key)
+        if key != original_key and (
+            is_otp_secret_field(original_key)
+            or original_key.startswith(KPEX_PASSKEY_PREFIX)
         ):
             protected_keys.add(key)
 
@@ -986,6 +996,26 @@ class Converter:
         state = self._legacy_ref_states.get(kp_uuid)
         if state is None:
             legacy_item = copy.deepcopy(item)
+            # Older releases overwrote reserved source fields and ignored later
+            # duplicates. Replay that only for recognizing historical REF output.
+            old_fields: list[BwField] = []
+            for field in legacy_item["fields"]:
+                origin = source_field_origin(field["name"])
+                if origin is not None:
+                    name, occurrence = origin
+                    if occurrence > 1 or name in {
+                        KP2BW_ID_FIELD_NAME,
+                        KP2BW_SYNC_FIELD_NAME,
+                    }:
+                        continue
+                    if (
+                        name == KP2BW_META_FIELD_NAME
+                        and kp_uuid in self._generated_metadata_ids
+                    ):
+                        continue
+                    field["name"] = name
+                old_fields.append(field)
+            legacy_item["fields"] = old_fields
             # Replay the historical YAML metadata too. This shadow is built
             # from our own generated JSON, never from arbitrary vault input.
             if kp_uuid in self._generated_metadata_ids:
@@ -997,8 +1027,8 @@ class Converter:
                             allow_unicode=False,
                             sort_keys=True,
                         ).rstrip("\n")
-                self._stamp_content(legacy_item)
-                sync_stamp = content_signature(legacy_item)
+            self._stamp_content(legacy_item)
+            sync_stamp = content_signature(legacy_item)
             base_uris = copy.deepcopy(legacy_item["login"]["uris"])
             state = _LegacyRefState(sync_stamp, legacy_item, base_uris, {})
             self._legacy_ref_states[kp_uuid] = state

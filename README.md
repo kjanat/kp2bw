@@ -222,6 +222,11 @@ kp2bw --strip-ids            # personal vault; add -o/-c to scope to an org/coll
 
 to remove that stamp from every migrated item and exit. No KeePass database is read.
 
+Source fields named `KP2BW_ID`, `KP2BW_SYNC` or `KP2BW_META` are preserved under names such as `KeePass:KP2BW_ID:1`,
+with their values and hidden/text status intact. Duplicate names and source fields already beginning with `KeePass:` are
+escaped too. These source fields survive `--strip-ids`. Rerunning from the original KeePass database can restore source
+values overwritten by older imports; Bitwarden edits remain protected.
+
 > [!WARNING]
 > This is **irreversible** and makes future migration re-runs unreliable. Without the stamp, a re-run can only match by
 > folder + name — the exact collision the stamp exists to prevent — so entries that share a folder and title may be
