@@ -92,3 +92,7 @@ uv run python tests/e2e_vaultwarden_test.py
 docker compose -f tests/docker-compose.yml build
 docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-code-from test
 ```
+
+- `templates_test.py` checks explicit template recognition, lossless field fallback, source KDBX loading and native-field
+  signatures. `e2e_templates_test.py` runs native card/identity/secure-note creation, updates, unchanged reruns and manual
+  edit protection with each CLI in the integration matrix.

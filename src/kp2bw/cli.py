@@ -1,4 +1,5 @@
 import getpass
+import json
 import logging
 import os
 import platform
@@ -15,6 +16,7 @@ from rich.markup import escape
 
 from . import VERBOSE, __title__, __version__
 from ._console import console
+from ._templates import parse_template_overrides
 from .bw_serve import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
@@ -297,6 +299,18 @@ def _argparser() -> MyArgParser:
         dest="force_update",
         help="Overwrite items changed in Bitwarden.",
         action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--map-templates",
+        help="Map referenced KeePass templates to cards, identities and secure notes.",
+        action=BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--template-map",
+        metavar="JSON",
+        help="Template UUID and field overrides (requires --map-templates).",
         default=None,
     )
     parser.add_argument(
@@ -765,6 +779,22 @@ def main() -> None:
         force_update = _resolve_bool_option(
             args.force_update, "KP2BW_FORCE_UPDATE", default=False
         )
+        map_templates = _resolve_bool_option(
+            args.map_templates, "KP2BW_MAP_TEMPLATES", default=False
+        )
+        template_map = {}
+        template_map_path = _with_env(args.template_map, "KP2BW_TEMPLATE_MAP")
+        if template_map_path:
+            if not map_templates:
+                raise ValueError("--template-map requires --map-templates")
+            try:
+                template_map = parse_template_overrides(
+                    json.loads(Path(template_map_path).read_text(encoding="utf-8"))
+                )
+            except OSError, UnicodeError, json.JSONDecodeError:
+                raise ValueError("Could not read template map as UTF-8 JSON") from None
+            except ConversionError as exc:
+                raise ValueError(str(exc)) from None
         include_oversize_secrets = _resolve_bool_option(
             args.include_oversize_secrets,
             "KP2BW_INCLUDE_OVERSIZE_SECRETS",
@@ -962,6 +992,8 @@ def main() -> None:
         update_existing=update_existing,
         force_update=force_update,
         include_oversize_secrets=include_oversize_secrets,
+        map_templates=map_templates,
+        template_map=template_map,
         create_folders=create_folders,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,

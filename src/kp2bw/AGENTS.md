@@ -180,3 +180,8 @@ src/kp2bw/
 
 - Attachment association updates force a server sync before their verification read. A successful PUT may precede the
   official CLI's local-cache update; old copies remain until the server-backed read confirms the new associations.
+
+- Opt-in `--map-templates` applies `_templates.py` rules after REF resolution. Only actual `_etm_template_uuid` references
+  to marked templates are classified. Native card/identity/secure-note fields enter content signatures; old login-only
+  stamp algorithms cannot authenticate them. Internal parsed source login data remains available for provenance but is
+  omitted by HTTP create/update for native items. Its nonempty values are retained in a custom field.

@@ -160,6 +160,20 @@ def _content_parts(
 
 def content_signature(item: BwItemResponse | BwItemCreate) -> str:
     """Return a digest over exactly the item content kp2bw manages."""
+    if item.get("type", 1) != 1:
+        native = (
+            item.get("card") or item.get("identity") or item.get("secureNote") or {}
+        )
+        blob = repr((
+            item.get("type"),
+            item.get("name") or "",
+            item.get("notes") or "",
+            fields_signature(item.get("fields")),
+            sorted(
+                (key, value) for key, value in native.items() if value not in (None, "")
+            ),
+        ))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
     parts = _content_parts(item)
     fido2 = fido2_signature(item.get("login"))
     blob = repr((*parts, fido2) if fido2 else parts)
@@ -189,6 +203,8 @@ def sync_stamp_generation(
     """Return which signature algorithm produced *stamp* for *item*, if any."""
     if stamp == content_signature(item):
         return "current"
+    if item.get("type", 1) != 1:
+        return None
     if stamp == pre_fido2_content_signature(item):
         return "pre_fido2"
     if stamp == legacy_content_signature(item):

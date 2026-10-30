@@ -53,6 +53,7 @@ from ._item_sync import (
     sync_stamp_matches,
 )
 from ._source_fields import source_field_name, source_field_origin
+from ._templates import TemplateRule, apply_template, recognize_template, template_uuid
 from .bw_serve import (
     BitwardenServeClient,
     item_kp2bw_sync,
@@ -81,7 +82,7 @@ KP_REF_IDENTIFIER: str = "{REF:"
 MAX_BW_ITEM_LENGTH: int = 10 * 1000
 KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
 # Bitwarden item type for login entries (1=login, 2=secureNote, 3=card,
-# 4=identity).  kp2bw only ever creates and content-syncs login items.
+# 4=identity). Explicit template mapping is applied after REF resolution.
 BW_ITEM_TYPE_LOGIN: int = 1
 AUTO_COLLECTION_MODE: str = "auto"
 NESTED_COLLECTION_MODE: str = "nested"
@@ -371,6 +372,8 @@ class Converter:
         uri_match: UriMatchValue = None,
         interpret_uri_syntax: bool = True,
         totp_pps: bool = False,
+        map_templates: bool = False,
+        template_map: dict[str, TemplateRule] | None = None,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._attachment_plans: dict[str, AttachmentPlan] = {}
@@ -393,6 +396,9 @@ class Converter:
         self._uri_match = uri_match
         self._interpret_uri_syntax = interpret_uri_syntax
         self._totp_pps = totp_pps
+        self._map_templates = map_templates
+        self._template_map = template_map or {}
+        self._entry_templates: dict[str, TemplateRule] = {}
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -815,12 +821,39 @@ class Converter:
         recyclebin_group: Group | None = kp.recyclebin_group
 
         entries: list[Entry] = kp.entries or []
+        self._entry_templates = {}
+        if self._map_templates:
+            templates: dict[str, TemplateRule] = {}
+            for source in entries:
+                props = _read_entry_custom_properties(source).values
+                if props.get("_etm_template") != "1":
+                    continue
+                identifier = source.uuid.hex.upper()
+                kind = recognize_template(identifier, source.title or "")
+                rule = self._template_map.get(identifier)
+                if rule is None and kind:
+                    rule = TemplateRule(kind, {})
+                if rule:
+                    templates[identifier] = rule
+            for source in entries:
+                props = _read_entry_custom_properties(source).values
+                identifier = template_uuid(props.get("_etm_template_uuid") or "")
+                if identifier and identifier in templates:
+                    self._entry_templates[source.uuid.hex.upper()] = templates[
+                        identifier
+                    ]
         total_entries: int = len(entries)
         skipped_recyclebin = 0
         skipped_expired = 0
 
         logger.info(f"Found {total_entries} entries in KeePass DB. Parsing now...")
         for entry in entries:
+            if (
+                self._map_templates
+                and _read_entry_custom_properties(entry).values.get("_etm_template")
+                == "1"
+            ):
+                continue
             # Skip recycle bin entries unless explicitly included
             if not self._include_recyclebin and self._is_in_recyclebin(
                 entry, recyclebin_group
@@ -1532,7 +1565,17 @@ class Converter:
         KeePass entry has none, so a re-run can't silently drop a Bitwarden-side
         FIDO2 credential.
         """
+        if desired["type"] != 1 and (existing.get("login") or {}).get(
+            "fido2Credentials"
+        ):
+            raise BitwardenClientError(
+                "Cannot change item type while it contains a Bitwarden passkey"
+            )
         payload: BwItemResponse = copy.copy(existing)
+        payload["type"] = desired["type"]
+        payload["card"] = copy.deepcopy(desired["card"])
+        payload["identity"] = copy.deepcopy(desired["identity"])
+        payload["secureNote"] = copy.deepcopy(desired["secureNote"])
         payload["name"] = desired["name"]
         payload["notes"] = desired["notes"]
         payload["fields"] = [
@@ -1546,7 +1589,11 @@ class Converter:
 
         desired_login: BwItemLogin = copy.copy(desired["login"])
         ex_login = existing.get("login")
-        if "fido2Credentials" not in desired_login and ex_login:
+        if (
+            desired["type"] == 1
+            and "fido2Credentials" not in desired_login
+            and ex_login
+        ):
             ex_fido2 = ex_login.get("fido2Credentials")
             if ex_fido2:
                 kept: list[BwFido2Credential] = []
@@ -1611,10 +1658,11 @@ class Converter:
             "skipped"
         )
 
-        # kp2bw only ever creates login items, so a non-login vault item sharing
-        # this (folder, name) is a name collision we must not mutate -- neither
-        # its content/collections nor (further down) its attachments.
-        if existing.get("type") != BW_ITEM_TYPE_LOGIN:
+        # Native types are reconciled only when template mapping is enabled.
+        # The dedup index never adopts unstamped non-login items by name.
+        if existing.get("type") != BW_ITEM_TYPE_LOGIN and (
+            existing.get("type") not in (2, 3, 4) or not self._map_templates
+        ):
             logger.log(
                 VERBOSE,
                 f"-- Entry {name!r}: matched a non-login item, skipping",
@@ -2106,6 +2154,13 @@ class Converter:
 
         # resolve {REF:...} stuff
         self._resolve_entries_with_references()
+
+        if self._map_templates:
+            for identifier, entry_value in self._entries.items():
+                if rule := self._entry_templates.get(identifier):
+                    item = self._unpack_entry(entry_value)[2]
+                    for warning in apply_template(item, rule):
+                        logger.warning("Entry %s: %s", identifier, warning)
 
         # store aggregated entries in bw
         return self._create_bitwarden_items_for_entries()

@@ -1227,7 +1227,10 @@ class BitwardenServeClient:
 
     def create_item(self, item: BwItemCreate) -> str:
         """Create a single vault item via HTTP and return its ID."""
-        data = self._request("POST", "/object/item", json_body=item)
+        body = dict(item)
+        if item["type"] != 1:
+            body.pop("login", None)
+        data = self._request("POST", "/object/item", json_body=body)
         item_id: str = data["id"]
         logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
@@ -1303,6 +1306,8 @@ class BitwardenServeClient:
             for k, v in cast(dict[str, Any], item).items()
             if k not in _RESPONSE_ONLY_ITEM_KEYS
         }
+        if item["type"] != 1:
+            body.pop("login", None)
         if expected_revision is not None:
             body["revisionDate"] = expected_revision
         return body

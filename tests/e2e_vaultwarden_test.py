@@ -1152,6 +1152,9 @@ def main() -> None:
     from e2e_attachment_identity_test import main as run_attachment_identity_test
 
     run_attachment_identity_test()
+    from e2e_templates_test import main as run_templates_test
+
+    run_templates_test()
     print("vaultwarden end-to-end integration test passed")
 
 

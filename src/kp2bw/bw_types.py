@@ -147,7 +147,7 @@ class _BwItemCommon(TypedDict):
     them ``NotRequired`` rather than nullable.
 
     ``login`` is intentionally absent from this base: ``BwItemCreate`` declares
-    it required (kp2bw only migrates login-type entries) and ``BwItemResponse``
+    it required for parsed source provenance and ``BwItemResponse``
     declares it ``NotRequired`` (the API omits it on cards, secure notes, and
     identities).  Keeping both declarations in their respective subclasses avoids
     a TypedDict field override, which type checkers cannot represent.
@@ -169,7 +169,9 @@ class _BwItemCommon(TypedDict):
 class BwItemCreate(_BwItemCommon):
     """Payload for ``POST /object/item`` and ``PUT /object/item/{id}``.
 
-    kp2bw exclusively migrates login-type entries, so ``login`` is required.
+    Parsing retains the source login for REF resolution and provenance, even
+    after explicit template mapping. The transport omits it for native non-login
+    items; their source login data is preserved in a custom field.
     """
 
     login: BwItemLogin

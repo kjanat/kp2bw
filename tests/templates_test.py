@@ -1,0 +1,166 @@
+"""Template classification never guesses from an ordinary entry's title."""
+
+import copy
+import tempfile
+from pathlib import Path
+from typing import cast
+from unittest.mock import patch
+
+from pykeepass import create_database
+
+from kp2bw._item_sync import (
+    content_signature,
+    pre_fido2_content_signature,
+    sync_stamp_matches,
+)
+from kp2bw._templates import (
+    TemplateRule,
+    apply_template,
+    parse_template_overrides,
+    plan_template,
+    recognize_template,
+)
+from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw.bw_types import BwItemResponse
+from kp2bw.convert import Converter
+from kp2bw.exceptions import ConversionError
+
+
+def main() -> None:
+    assert (
+        recognize_template("49DD48DBFF149445B3392CE90EA75309", "Kreditkarte") == "card"
+    )
+    assert recognize_template("", "ID Card") == "identity"
+    assert recognize_template("", "Gift card account login") is None
+    rule = TemplateRule("card", {})
+    plan = plan_template(
+        rule,
+        {
+            "Card Number": "4111 1111-1111 1111",
+            "Expiry": "03/29",
+            "CVV": "123",
+            "PIN": "1234",
+        },
+    )
+    assert plan.values == {
+        "number": "4111111111111111",
+        "expMonth": "3",
+        "expYear": "2029",
+        "code": "123",
+    }
+    assert plan.consumed == {"Card Number", "Expiry", "CVV"}
+    conflict = plan_template(
+        rule,
+        {
+            "Number": "4111111111111111",
+            "Card Number": "5555555555554444",
+            "Expiry": "13/29",
+        },
+    )
+    assert not conflict.consumed and not conflict.values and conflict.warnings
+    partial = plan_template(rule, {"Expiry": "03/29", "Expiry month": "4"})
+    assert "Expiry" not in partial.consumed
+    invalid_cases: list[object] = [
+        [],
+        {"bad": {}},
+        {"0" * 32: {"type": "login"}},
+        {"0" * 32: {"type": "card", "fields": {"x": "password"}}},
+    ]
+    for invalid in invalid_cases:
+        try:
+            parse_template_overrides(invalid)
+        except ConversionError:
+            pass
+        else:
+            raise AssertionError("Invalid mapping accepted")
+    overrides = parse_template_overrides({
+        "0" * 32: {"type": "identity", "fields": {"Naam": "lastName"}}
+    })
+    assert plan_template(overrides["0" * 32], {"Naam": "Example"}).values == {
+        "lastName": "Example"
+    }
+    conv = Converter(
+        "unused", None, None, "unused", None, None, False, 0, None, map_templates=True
+    )
+    item = conv._create_bw_python_object(
+        "Card",
+        "notes",
+        "https://example.test",
+        "",
+        "user",
+        "secret",
+        {
+            "Number": ("4111111111111111", 0),
+            "PIN": ("1234", 1),
+            "_etm_template_uuid": ("0" * 32, 0),
+        },
+    )
+    apply_template(item, rule)
+    assert (
+        item["type"] == 3
+        and item["card"]
+        and item["card"].get("number") == "4111111111111111"
+    )
+    assert any(
+        f["name"] == "PIN" and f["value"] == "1234" and f["type"] == 1
+        for f in item["fields"]
+    )
+    assert any(
+        f["name"] == "KeePass login data" and f["type"] == 1 and "secret" in f["value"]
+        for f in item["fields"]
+    )
+    existing = cast(BwItemResponse, copy.deepcopy(item))
+    existing.update(id="destination", object="item", revisionDate="revision")
+    existing.pop("login", None)
+    assert not conv._content_differs(existing, item), (
+        "Wire format must retain the same signature"
+    )
+    assert "login" not in BitwardenServeClient._item_update_body(existing)
+    stamp = content_signature(existing)
+    assert sync_stamp_matches(existing, stamp)
+    assert existing["card"] is not None
+    existing["card"]["number"] = "5555555555554444"
+    assert conv._is_user_modified(existing)
+    assert not sync_stamp_matches(existing, pre_fido2_content_signature(existing)), (
+        "Old login-only stamps cannot authenticate native fields"
+    )
+    assert not sync_stamp_matches(existing, stamp)
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "templates.kdbx"
+        db = create_database(path, password="synthetic")
+        template = db.add_entry(db.root_group, "Credit Card", "", "")
+        template.set_custom_property("_etm_template", "1")
+        card = db.add_entry(db.root_group, "Account", "user", "secret")
+        card.set_custom_property("_etm_template_uuid", template.uuid.hex)
+        card.set_custom_property("Number", "4111111111111111")
+        ordinary = db.add_entry(db.root_group, "Credit Card", "ordinary", "")
+        db.save()
+        for enabled in (False, True):
+            converter = Converter(
+                str(path),
+                "synthetic",
+                None,
+                "unused",
+                None,
+                None,
+                False,
+                0,
+                None,
+                map_templates=enabled,
+            )
+            with patch.object(
+                converter, "_create_bitwarden_items_for_entries", return_value=0
+            ):
+                assert converter.convert() == 0
+            items = {
+                key: converter._unpack_entry(value)[2]
+                for key, value in converter._entries.items()
+            }
+            assert items[card.uuid.hex.upper()]["type"] == (3 if enabled else 1)
+            assert items[ordinary.uuid.hex.upper()]["type"] == 1
+            assert (template.uuid.hex.upper() in items) is not enabled
+    print("template mapping tests passed")
+
+
+if __name__ == "__main__":
+    main()
