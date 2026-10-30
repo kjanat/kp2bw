@@ -3099,6 +3099,10 @@ class Converter:
                                 existing,
                                 bw_item,
                                 migrate_password_history=self.migrate_password_history,
+                                legacy_history_source=self.legacy_ref_status(
+                                    existing, key
+                                )
+                                == "exact",
                             )
                         )
                     elif outcome == "collection":

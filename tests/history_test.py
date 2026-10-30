@@ -256,6 +256,12 @@ def check_legacy_ref_history() -> None:
             and field["value"] == "ordinary source value"
             for field in payload["fields"]
         )
+        # Exercise the post-write summary as well as reconciliation: rebuilding
+        # its payload must retain the authenticated legacy REF interpretation.
+        client.get_item_by_uuid.return_value = copy.deepcopy(old)
+        with patch("kp2bw.convert.print_summary") as summary:
+            assert converter.create_bitwarden_items_for_entries(client) == 0
+        assert summary.call_args.args[-1] == len(desired["passwordHistory"])
         old["notes"] = "destination edit"
         assert converter.legacy_ref_status(old, identifier) == "diverged"
         client.reset_mock()

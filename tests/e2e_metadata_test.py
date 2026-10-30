@@ -208,6 +208,9 @@ def check_legacy_ref_upgrade(tmp: Path, env: dict[str, str], password: str) -> N
                 field["name"] == "KeePass:KP2BW_HISTORY:1"
                 for field in updated["fields"]
             )
+            assert not any(
+                field["name"] == "KP2BW_HISTORY" for field in updated["fields"]
+            )
             records = records_from_fields(updated["fields"])
             assert len(records) == 1
             metadata_bytes = bw.get_attachment(
