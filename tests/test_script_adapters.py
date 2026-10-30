@@ -131,6 +131,14 @@ def test_bw_serve_inventory_script() -> None:
     _run_script_main("bw_serve_inventory_test.py")
 
 
+def test_attachment_checkpoint_script() -> None:
+    _run_script_main("attachment_checkpoint_test.py")
+
+
+def test_attachment_resume_script() -> None:
+    _run_script_main("attachment_resume_test.py")
+
+
 def test_windows_bw_cmd_smoke_script() -> None:
     if os.name != "nt":
         pytest.skip("windows bw .cmd smoke runs on Windows only")

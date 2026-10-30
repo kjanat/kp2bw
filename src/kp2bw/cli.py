@@ -329,6 +329,12 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--checkpoint",
+        metavar="PATH",
+        default=None,
+        help="Save verified attachment mappings for resumable migration.",
+    )
+    parser.add_argument(
         "--strip-ids",
         dest="strip_ids",
         help="Remove kp2bw tracking fields, then exit. Irreversible.",
@@ -966,6 +972,7 @@ def main() -> None:
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,
         totp_pps=totp_pps,
+        checkpoint_path=_with_env(args.checkpoint, "KP2BW_CHECKPOINT"),
     )
     try:
         failures = c.convert()

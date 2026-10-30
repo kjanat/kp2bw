@@ -14,5 +14,9 @@ class ConversionError(Exception):
     """Raised when a KeePass to Bitwarden conversion operation fails."""
 
 
+class BitwardenAttachmentMissingError(BitwardenHttpError):
+    """The CLI reached attachment storage, which reported a missing file body."""
+
+
 class BitwardenServeExitedError(ConversionError):
     """Fatal transport loss; per-item failure handlers must not swallow it."""

@@ -58,6 +58,12 @@ src/kp2bw/
 
 ## NOTES
 
+- `--checkpoint` uses `_checkpoint.py` for atomic, locked metadata bound to server/account/source/scope and
+  `_attachment_resume.py` for transaction filename and recovery decisions. Cached bytes are reusable only when
+  source hashes, destination associations, item revisions and attachment metadata all match. Pending replacements
+  retain the previous file's hashes; cleanup checks those bytes and concurrent revision changes before deletion.
+  Checkpoint files contain hashes and IDs, never credentials or decrypted attachment contents.
+
 - Maintain behavior parity for `kp2bw.cli:main` and `python -m kp2bw`.
 - Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on, `Converter(update_existing=...)`):
   `convert._reconcile_existing_item()` diffs a matched login item via `_content_differs()` and, when changed, `PUT`s a

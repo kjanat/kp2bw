@@ -174,6 +174,10 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 
+Use `--checkpoint PATH` (or `KP2BW_CHECKPOINT`) to resume interrupted attachment uploads and avoid downloading verified,
+unchanged files on later runs. See [attachment checkpoints](docs/attachment-checkpoints.md) for usage and filename
+changes.
+
 ### Organization collections
 
 Bitwarden folders are personal-vault metadata. When importing into an organization, use `--bitwarden-collection auto` to

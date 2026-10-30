@@ -1142,6 +1142,14 @@ def main() -> None:
 
         run_reserved_fields_test(tmp, env, bw_password)
 
+        from e2e_checkpoint_test import run_checkpoint_test
+
+        run_checkpoint_test(
+            tmp,
+            {**env, "BW_SERVER_URL": server_url, "BW_TEST_EMAIL": bw_email},
+            bw_password,
+        )
+
     # Scope fixtures run last so their org items do not enter personal goldens.
     from e2e_scope_test import main as run_scope_test
 
