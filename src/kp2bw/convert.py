@@ -405,6 +405,7 @@ class Converter:
     _resolved_ref_items: dict[str, EntryValue | None]
     _refs_in_progress: set[str]
     _generated_metadata_ids: set[str]
+    legacy_ref_sources: dict[str, BwItemCreate]
     _legacy_ref_states: dict[str, _LegacyRefState]
     _legacy_ref_order: dict[str, int]
     _legacy_ref_results: dict[str, EntryValue | None]
@@ -490,6 +491,7 @@ class Converter:
         self._refs_in_progress = set()
         self._generated_metadata_ids = set()
         self._legacy_ref_states = {}
+        self.legacy_ref_sources = {}
         self._legacy_ref_order = {}
         self._legacy_ref_results = {}
 
@@ -789,9 +791,9 @@ class Converter:
         if self._migrate_metadata:
             meta_field = self._build_metadata_field(entry)
             if meta_field is not None:
+                self._generated_metadata_ids.add(entry_uuid)
                 if fits_field(meta_field[0], FIELD_VALUE_LIMIT):
                     custom_properties[KP2BW_META_FIELD_NAME] = meta_field
-                    self._generated_metadata_ids.add(entry_uuid)
                 elif meta_field[0] is not None:
                     generated_attachments.append((KP2BW_META_FIELD_NAME, meta_field[0]))
 
@@ -831,6 +833,39 @@ class Converter:
             additional_urls=[v for _, v in sorted(url_attrs)],
             android_packages=[v for _, v in sorted(app_attrs)],
         )
+
+        # Historical imports used a 10,000-character plaintext cutoff. Keep
+        # that representation independently of today's encrypted field budgets
+        # so an old REF merge's stale stamp remains recognizable without force.
+        historical = copy.deepcopy(bw_item_object)
+        historical["notes"] = expired_prefix + (
+            entry.notes if entry.notes and len(entry.notes) <= 10000 else ""
+        )
+        historical_fields: dict[str, FieldSpec] = {
+            key: (
+                value,
+                1 if key in otp_result.hidden_keys or key in custom_protected else 0,
+            )
+            for key, value in custom_props.items()
+            if value is not None
+            and len(value) <= 10000
+            and not key.startswith(KPEX_PASSKEY_PREFIX)
+            and key not in otp_result.consumed_keys
+            and not is_url_attribute_key(key)
+        }
+        if (
+            self._migrate_metadata
+            and (historical_meta := self._build_metadata_field(entry)) is not None
+        ):
+            historical_fields[KP2BW_META_FIELD_NAME] = historical_meta
+        historical_fields[KP2BW_ID_FIELD_NAME] = (entry_uuid, 0)
+        historical["fields"] = [
+            BwField(name=key, value=value, type=kind)
+            for key, (value, kind) in historical_fields.items()
+            if value is not None
+        ]
+        self._stamp_content(historical)
+        self.legacy_ref_sources[entry_uuid] = historical
 
         # Stamp the content signature kp2bw is writing, so a later re-run can tell
         # a user's manual Bitwarden edit (signature no longer matches) from kp2bw's
@@ -1020,6 +1055,7 @@ class Converter:
         self._entries = {}
         self._generated_metadata_ids = set()
         self._legacy_ref_states = {}
+        self.legacy_ref_sources = {}
         self._legacy_ref_order = {}
         self._legacy_ref_results = {}
 
@@ -1371,7 +1407,7 @@ class Converter:
 
         state = self._legacy_ref_states.get(kp_uuid)
         if state is None:
-            legacy_item = copy.deepcopy(item)
+            legacy_item = copy.deepcopy(self.legacy_ref_sources.get(kp_uuid, item))
             # Older releases overwrote reserved source fields and ignored later
             # duplicates. Replay that only for recognizing historical REF output.
             old_fields: list[BwField] = []

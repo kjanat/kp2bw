@@ -162,18 +162,17 @@ def main() -> None:
             assert bool(attachments) == allowed
         entry = database.add_entry(database.root_group, "Metadata", "user", "pw")
         entry.tags = ["é" * 4000]
+        entry.add_attachment(
+            database.add_binary(b"original metadata file"), "KP2BW_META.txt"
+        )
         conv = converter()
         conv._add_bw_entry_to_entries_dict(entry)
         _, _, item, attachments = next(iter(conv._entries.values()))
         assert not any(field["name"] == "KP2BW_META" for field in item["fields"])
-        assert any(
-            conv._attachment_filename(attachment) == "KP2BW_META.txt"
-            for attachment in attachments
-        )
-        assert (
-            json.loads(conv._materialise_attachment(attachments[0])[1])["tags"]
-            == entry.tags
-        )
+        materialized = dict(conv._materialise_attachment(a) for a in attachments)
+        assert len(materialized) == len(attachments) == 2
+        assert materialized.pop("KP2BW_META.txt") == b"original metadata file"
+        assert json.loads(next(iter(materialized.values())))["tags"] == entry.tags
         for size in (686, 687, 688):
             entry = database.add_entry(database.root_group, f"Names {size}", "u", "p")
             entry.set_custom_property("n" * size, "v")

@@ -233,3 +233,6 @@ src/kp2bw/
 
 - Template mapping resolves escaped source-field names before matching overrides and excludes migration bookkeeping.
   Conflicting duplicate values remain custom fields. Login REF aliases remain separate when their target maps to a native non-login item.
+
+- Historical REF recognition reconstructs the former plaintext field/notes cutoff independently of current encrypted budgets.
+  Untouched old imports remain eligible for automatic upgrade; edits to their old inline fields stay protected.
