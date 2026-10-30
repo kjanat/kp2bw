@@ -139,6 +139,7 @@ def main() -> None:
         path = Path(directory) / "selection.kdbx"
         db = create_database(path, password="synthetic")
         target = db.add_entry(db.root_group, "Same title", "user", "password")
+        target.tags = ["selected"]
         alias = db.add_entry(
             db.root_group,
             "Same title",
@@ -175,10 +176,12 @@ def main() -> None:
             assert result["login"]["password"] == "password"
             assert result["name"] == "Same title"
         full = converter(path, None)
+        full._import_tags = ["selected"]
         full._load_keepass_data()
         full._resolve_entries_with_references()
         full_target = full._unpack_entry(full._entries[target.uuid.hex.upper()])[2]
         conv = converter(path, str(target.uuid))
+        conv._import_tags = ["selected"]
         with (
             patch("kp2bw.convert.BitwardenServeClient", return_value=client),
             patch.object(conv, "_create_bitwarden_items_for_entries", return_value=0),
@@ -192,6 +195,19 @@ def main() -> None:
             "https://alias.example.test",
             "https://chain.example.test",
         }
+        existing_target = _make_existing(**copy.deepcopy(full_target))
+        client_double = FakeBw()
+        outcome, uploads, stale = conv._reconcile_existing_item(
+            _as_bw(client_double),
+            existing_target,
+            None,
+            selected_target,
+            [],
+            fixed_coll_id=None,
+            kp_uuid=target.uuid.hex.upper(),
+        )
+        assert outcome == "skipped" and not uploads and not stale
+        assert not client_double.updates, "Selected rerun removed merged REF data"
         for source_id, tags in ((str(uuid4()), None), (str(alias.uuid), ["elsewhere"])):
             conv = converter(path, source_id)
             conv._import_tags = tags

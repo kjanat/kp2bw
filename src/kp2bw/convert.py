@@ -1143,16 +1143,9 @@ class Converter:
                     invalid_refs.add(key)
                 references[key] = targets
                 if (
-                    (
-                        not self._include_recyclebin
-                        and self._is_in_recyclebin(candidate, recyclebin_group)
-                    )
-                    or (self._skip_expired and candidate.expired)
-                    or (
-                        self._import_tags
-                        and not set(self._import_tags).intersection(candidate.tags)
-                    )
-                ):
+                    not self._include_recyclebin
+                    and self._is_in_recyclebin(candidate, recyclebin_group)
+                ) or (self._skip_expired and candidate.expired):
                     continue
                 for target in targets:
                     inbound.setdefault(target, set()).add(key)

@@ -44,6 +44,14 @@ def main() -> None:
         second = db.add_entry(db.root_group, name, "u", "p", force_creation=True)
         for entry in (first, second):
             entry.add_attachment(db.add_binary(b"original"), "same.txt")
+        alias = db.add_entry(
+            db.root_group,
+            "Inbound REF alias",
+            "u",
+            f"{{REF:P@I:{first.uuid.hex.upper()}}}",
+        )
+        alias.url = "https://selection-alias.example.test"
+        alias.otp = "otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP"
         db.save()
 
         def convert(
@@ -95,6 +103,11 @@ def main() -> None:
         before = snapshot()
         first_key, second_key = first.uuid.hex.upper(), second.uuid.hex.upper()
         first_id, second_id = before[first_key]["id"], before[second_key]["id"]
+        login = before[first_key].get("login")
+        assert login is not None and login.get("totp")
+        assert any(uri["uri"] == alias.url for uri in login.get("uris") or [])
+        convert(str(first.uuid))
+        assert snapshot() == before, "Selected rerun removed merged REF data"
         first.notes = "Selected source change"
         second.notes = "Unselected source change"
         first.attachments[0].id = db.add_binary(b"replacement")
