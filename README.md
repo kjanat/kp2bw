@@ -174,6 +174,11 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 
+`--archive-history` (`KP2BW_ARCHIVE_HISTORY=true`) saves full KeePass historical records as an encrypted vault
+attachment. It includes old passwords, protected fields, notes, source timestamps and available historical attachment
+bytes. The generated filename avoids collisions with your files. Missing historical bytes are reported and their
+references retained. The option is off by default; it does not change Bitwarden's creation or revision timestamps.
+
 ### Organization collections
 
 Bitwarden folders are personal-vault metadata. When importing into an organization, use `--bitwarden-collection auto` to

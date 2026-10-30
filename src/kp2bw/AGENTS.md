@@ -55,6 +55,11 @@ src/kp2bw/
 
 ## NOTES
 
+- `_history.py` extracts distinct previous passwords using the next password-changing version's modification time.
+  Its opt-in archive preserves complete historical XML and available referenced binary bytes. Treat archive data as
+  secret. `--archive-history` adds a `SourceFile` of kind `history`, so existing attachment identity handling protects
+  filename collisions and unchanged reruns. REF aliases with archived history stay separate.
+
 - Maintain behavior parity for `kp2bw.cli:main` and `python -m kp2bw`.
 - Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on, `Converter(update_existing=...)`):
   `convert._reconcile_existing_item()` diffs a matched login item via `_content_differs()` and, when changed, `PUT`s a

@@ -307,6 +307,12 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--archive-history",
+        help="Archive full KeePass history, including historical secrets, as an attachment.",
+        action="store_true",
+        default=None,
+    )
+    parser.add_argument(
         "--uri-match",
         dest="uri_match",
         metavar="MODE",
@@ -770,6 +776,9 @@ def main() -> None:
             "KP2BW_INCLUDE_OVERSIZE_SECRETS",
             default=False,
         )
+        archive_history = _resolve_bool_option(
+            args.archive_history, "KP2BW_ARCHIVE_HISTORY", default=False
+        )
         # Personal folders are a personal-vault concept; under --bitwarden-org
         # they duplicate the collection tree, so default them off there. Explicit
         # --folder/--no-folder or KP2BW_CREATE_FOLDERS still wins (issue #33).
@@ -962,6 +971,7 @@ def main() -> None:
         update_existing=update_existing,
         force_update=force_update,
         include_oversize_secrets=include_oversize_secrets,
+        archive_history=archive_history,
         create_folders=create_folders,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,

@@ -37,6 +37,7 @@ __all__ = [
     "BwItemCreate",
     "BwItemLogin",
     "BwItemResponse",
+    "BwPasswordHistory",
     "BwUri",
     "Group",
     "ItemCard",
@@ -138,6 +139,13 @@ class BwItemLogin(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+class BwPasswordHistory(TypedDict):
+    """Previous password and the instant it stopped being current."""
+
+    password: str
+    lastUsedDate: str
+
+
 class _BwItemCommon(TypedDict):
     """Fields shared across both the create payload and every API response.
 
@@ -164,6 +172,7 @@ class _BwItemCommon(TypedDict):
     secureNote: ItemSecureNote | None
     card: ItemCard | None
     identity: ItemIdentity | None
+    passwordHistory: NotRequired[list[BwPasswordHistory] | None]
 
 
 class BwItemCreate(_BwItemCommon):

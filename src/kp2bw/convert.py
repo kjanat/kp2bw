@@ -40,6 +40,7 @@ from ._attachments import (
     source_file,
 )
 from ._console import console
+from ._history import history_archive
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
@@ -371,6 +372,7 @@ class Converter:
         uri_match: UriMatchValue = None,
         interpret_uri_syntax: bool = True,
         totp_pps: bool = False,
+        archive_history: bool = False,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._attachment_plans: dict[str, AttachmentPlan] = {}
@@ -393,6 +395,7 @@ class Converter:
         self._uri_match = uri_match
         self._interpret_uri_syntax = interpret_uri_syntax
         self._totp_pps = totp_pps
+        self._archive_history = archive_history
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -682,6 +685,24 @@ class Converter:
         # The value itself is never logged in either branch.
         label = entry.title or "_untitled"
         attachments: list[AttachmentItem] = []
+        if self._archive_history:
+            archive = history_archive(entry, entry._kp.binaries if entry._kp else [])
+            if archive is not None:
+                attachments.append(
+                    source_file("history", "", 1, "history.json", archive.data)
+                )
+                logger.log(
+                    VERBOSE,
+                    "Prepared %d historical records for archival on entry %s",
+                    archive.records,
+                    entry_uuid,
+                )
+                if archive.missing_binaries:
+                    logger.warning(
+                        "Entry %s: %d historical attachment bodies are unavailable; their references remain in the archive",
+                        entry_uuid,
+                        archive.missing_binaries,
+                    )
         for key, value in custom_props.items():
             if value is None or len(value) <= MAX_BW_ITEM_LENGTH:
                 continue
@@ -956,6 +977,8 @@ class Converter:
         }
         if unmerged_custom_properties:
             return "custom fields that cannot be merged"
+        if self._archive_history and entry.history:
+            return "historical records that cannot be merged"
         if entry.notes or entry.attachments or entry.expired:
             return "notes, attachments, or expiry state that cannot be merged"
         if self._migrate_metadata and (
