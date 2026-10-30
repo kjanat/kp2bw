@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,13 +34,25 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     env = env.copy()
     mapping = tmp / "ssh-map.json"
     mapping.write_text(
-        json.dumps([{"group": "SSH", "fields": {"privateKey": "Private Key"}}]),
+        json.dumps([
+            {"group": "SSH", "fields": {"privateKey": "Private Key"}},
+            {
+                "field": {"name": "Type", "value": "Excluded"},
+                "fields": {"privateKey": "Private Key"},
+            },
+        ]),
         encoding="utf-8",
     )
-    env.update(KP2BW_SSH_MAP=str(mapping), BW_NOINTERACTION="true")
+    env.update(
+        KP2BW_SSH_MAP=str(mapping), BW_NOINTERACTION="true", KP2BW_SKIP_EXPIRED="true"
+    )
     source = tmp / "ssh.kdbx"
     db = create_database(source, password="synthetic")
     group = db.add_group(db.root_group, "SSH")
+    excluded = db.add_entry(group, "Excluded ambiguous SSH key", "", "")
+    excluded.set_custom_property("Type", "Excluded")
+    excluded.expires = True
+    excluded.expiry_time = datetime(2000, 1, 1, tzinfo=UTC)
     entry = db.add_entry(group, "Synthetic SSH key", "ssh-user", "synthetic-password")
     alias = db.add_entry(
         db.root_group,
@@ -62,6 +75,7 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     def read() -> tuple[BwItemResponse, BwItemResponse]:
         nonlocal alias_revision
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            assert bw.get_item_by_uuid(excluded.uuid.hex.upper()) is None
             login = bw.get_item_by_uuid(alias.uuid.hex.upper())
             assert login is not None
             login = bw.get_item(login["id"])
