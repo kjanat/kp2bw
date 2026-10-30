@@ -86,7 +86,29 @@ def main() -> None:
                     key: record.attachment_id for key, record in records.items()
                 }
 
-        migrate()
+        converter = Converter(
+            str(source), "synthetic", None, password, None, None, False, 999, None
+        )
+        with (
+            patch.dict(os.environ, env),
+            patch.object(
+                BitwardenServeClient,
+                "update_item",
+                side_effect=BitwardenClientError(
+                    "synthetic initial metadata rejection"
+                ),
+            ),
+        ):
+            assert converter.convert() != 0
+        with (
+            patch.dict(os.environ, env),
+            patch.object(
+                BitwardenServeClient,
+                "upload_attachments",
+                side_effect=AssertionError("First-import retry uploaded another copy"),
+            ),
+        ):
+            assert converter.convert() == 0
         before = verify()
         migrate()
         assert verify() == before, (
@@ -189,6 +211,19 @@ def main() -> None:
         assert all(added[1][key] == value for key, value in recovered[1].items())
         migrate()
         assert verify() == added
+        db.delete_entry(entry)
+        db.save()
+        with (
+            patch.dict(os.environ, env),
+            patch.object(
+                converter,
+                "_persist_attachment_plan",
+                side_effect=AssertionError(
+                    "A removed entry retained its previous attachment plan"
+                ),
+            ),
+        ):
+            assert converter.convert() == 0
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
             item = bw.get_item_by_uuid(entry.uuid.hex.upper())
             assert item is not None

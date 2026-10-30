@@ -169,6 +169,9 @@ def main() -> None:
             hashlib.sha256(source.filename.encode()).hexdigest(),
             source.digest,
         )
+    recovered_initial = plan_attachments(sources, {}, remote, data.__getitem__)
+    assert not recovered_initial.uploads and not recovered_initial.stale
+    assert recovered_initial.records == records
     fields = fields_from_records(records)
     assert records_from_fields(fields) == records
     try:
