@@ -1315,7 +1315,74 @@ def assert_refs_to_different_items_do_not_merge_arbitrarily() -> None:
         raise AssertionError("Mixed REF did not explain why it stayed separate")
 
 
+def assert_legacy_ref_keeps_historical_field_routing() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        path = str(Path(directory) / "historical-fields.kdbx")
+        database = create_database(path, password="pw")
+        target = database.add_entry(
+            database.root_group,
+            "Old large fields",
+            "user",
+            "pw",
+            url="https://target.example",
+        )
+        target.set_custom_property("large", "f" * 4000)
+        target.notes = "n" * 8000
+        alias = database.add_entry(
+            database.root_group,
+            "Alias",
+            "user",
+            f"{{REF:P@I:{target.uuid.hex.upper()}}}",
+            url="https://alias.example",
+        )
+        database.save()
+        converter = ChainResolutionTestConverter(
+            path,
+            "pw",
+            None,
+            "pw",
+            None,
+            None,
+            False,
+            1,
+            None,
+        )
+        items, _ = converter.load_and_resolve()
+    desired = items["Old large fields"]
+    assert not any(field["name"] == "large" for field in desired["fields"])
+    assert not desired["notes"]
+    # Construct the old output independently: inline plaintext fields, then
+    # stamp, then merge the alias URI without restamping (the old bug).
+    historical = copy.deepcopy(desired)
+    historical["notes"] = "n" * 8000
+    historical["fields"].append({"name": "large", "value": "f" * 4000, "type": 0})
+    historical["login"]["uris"] = [{"uri": "https://target.example", "match": None}]
+    converter.restamp(historical)
+    historical["login"]["uris"].append({"uri": alias.url or "", "match": None})
+    source_id = target.uuid.hex.upper()
+    existing = _legacy_response(historical)
+    assert converter._legacy_ref_status(existing, source_id) == "exact"
+    client = _LegacyUpgradeClient()
+    assert (
+        converter.reconcile_legacy_output(client, existing, desired, kp_uuid=source_id)
+        == "updated"
+    )
+    assert len(client.updated) == 1
+    assert not any(field["name"] == "large" for field in client.updated[0]["fields"])
+    edited = copy.deepcopy(existing)
+    next(field for field in edited["fields"] if field["name"] == "large")["value"] = (
+        "manual destination edit"
+    )
+    protected = _LegacyUpgradeClient()
+    assert (
+        converter.reconcile_legacy_output(protected, edited, desired, kp_uuid=source_id)
+        == "protected"
+    )
+    assert not protected.updated
+
+
 def main() -> None:
+    assert_legacy_ref_keeps_historical_field_routing()
     """Run the script-style assertions and report success."""
     assert_resolves_none_fields_with_references()
     assert_resolves_chain_with_merge()

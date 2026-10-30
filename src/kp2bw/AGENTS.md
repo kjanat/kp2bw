@@ -184,3 +184,6 @@ src/kp2bw/
 
 - Attachment association updates force a server sync before their verification read. A successful PUT may precede the
   official CLI's local-cache update; old copies remain until the server-backed read confirms the new associations.
+
+- Historical REF recognition reconstructs the former plaintext field/notes cutoff independently of current encrypted budgets.
+  Untouched old imports remain eligible for automatic upgrade; edits to their old inline fields stay protected.
