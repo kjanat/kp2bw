@@ -127,6 +127,10 @@ def test_doctor_script() -> None:
     _run_script_main("doctor_test.py")
 
 
+def test_bw_serve_inventory_script() -> None:
+    _run_script_main("bw_serve_inventory_test.py")
+
+
 def test_windows_bw_cmd_smoke_script() -> None:
     if os.name != "nt":
         pytest.skip("windows bw .cmd smoke runs on Windows only")

@@ -48,6 +48,9 @@ src/kp2bw/
 ## ANTI-PATTERNS
 
 - Reintroducing subprocess-per-op transport for new work.
+- Post-sync inventory verification is a bounded bootstrap check: fresh read-only CLI lists use the active HTTP unlock
+  session and profile, then HTTP lists must match before dedup or folder/collection decisions. This is necessary because
+  `bw serve` can return a transient empty or partial list after successful sync. CRUD and attachment transport stay HTTP.
 - Logging decrypted vault content or credential-bearing command strings.
 - Breaking idempotency: a re-run with no KeePass changes must issue no `PUT` and upload no attachment
   (`_content_differs` / upload-if-missing gate this).
