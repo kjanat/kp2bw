@@ -209,7 +209,9 @@ src/kp2bw/
 
 - `--entry-id` / `--item-id` resolve one stable source/destination association before writes. Selection checks all visible
   stamps for ambiguity and intersects destination scope; it never uses legacy title adoption. Only the selected source
-  and its REF dependencies are parsed, and only the selected source is written. A selected alias stays separate.
+  and its inbound/outbound REF component are parsed, and only the selected source is written. Inbound aliases
+  reconstruct merged URLs/TOTP; a selected alias stays separate. Failed legacy adoption needs a normal rerun
+  because an item without its source association cannot be selected by destination ID.
   Import filters apply to the selected source; references may read excluded dependencies without writing them.
 - Attachment association updates force a server sync before their verification read. A successful PUT may precede the
   official CLI's local-cache update; old copies remain until the server-backed read confirms the new associations.
