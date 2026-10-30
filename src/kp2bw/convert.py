@@ -82,6 +82,7 @@ from ._item_sync import (
     legacy_extensions_differ,
     login_signature,
     mark_credential_id,
+    pre_history_content_signature,
     stamp_content,
     sync_stamp_generation,
     sync_stamp_matches,
@@ -1408,6 +1409,12 @@ class Converter:
         state = self._legacy_ref_states.get(kp_uuid)
         if state is None:
             legacy_item = copy.deepcopy(self.legacy_ref_sources.get(kp_uuid, item))
+            legacy_item.pop("passwordHistory", None)
+            legacy_item["fields"] = [
+                field
+                for field in legacy_item["fields"]
+                if field["name"] != HISTORY_FIELD_NAME
+            ]
             # Older releases overwrote reserved source fields and ignored later
             # duplicates. Replay that only for recognizing historical REF output.
             old_fields: list[BwField] = []
@@ -1440,7 +1447,10 @@ class Converter:
                             sort_keys=True,
                         ).rstrip("\n")
             self._stamp_content(legacy_item)
-            sync_stamp = content_signature(legacy_item)
+            sync_stamp = pre_history_content_signature(legacy_item)
+            for field in legacy_item["fields"]:
+                if field["name"] == KP2BW_SYNC_FIELD_NAME:
+                    field["value"] = sync_stamp
             base_uris = copy.deepcopy(legacy_item["login"]["uris"])
             state = _LegacyRefState(sync_stamp, legacy_item, base_uris, {})
             self._legacy_ref_states[kp_uuid] = state

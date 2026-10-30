@@ -180,7 +180,56 @@ def check_native_updates() -> None:
     bw.update_item.assert_not_called()
 
 
+def check_legacy_ref_history() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "legacy-ref.kdbx"
+        db = create_database(path, password="test")
+        entry = db.add_entry(db.root_group, "Target", "user", "old")
+        entry.save_history()
+        entry.password = "current"
+        entry.set_custom_property("KP2BW_HISTORY", "ordinary source value")
+        alias_url = "https://alias.example.test"
+        db.add_entry(
+            db.root_group,
+            "Alias",
+            "{REF:U@I:" + entry.uuid.hex.upper() + "}",
+            "{REF:P@I:" + entry.uuid.hex.upper() + "}",
+            url=alias_url,
+        )
+        db.save()
+        converter = Converter(
+            str(path), "test", None, "unused", None, None, False, 0, None
+        )
+        with patch.object(
+            converter, "_create_bitwarden_items_for_entries", return_value=0
+        ):
+            assert converter.convert() == 0
+        identifier = entry.uuid.hex.upper()
+        desired = converter._unpack_entry(converter._entries[identifier])[2]
+        assert desired.get("passwordHistory")
+        old = cast(BwItemResponse, copy.deepcopy(desired))
+        old.update(id="existing", object="item", revisionDate="old")
+        old.pop("passwordHistory", None)
+        old["fields"] = [
+            field for field in old["fields"] if field["name"] != "KP2BW_HISTORY"
+        ]
+        for field in old["fields"]:
+            if field["name"] == "KeePass:KP2BW_HISTORY:1":
+                field["name"] = "KP2BW_HISTORY"
+        old["login"]["uris"] = []
+        # This fixture has no passkeys: the historical algorithm is exactly 3.8.1.
+        original_stamp = pre_fido2_content_signature(old)
+        for field in old["fields"]:
+            if field["name"] == "KP2BW_SYNC":
+                field["value"] = original_stamp
+        old["login"]["uris"] = [{"uri": alias_url, "match": None}]
+        assert converter._legacy_ref_status(old, identifier) == "exact"
+        old["notes"] = "destination edit"
+        assert converter._legacy_ref_status(old, identifier) == "diverged"
+
+
 def main() -> None:
+    check_legacy_ref_history()
     check_native_updates()
     check_review_regressions()
     with tempfile.TemporaryDirectory() as directory:
