@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from attachment_checkpoint_test import record, scope
 from convert_update_test import UpdateTestConverter, _make_desired, _make_existing
@@ -22,12 +23,147 @@ from kp2bw._cli_policy_state import CliPolicyState
 from kp2bw._item_sync import stamp_content
 from kp2bw._preview import PreviewEntry, describe_payload
 from kp2bw._preview_transport import PreviewCheckpoint, PreviewTransport
+from kp2bw._selection import ItemSelection
 from kp2bw._ssh_mapping import parse_ssh_rules
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
 from kp2bw.cli import main as cli_main
 from kp2bw.convert import Converter
-from kp2bw.exceptions import BitwardenClientError
+from kp2bw.exceptions import BitwardenClientError, ConversionError
+
+
+def check_selected_ssh_component() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "selection.kdbx"
+        db = create_database(path, password="synthetic")
+        selected = db.add_entry(db.root_group, "Selected", "user", "pw")
+        alias = db.add_entry(
+            db.root_group, "Alias", "user", f"{{REF:P@I:{selected.uuid.hex}}}"
+        )
+        unrelated = db.add_entry(db.root_group, "Unrelated", "user", "pw")
+        unrelated.set_custom_property("Kind", "SSH")
+        db.save()
+        rules = parse_ssh_rules([
+            {
+                "field": {"name": "Kind", "value": "SSH"},
+                "fields": {"privateKey": "Password"},
+            },
+            {
+                "field": {"name": "Title", "value": "Unrelated"},
+                "fields": {"privateKey": "Password"},
+            },
+        ])
+        destination = str(uuid4())
+        remote = _make_existing(
+            id=destination,
+            name="Selected",
+            fields=[
+                {"name": "KP2BW_ID", "value": selected.uuid.hex.upper(), "type": 0},
+            ],
+        )
+        target = MagicMock(spec=BitwardenServeClient)
+        target.__enter__.return_value = target
+        target.list_items.return_value = [remote]
+        target.list_folders.return_value = {}
+        target.get_item.return_value = remote
+        target.item_policy_blockers.return_value = {}
+        for by_item in (False, True):
+            converter = Converter(
+                str(path),
+                "synthetic",
+                None,
+                "unused",
+                None,
+                None,
+                False,
+                999,
+                None,
+                entry_id=None if by_item else str(selected.uuid),
+                item_id=destination if by_item else None,
+                ssh_rules=rules,
+            )
+            report = converter.preview(
+                cast(BitwardenServeClient, target) if by_item else None
+            )
+            assert not report.blockers and not report.entries[0].blockers
+            assert (
+                len(report.entries) == 1
+                and report.entries[0].source_id == selected.uuid.hex.upper()
+            )
+            assert alias.uuid.hex.upper() in converter._resolved_ref_items
+            with (
+                patch("kp2bw.convert.BitwardenServeClient", return_value=target),
+                patch.object(
+                    converter,
+                    "_create_bitwarden_items_for_entries",
+                    return_value=0,
+                ),
+            ):
+                assert converter.convert() == 0
+            assert set(converter._entries) == {selected.uuid.hex.upper()}
+        # The same ambiguity remains an error when it belongs to the selection.
+        converter._selection = ItemSelection(unrelated.uuid.hex.upper(), None)
+        try:
+            converter._load_keepass_data()
+        except ConversionError:
+            pass
+        else:
+            raise AssertionError("Selected SSH ambiguity was ignored")
+
+
+def check_destination_attachment_entitlement() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "ownership.kdbx"
+        db = create_database(path, password="synthetic")
+        owners = ["org-a", "org-a", "org-b", None]
+        for index in range(4):
+            entry = db.add_entry(db.root_group, str(index), "user", "pw")
+            entry.add_attachment(db.add_binary(b"abc"), "file.txt")
+        db.save()
+        converter = Converter(
+            str(path), "synthetic", None, "", None, None, False, 999, None
+        )
+        converter._prepare_entries()
+        remote = [
+            cast(
+                BwItemResponse,
+                {
+                    **copy.deepcopy(value[2]),
+                    "id": str(index),
+                    "organizationId": owners[index],
+                },
+            )
+            for index, value in enumerate(converter._entries.values())
+            if owners[index] is not None
+        ]
+        target = MagicMock(spec=BitwardenServeClient)
+        target.list_items.return_value = remote
+        target.list_folders.return_value = {}
+        target.get_item.side_effect = lambda item_id: copy.deepcopy(
+            next(item for item in remote if item["id"] == item_id)
+        )
+        target.item_policy_blockers.return_value = {}
+        for limit in (10, 5):
+            target.attachment_capability.side_effect = lambda organization_id: (
+                AttachmentCapability(
+                    organization_id is not None,
+                    storage_limit_bytes=limit if organization_id == "org-a" else 5,
+                    reason="Personal uploads require premium"
+                    if organization_id is None
+                    else "Organization storage",
+                )
+            )
+            report = converter.preview(cast(BitwardenServeClient, target))
+            assert [entry.outcome for entry in report.entries] == [
+                "update" if limit == 10 else "blocked",
+                "update" if limit == 10 else "blocked",
+                "update",
+                "blocked",
+            ]
+            assert report.attachment_capability is None
+            assert all(
+                entry.attachment_capability is not None for entry in report.entries
+            )
 
 
 def check_target_reconciliation() -> None:
@@ -104,6 +240,8 @@ def check_checkpoint_snapshot() -> None:
 
 
 def main() -> None:
+    check_selected_ssh_component()
+    check_destination_attachment_entitlement()
     for arguments in (
         ["--preview", "--fixup"],
         ["--entry-id", "00000000-0000-0000-0000-000000000001", "--fixup"],
@@ -133,6 +271,30 @@ def main() -> None:
     denied = CliPolicyState("bitwarden", "https://synthetic.example/api", (), (), False)
     assert attachment_capability(denied, None).allowed is False
     assert attachment_capability(denied, "absent").allowed is None
+    client = MagicMock(spec=BitwardenServeClient)
+    client._org_id = None
+    client._request.return_value = {"template": {}}
+    state = CliPolicyState(
+        "bitwarden",
+        "https://synthetic.example/api",
+        ({"id": "org", "status": 2, "maxStorageGb": 1},),
+        (),
+        False,
+    )
+    with patch("kp2bw.bw_serve.read_policy_state", return_value=state):
+        assert (
+            BitwardenServeClient.attachment_capability(
+                cast(BitwardenServeClient, client), "org"
+            ).allowed
+            is True
+        )
+        assert (
+            BitwardenServeClient.attachment_capability(
+                cast(BitwardenServeClient, client), None
+            ).allowed
+            is False
+        )
+    assert client._org_id is None
     for maximum, allowed in ((0, False), (1, True), (None, None), (-1, None)):
         state = CliPolicyState(
             "vaultwarden",

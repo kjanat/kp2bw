@@ -93,6 +93,7 @@ class PreviewEntry:
     uploads: int = 0
     upload_bytes: int = 0
     cleanup_attachments: int = 0
+    attachment_capability: AttachmentCapability | None = None
     destination_source_id: str | None = None
     item_type: int | None = None
     native_fields: list[str] = field(default_factory=list)
@@ -200,6 +201,11 @@ def format_preview(preview: MigrationPreview) -> str:
             )
         lines.extend(f"  Omitted: {reason}" for reason in entry.omissions)
         lines.extend(f"  Blocked: {reason}" for reason in entry.blockers)
+        if entry.attachment_capability is not None:
+            capability = entry.attachment_capability
+            lines.append(
+                f"  Attachment entitlement: {capability.allowed}; {capability.reason}"
+            )
     lines.extend(f"Blocked: {reason}" for reason in preview.blockers)
     if preview.attachment_capability is not None:
         capability = preview.attachment_capability

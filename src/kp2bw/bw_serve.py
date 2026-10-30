@@ -1262,8 +1262,10 @@ class BitwardenServeClient:
         logger.log(VERBOSE, "Syncing vault via bw serve")
         self._request("POST", "/sync", idempotent=True)
 
-    def attachment_capability(self) -> AttachmentCapability:
-        """Read entitlement metadata bound to this account and a fresh sync."""
+    def attachment_capability(
+        self, organization_id: str | None
+    ) -> AttachmentCapability:
+        """Read fresh account entitlement for the effective destination owner."""
         started = datetime.now(UTC)
         self.sync(force=True)
         status = self._request("GET", "/status").get("template")
@@ -1272,7 +1274,7 @@ class BitwardenServeClient:
                 "Cannot verify attachment entitlement: missing CLI status"
             )
         state = read_policy_state(cast(dict[str, object], status), synced_after=started)
-        return attachment_capability(state, self._org_id)
+        return attachment_capability(state, organization_id)
 
     def item_policy_blockers(self, item_types: set[int]) -> dict[int, str]:
         """Explain synced organization restrictions without attempting a write."""
