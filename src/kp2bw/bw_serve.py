@@ -39,6 +39,7 @@ from ._item_sync import (
 from ._ssh_policy import require_ssh_policy_allowed
 from .bw_types import BwCollection, BwField, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import (
+    BitwardenAttachmentMissingError,
     BitwardenClientError,
     BitwardenHttpError,
     BitwardenServeExitedError,
@@ -1343,6 +1344,23 @@ class BitwardenServeClient:
         # item update or attachment reconciliation uses it.
         self._build_dedup_index()
 
+    def checkpoint_identity(self) -> tuple[str, str]:
+        """Return the active account/server identity without exposing credentials."""
+        status = self._request("GET", "/status").get("template")
+        if not isinstance(status, dict):
+            raise BitwardenClientError("Cannot identify the checkpoint account")
+        identity = cast(dict[str, object], status)
+        account = identity.get("userId")
+        server = identity.get("serverUrl") or "https://vault.bitwarden.com"
+        if (
+            identity.get("status") != "unlocked"
+            or not isinstance(account, str)
+            or not account
+            or not isinstance(server, str)
+        ):
+            raise BitwardenClientError("Checkpoint requires a known unlocked account")
+        return server.rstrip("/"), account
+
     def sync(self, *, force: bool = False) -> None:
         """Synchronise the vault, optionally bypassing the CLI revision cache."""
         if force:
@@ -1983,9 +2001,29 @@ class BitwardenServeClient:
             sleep=self._sleep,
         )
         if resp.status_code >= 400:
-            raise BitwardenClientError(
+            try:
+                payload: object = resp.json()
+            except ValueError:
+                payload = None
+            message = (
+                cast(dict[str, object], payload).get("message")
+                if isinstance(payload, dict)
+                else None
+            )
+            # Distinguish an upstream storage 404 from a transient missing item
+            # or attachment in the CLI's own cache. Never infer an orphan from
+            # a generic 'Not found', authorization failure or transport error.
+            missing_body = message in (
+                "A 404 error occurred while downloading the attachment.",
+                "Vaultwarden request failed (HTTP 404).",
+            )
+            error = (
+                BitwardenAttachmentMissingError if missing_body else BitwardenHttpError
+            )
+            raise error(
                 f"bw serve returned HTTP {resp.status_code} downloading "
-                f"attachment {attachment_id} on item {item_id}"
+                f"attachment {attachment_id} on item {item_id}",
+                status_code=resp.status_code,
             )
         return resp.content
 

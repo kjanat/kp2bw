@@ -192,6 +192,10 @@ attachment. It includes old passwords, protected fields, notes, source timestamp
 bytes. The generated filename avoids collisions with your files. Missing historical bytes are reported and their
 references retained. The option is off by default; it does not change Bitwarden's creation or revision timestamps.
 
+Use `--checkpoint PATH` (or `KP2BW_CHECKPOINT`) to resume interrupted attachment uploads and avoid downloading verified,
+unchanged files on later runs. See [attachment checkpoints](docs/attachment-checkpoints.md) for usage and filename
+changes.
+
 ### Organization collections
 
 Bitwarden folders are personal-vault metadata. When importing into an organization, use `--bitwarden-collection auto` to

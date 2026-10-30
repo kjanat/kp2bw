@@ -51,6 +51,11 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
   verifies distinct and identical same-named files, generated/original collisions, unchanged IDs and revisions,
   replacement of exactly one source, and retention when saving the association fails.
 - Fixtures are contract data; path and naming changes require docker + test updates together.
+- Checkpoint tests cover atomic replacement, process locks, revision invalidation and preservation of remote edits.
+  `e2e_checkpoint_test.py` kills migration processes before upload, after upload, after mapping and after deletion,
+  then checks convergence and a rerun without attachment body transfers. With
+  `KP2BW_E2E_VAULTWARDEN_CONTAINER`, it also removes a synthetic encrypted body from that disposable container to
+  exercise recovery of an actual orphan slot. Both CLI jobs run these checks after golden snapshots.
 - The final live attachment batch regression verifies four distinct files on each of two items, unchanged reruns,
   replacement and a falsely acknowledged upload that must fail without deleting the old copy.
   `e2e_attachment_batch_test.py` can also run independently against an official Bitwarden test account using

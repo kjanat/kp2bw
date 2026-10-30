@@ -6,8 +6,10 @@ import json
 import logging
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from contextlib import ExitStack
+from dataclasses import dataclass, replace
 from itertools import islice
+from pathlib import Path
 from typing import Literal
 
 import yaml
@@ -28,6 +30,7 @@ from rich.progress import (
 )
 
 from . import VERBOSE
+from ._attachment_resume import inspect_pending_upload, transaction_filename
 from ._attachments import (
     ATTACHMENT_FIELD_PREFIX,
     AttachmentPlan,
@@ -38,6 +41,12 @@ from ._attachments import (
     plan_attachments,
     records_from_fields,
     source_file,
+)
+from ._checkpoint import (
+    AttachmentCheckpoint,
+    CheckpointRecord,
+    CheckpointScope,
+    metadata_digest,
 )
 from ._console import console
 from ._history import (
@@ -65,6 +74,7 @@ from ._ssh_mapping import SshRule, apply_ssh_rule
 from ._templates import TemplateRule, apply_template, recognize_template, template_uuid
 from .bw_serve import (
     BitwardenServeClient,
+    item_kp2bw_id,
     item_kp2bw_sync,
 )
 from .bw_types import (
@@ -75,7 +85,11 @@ from .bw_types import (
     BwItemResponse,
     BwUri,
 )
-from .exceptions import BitwardenClientError, ConversionError
+from .exceptions import (
+    BitwardenAttachmentMissingError,
+    BitwardenClientError,
+    ConversionError,
+)
 from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
 from .uri_mapping import (
     UriMatchValue,
@@ -390,9 +404,16 @@ class Converter:
         ssh_rules: tuple[SshRule, ...] = (),
         archive_history: bool = False,
         migrate_password_history: bool = True,
+
+        checkpoint_path: str | None = None,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._attachment_plans: dict[str, AttachmentPlan] = {}
+        self._checkpoint_path = checkpoint_path
+        self._checkpoint: AttachmentCheckpoint | None = None
+        self._checkpoint_entry_ids: dict[str, str] = {}
+        self._checkpoint_cleanup: list[tuple[str, str, str]] = []
+        self._source_scope_id = ""
         self._keepass_file_path = keepass_file_path
         self._keepass_password = keepass_password
         self._keepass_keyfile_path = keepass_keyfile_path
@@ -858,6 +879,11 @@ class Converter:
             self._keepass_password,
             self._keepass_keyfile_path,
         )
+        if self._checkpoint_path:
+            self._source_scope_id = metadata_digest({
+                "path": str(Path(self._keepass_file_path).resolve()),
+                "root": kp.root_group.uuid.hex,
+            })
 
         # reset data structures
         self._kp_ref_entries = []
@@ -1937,15 +1963,24 @@ class Converter:
                     raise ConversionError(
                         "Attachment associations have an invalid sync stamp"
                     )
+                sources = self._attachment_sources(attachments)
+                previous_records = dict(records)
+                full, records = self._recover_checkpoint_uploads(
+                    bw, full, sources, records
+                )
                 plan = plan_attachments(
-                    self._attachment_sources(attachments),
+                    sources,
                     records,
                     [
                         (att["id"], att["fileName"])
                         for att in full.get("attachments") or []
                     ],
-                    lambda attachment_id: bw.get_attachment(item_id, attachment_id),
+                    lambda attachment_id: self._read_checkpoint_attachment(
+                        bw, full, sources, records, attachment_id
+                    ),
                 )
+                plan.previous_records = previous_records
+                self._prepare_checkpoint_uploads(bw, full, plan)
                 self._attachment_plans[item_id] = plan
                 upload_atts = list(plan.uploads)
                 stale_by_name = {
@@ -1953,10 +1988,13 @@ class Converter:
                     for source in plan.uploads
                     if source.source_id in plan.stale
                 }
-            except BitwardenClientError, ConversionError:
+            except (BitwardenClientError, ConversionError) as exc:
                 logger.warning(
-                    "Could not safely associate attachments on item %s; leaving its files unchanged",
+                    "Could not safely associate attachments on item %s (%s); leaving its files unchanged",
                     item_id,
+                    str(exc)
+                    if isinstance(exc, ConversionError)
+                    else type(exc).__name__,
                 )
                 return "failed", [], {}
 
@@ -1967,6 +2005,406 @@ class Converter:
             )
 
         return outcome, upload_atts, stale_by_name
+
+    @staticmethod
+    def _attachment_metadata_digest(item: BwItemResponse) -> str:
+        return metadata_digest(
+            sorted(
+                [
+                    {
+                        "id": attachment["id"],
+                        "name": attachment["fileName"],
+                        "size": attachment.get("size"),
+                    }
+                    for attachment in item.get("attachments") or []
+                ],
+                key=lambda row: row["id"] or "",
+            )
+        )
+
+    def _prepare_checkpoint_uploads(
+        self, bw: BitwardenServeClient, item: BwItemResponse, plan: AttachmentPlan
+    ) -> None:
+        checkpoint = self._checkpoint
+        if checkpoint is None or not plan.uploads:
+            return
+        entry_id = item_kp2bw_id(item)
+        if not entry_id:
+            raise ConversionError(
+                "Cannot checkpoint an upload without its source identity"
+            )
+        self._checkpoint_entry_ids[item["id"]] = entry_id.upper()
+        prepared: dict[str, SourceFile] = {}
+        adopted: set[str] = set()
+        updates: list[CheckpointRecord] = []
+        for source in plan.uploads:
+            previous_id = plan.stale.get(source.source_id)
+            previous = plan.records.get(source.source_id)
+            if previous_id is not None and (
+                previous is None or previous.attachment_id != previous_id
+            ):
+                raise ConversionError(
+                    "Cannot checkpoint a replacement without its previous association"
+                )
+            filename = transaction_filename(
+                source, checkpoint.scope_digest, entry_id, previous_id
+            )
+            prepared[source.source_id] = replace(source, filename=filename)
+            candidates = [
+                att["id"]
+                for att in item.get("attachments") or []
+                if att["fileName"] == filename and att["id"] != previous_id
+            ]
+            recovered_id: str | None = None
+            if candidates:
+                if len(candidates) != 1 or any(
+                    record.attachment_id == candidates[0]
+                    for record in plan.records.values()
+                ):
+                    raise ConversionError(
+                        "Unmapped transaction attachments are ambiguous; preserving them"
+                    )
+                if bw.get_attachment(item["id"], candidates[0]) != source.data:
+                    raise ConversionError(
+                        "Unmapped transaction attachment has different contents; preserving it"
+                    )
+                recovered_id = candidates[0]
+                plan.records[source.source_id] = FileRecord(
+                    recovered_id,
+                    hashlib.sha256(filename.encode()).hexdigest(),
+                    source.digest,
+                )
+                adopted.add(source.source_id)
+                if previous_id:
+                    self._checkpoint_cleanup.append((item["id"], previous_id, filename))
+            updates.append(
+                CheckpointRecord(
+                    entry_id=entry_id,
+                    source_id=source.source_id,
+                    source_digest=source.digest,
+                    source_size=len(source.data),
+                    item_id=item["id"],
+                    name_digest=hashlib.sha256(filename.encode()).hexdigest(),
+                    phase="verified" if recovered_id else "pending",
+                    attachment_id=recovered_id,
+                    remote_revision=item.get("revisionDate") if recovered_id else None,
+                    remote_metadata_digest=self._attachment_metadata_digest(item)
+                    if recovered_id
+                    else None,
+                    previous_attachment_id=previous_id,
+                    previous_digest=previous.digest
+                    if previous_id and previous
+                    else None,
+                    previous_name_digest=previous.name_digest
+                    if previous_id and previous
+                    else None,
+                    before_ids=tuple(
+                        att["id"]
+                        for att in item.get("attachments") or []
+                        if att["id"] != recovered_id
+                    ),
+                )
+            )
+        checkpoint.save_many(updates)
+        plan.sources = [
+            prepared.get(source.source_id, source) for source in plan.sources
+        ]
+        plan.uploads = [
+            prepared[source.source_id]
+            for source in plan.uploads
+            if source.source_id not in adopted
+        ]
+
+    def _recover_checkpoint_uploads(
+        self,
+        bw: BitwardenServeClient,
+        item: BwItemResponse,
+        sources: list[SourceFile],
+        records: dict[str, FileRecord],
+    ) -> tuple[BwItemResponse, dict[str, FileRecord]]:
+        checkpoint = self._checkpoint
+        entry_id = item_kp2bw_id(item)
+        if checkpoint is None or not entry_id:
+            return item, records
+        effective = dict(records)
+        for source in sources:
+            pending = checkpoint.records.get(entry_id.upper() + ":" + source.source_id)
+            if pending is None or pending.item_id != item["id"]:
+                continue
+            expected_name = transaction_filename(
+                source,
+                checkpoint.scope_digest,
+                entry_id,
+                pending.previous_attachment_id,
+            )
+            # Ordinary cached files have no transaction suffix. Unchanged
+            # transaction files also need no recovery or body download.
+            if pending.phase == "mapped" and (
+                pending.name_digest
+                != hashlib.sha256(expected_name.encode()).hexdigest()
+                or pending.reusable(
+                    item_id=item["id"],
+                    attachment_id=pending.attachment_id or "",
+                    source_digest=source.digest,
+                    source_size=len(source.data),
+                    name_digest=pending.name_digest,
+                    revision=item.get("revisionDate") or "",
+                    remote_metadata_digest=self._attachment_metadata_digest(item),
+                )
+            ):
+                continue
+
+            def read(attachment_id: str, item_id: str = item["id"]) -> bytes | None:
+                try:
+                    return bw.get_attachment(item_id, attachment_id)
+                except BitwardenAttachmentMissingError:
+                    return None
+
+            decision = inspect_pending_upload(
+                source,
+                pending,
+                checkpoint.scope_digest,
+                item.get("attachments") or [],
+                read,
+            )
+            if pending.previous_attachment_id is not None:
+                previous = next(
+                    (
+                        att
+                        for att in item.get("attachments") or []
+                        if att["id"] == pending.previous_attachment_id
+                    ),
+                    None,
+                )
+                current_association = records.get(source.source_id)
+                if (
+                    previous is None
+                    and current_association is not None
+                    and current_association.attachment_id
+                    == pending.previous_attachment_id
+                ):
+                    raise ConversionError(
+                        "The previous attachment was removed while its replacement was pending"
+                    )
+                if previous is not None and (
+                    hashlib.sha256(previous["fileName"].encode()).hexdigest()
+                    != pending.previous_name_digest
+                    or hashlib.sha256(
+                        bw.get_attachment(item["id"], previous["id"])
+                    ).hexdigest()
+                    != pending.previous_digest
+                ):
+                    raise ConversionError(
+                        "The previous attachment was edited while its replacement was pending"
+                    )
+            for orphan_id in decision.orphan_ids:
+                # Record the discovered slot before removing it. A crash after
+                # deletion is recoverable because the stable transaction name
+                # is reused and no completed upload is assumed.
+                checkpoint.save(replace(pending, phase="slot", attachment_id=orphan_id))
+                current = bw.get_item(item["id"])
+                if current.get("revisionDate") != item.get(
+                    "revisionDate"
+                ) or self._attachment_metadata_digest(
+                    current
+                ) != self._attachment_metadata_digest(item):
+                    raise ConversionError(
+                        "Item changed before incomplete upload cleanup"
+                    )
+                bw.delete_attachment(item["id"], orphan_id)
+                bw.sync(force=True)
+                item = bw.get_item(item["id"])
+            if decision.attachment_id is None:
+                continue
+            association = records.get(source.source_id)
+            if association is not None and association.attachment_id not in {
+                pending.previous_attachment_id,
+                decision.attachment_id,
+            }:
+                raise ConversionError(
+                    "Attachment association changed during checkpoint recovery"
+                )
+            effective[source.source_id] = FileRecord(
+                decision.attachment_id, pending.name_digest, source.digest
+            )
+            checkpoint.save(
+                replace(
+                    pending,
+                    phase="verified",
+                    attachment_id=decision.attachment_id,
+                    remote_revision=item.get("revisionDate"),
+                    remote_metadata_digest=self._attachment_metadata_digest(item),
+                )
+            )
+            cleanup_ids = list(decision.duplicate_ids)
+            if (
+                pending.previous_attachment_id
+                and pending.previous_attachment_id != decision.attachment_id
+                and any(
+                    att["id"] == pending.previous_attachment_id
+                    for att in item.get("attachments") or []
+                )
+            ):
+                cleanup_ids.append(pending.previous_attachment_id)
+            self._checkpoint_cleanup.extend(
+                (item["id"], old_id, expected_name) for old_id in cleanup_ids
+            )
+        return item, effective
+
+    def _read_checkpoint_attachment(
+        self,
+        bw: BitwardenServeClient,
+        item: BwItemResponse,
+        sources: list[SourceFile],
+        records: dict[str, FileRecord],
+        attachment_id: str,
+    ) -> bytes:
+        checkpoint = self._checkpoint
+        entry_id = item_kp2bw_id(item)
+        if checkpoint is not None and entry_id:
+            for source in sources:
+                association = records.get(source.source_id)
+                cached = checkpoint.records.get(
+                    entry_id.upper() + ":" + source.source_id
+                )
+                if (
+                    association is None
+                    or cached is None
+                    or association.attachment_id != attachment_id
+                ):
+                    continue
+                if association.digest == source.digest and cached.reusable(
+                    item_id=item["id"],
+                    attachment_id=attachment_id,
+                    source_digest=source.digest,
+                    source_size=len(source.data),
+                    name_digest=association.name_digest,
+                    revision=item.get("revisionDate") or "",
+                    remote_metadata_digest=self._attachment_metadata_digest(item),
+                ):
+                    return source.data
+        return bw.get_attachment(item["id"], attachment_id)
+
+    def _save_verified_checkpoint(
+        self,
+        bw: BitwardenServeClient,
+        item_id: str,
+        plan: AttachmentPlan,
+    ) -> None:
+        checkpoint = self._checkpoint
+        if checkpoint is None:
+            return
+        before = bw.get_item(item_id)
+        entry_id = item_kp2bw_id(before)
+        revision = before.get("revisionDate")
+        if not entry_id or not revision:
+            raise ConversionError(
+                "Cannot checkpoint attachments without source identity and revision"
+            )
+        associations = records_from_fields(before.get("fields") or [])
+        metadata = self._attachment_metadata_digest(before)
+        updates: list[CheckpointRecord] = []
+        for source in plan.sources:
+            association = associations.get(source.source_id)
+            if association is None or association.digest != source.digest:
+                raise ConversionError(
+                    "Cannot checkpoint an unverified attachment association"
+                )
+            if (
+                self._read_checkpoint_attachment(
+                    bw, before, plan.sources, associations, association.attachment_id
+                )
+                != source.data
+            ):
+                raise ConversionError(
+                    "Remote attachment changed before checkpoint verification"
+                )
+            prior = checkpoint.records.get(entry_id.upper() + ":" + source.source_id)
+            updates.append(
+                CheckpointRecord(
+                    entry_id=entry_id,
+                    source_id=source.source_id,
+                    source_digest=source.digest,
+                    source_size=len(source.data),
+                    item_id=item_id,
+                    name_digest=association.name_digest,
+                    phase="mapped",
+                    attachment_id=association.attachment_id,
+                    remote_revision=revision,
+                    remote_metadata_digest=metadata,
+                    previous_attachment_id=(
+                        prior.previous_attachment_id if prior else None
+                    ),
+                    before_ids=prior.before_ids if prior else (),
+                    previous_digest=prior.previous_digest if prior else None,
+                    previous_name_digest=prior.previous_name_digest if prior else None,
+                )
+            )
+        after = bw.get_item(item_id)
+        if (
+            after.get("revisionDate") != revision
+            or self._attachment_metadata_digest(after) != metadata
+        ):
+            raise ConversionError("Item changed during checkpoint verification")
+        checkpoint.save_many(updates)
+
+    def _delete_checkpoint_copy(
+        self, bw: BitwardenServeClient, item_id: str, attachment_id: str, filename: str
+    ) -> None:
+        checkpoint = self._checkpoint
+        if checkpoint is None:
+            bw.delete_attachment(item_id, attachment_id)
+            return
+        matches = [
+            record
+            for record in checkpoint.records.values()
+            if record.item_id == item_id
+            and record.name_digest == hashlib.sha256(filename.encode()).hexdigest()
+            and record.phase in {"verified", "mapped"}
+        ]
+        if len(matches) != 1:
+            raise ConversionError(
+                "Cleanup has no unique verified checkpoint association"
+            )
+        record = matches[0]
+        if attachment_id == record.attachment_id:
+            raise ConversionError("Cleanup must not remove the verified replacement")
+        old_copy = attachment_id == record.previous_attachment_id
+        if not old_copy and attachment_id in record.before_ids:
+            raise ConversionError(
+                "Cleanup must not remove a pre-existing unrelated file"
+            )
+        expected_name = record.previous_name_digest if old_copy else record.name_digest
+        expected_digest = record.previous_digest if old_copy else record.source_digest
+        before = bw.get_item(item_id)
+        attachment = next(
+            (
+                att
+                for att in before.get("attachments") or []
+                if att["id"] == attachment_id
+            ),
+            None,
+        )
+        if attachment is None:
+            return
+        if (
+            hashlib.sha256(attachment["fileName"].encode()).hexdigest() != expected_name
+            or hashlib.sha256(bw.get_attachment(item_id, attachment_id)).hexdigest()
+            != expected_digest
+        ):
+            raise ConversionError(
+                "Attachment changed before checkpoint cleanup; preserving it"
+            )
+        after = bw.get_item(item_id)
+        if before.get("revisionDate") != after.get(
+            "revisionDate"
+        ) or self._attachment_metadata_digest(
+            before
+        ) != self._attachment_metadata_digest(after):
+            raise ConversionError(
+                "Item changed before checkpoint cleanup; preserving its files"
+            )
+        bw.delete_attachment(item_id, attachment_id)
 
     def _persist_attachment_plan(
         self,
@@ -1980,6 +2418,7 @@ class Converter:
         if current != plan.previous_records or self._is_user_modified(full):
             raise ConversionError("Item changed while saving attachment associations")
         records = dict(plan.records)
+        verified: list[CheckpointRecord] = []
         for source in plan.uploads:
             if (item_id, source.filename) in failed:
                 continue
@@ -1999,6 +2438,20 @@ class Converter:
                 hashlib.sha256(source.filename.encode()).hexdigest(),
                 source.digest,
             )
+            if self._checkpoint is not None:
+                entry_id = self._checkpoint_entry_ids[item_id]
+                pending = self._checkpoint.records[entry_id + ":" + source.source_id]
+                verified.append(
+                    replace(
+                        pending,
+                        phase="verified",
+                        attachment_id=candidates[0],
+                        remote_revision=full.get("revisionDate"),
+                        remote_metadata_digest=self._attachment_metadata_digest(full),
+                    )
+                )
+        if self._checkpoint is not None and verified:
+            self._checkpoint.save_many(verified)
         if records == current:
             return
         full["fields"] = [
@@ -2057,6 +2510,7 @@ class Converter:
 
         with (
             progress,
+            ExitStack() as checkpoint_resources,
             BitwardenServeClient(
                 self._bitwarden_password,
                 org_id=self._bitwarden_organization_id,
@@ -2068,6 +2522,21 @@ class Converter:
                 for value in self._entries.values()
             ):
                 bw.require_ssh_supported()
+
+            if self._checkpoint_path:
+                server, account = bw.checkpoint_identity()
+                self._checkpoint = checkpoint_resources.enter_context(
+                    AttachmentCheckpoint(
+                        Path(self._checkpoint_path),
+                        CheckpointScope(
+                            server,
+                            account,
+                            self._source_scope_id,
+                            self._bitwarden_organization_id,
+                            self._bitwarden_coll_id,
+                        ),
+                    )
+                )
             # --- Phase 1: Partition entries and resolve collections ----------
             import_entries: dict[str, tuple[str | None, BwItemCreate]] = {}
             attachment_map: dict[str, list[AttachmentItem]] = {}
@@ -2215,9 +2684,12 @@ class Converter:
                     [],
                     lambda _: b"",
                 )
+                plan = self._attachment_plans[item_id]
+                if self._checkpoint is not None:
+                    self._prepare_checkpoint_uploads(bw, bw.get_item(item_id), plan)
                 upload_items.append((
                     item_id,
-                    [self._materialise_attachment(a) for a in new_atts],
+                    [self._materialise_attachment(a) for a in plan.uploads],
                 ))
             for item_id, existing_atts in existing_uploads:
                 upload_items.append((
@@ -2239,6 +2711,22 @@ class Converter:
                     "Uploading attachments", total=len(upload_items)
                 )
                 failed = bw.upload_attachments(upload_items)
+                if self._checkpoint is not None:
+                    completed: list[CheckpointRecord] = []
+                    for item_id, plan in self._attachment_plans.items():
+                        for source in plan.uploads:
+                            if (item_id, source.filename) not in failed:
+                                key = (
+                                    self._checkpoint_entry_ids[item_id]
+                                    + ":"
+                                    + source.source_id
+                                )
+                                completed.append(
+                                    replace(
+                                        self._checkpoint.records[key], phase="uploaded"
+                                    )
+                                )
+                    self._checkpoint.save_many(completed)
                 n_attach_failed = len(failed)
                 n_attachments = total_files - n_attach_failed
                 progress.update(task3, completed=len(upload_items))
@@ -2262,16 +2750,41 @@ class Converter:
                         if isinstance(exc, ConversionError)
                         else type(exc).__name__,
                     )
-            for item_id, old_id, fname in pending_deletes:
+            deleted_files = False
+            for item_id, old_id, fname in dict.fromkeys([
+                *pending_deletes,
+                *self._checkpoint_cleanup,
+            ]):
                 if (item_id, fname) in failed_uploads:
                     continue
                 try:
-                    bw.delete_attachment(item_id, old_id)
-                except BitwardenClientError:
+                    self._delete_checkpoint_copy(bw, item_id, old_id, fname)
+                    deleted_files = True
+                except BitwardenClientError, ConversionError:
                     n_attach_failed += 1
+                    failed_uploads.add((item_id, fname))
                     logger.warning(
                         "Could not remove a stale attachment on item %s; old copy retained",
                         item_id,
+                    )
+
+            if deleted_files and self._checkpoint is not None:
+                bw.sync(force=True)
+                _ = bw.list_items()
+            for item_id, plan in self._attachment_plans.items():
+                if any(
+                    (item_id, source.filename) in failed_uploads
+                    for source in plan.sources
+                ):
+                    continue
+                try:
+                    self._save_verified_checkpoint(bw, item_id, plan)
+                except (BitwardenClientError, ConversionError) as exc:
+                    n_update_failed += 1
+                    logger.warning(
+                        "Could not checkpoint verified attachments on item %s (%s)",
+                        item_id,
+                        type(exc).__name__,
                     )
 
         elapsed = time.monotonic() - t_start
