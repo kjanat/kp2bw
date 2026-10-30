@@ -1173,6 +1173,7 @@ class BitwardenServeClient:
                     args,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                     check=False,
                     timeout=self._http_timeout,
                     stdin=subprocess.DEVNULL,
@@ -1184,7 +1185,7 @@ class BitwardenServeClient:
                         "VW_SESSION": self._inventory_session or "",
                     },
                 )
-            except OSError, subprocess.TimeoutExpired:
+            except OSError, UnicodeError, subprocess.TimeoutExpired:
                 raise BitwardenClientError(
                     "Could not verify the post-sync CLI inventory"
                 ) from None
