@@ -49,6 +49,14 @@ from ._checkpoint import (
     metadata_digest,
 )
 from ._console import console
+from ._field_limits import (
+    FIELD_VALUE_LIMIT,
+    NAME_LIMIT,
+    NOTES_LIMIT,
+    fits_field,
+    require_field,
+    validate_item,
+)
 from ._history import (
     HISTORY_FIELD_NAME,
     apply_native_history,
@@ -89,6 +97,7 @@ from .exceptions import (
     BitwardenAttachmentMissingError,
     BitwardenClientError,
     ConversionError,
+    FieldLimitError,
 )
 from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
 from .uri_mapping import (
@@ -102,7 +111,6 @@ from .uri_mapping import (
 logger = logging.getLogger(__name__)
 
 KP_REF_IDENTIFIER: str = "{REF:"
-MAX_BW_ITEM_LENGTH: int = 10 * 1000
 KPEX_PASSKEY_PREFIX: str = "KPEX_PASSKEY_"
 # Bitwarden item type for login entries (1=login, 2=secureNote, 3=card,
 # 4=identity). Explicit template mapping is applied after REF resolution.
@@ -544,7 +552,7 @@ class Converter:
         fields: list[BwField] = [
             BwField(name=key, value=value, type=ftype)
             for key, (value, ftype) in custom_properties.items()
-            if value is not None and len(value) <= MAX_BW_ITEM_LENGTH
+            if value is not None
         ]
 
         return BwItemCreate(
@@ -638,6 +646,7 @@ class Converter:
             logger.warning(f"{entry.title or '_untitled'}: {warning}")
 
         custom_properties: dict[str, FieldSpec] = {}
+        generated_attachments: list[AttachmentItem] = []
         # KeePass(XC) additional URLs / Android packages are folded into
         # login.uris (not custom fields); collected here keyed by their suffix so
         # the emitted URI order is deterministic across re-runs.
@@ -657,7 +666,8 @@ class Converter:
             # attachment below (mirroring the notes handling); keep it out of the
             # inline fields entirely so it is not also stored inline, which would
             # duplicate it and can hit Bitwarden's field-size limit.
-            if value is not None and len(value) > MAX_BW_ITEM_LENGTH:
+            require_field(key, NAME_LIMIT, "Custom field name")
+            if not fits_field(value, FIELD_VALUE_LIMIT):
                 continue
             if key in otp_result.hidden_keys or key in custom_protected:
                 custom_properties[key] = (value, 1)
@@ -670,8 +680,11 @@ class Converter:
         if self._migrate_metadata:
             meta_field = self._build_metadata_field(entry)
             if meta_field is not None:
-                custom_properties[KP2BW_META_FIELD_NAME] = meta_field
-                self._generated_metadata_ids.add(entry_uuid)
+                if fits_field(meta_field[0], FIELD_VALUE_LIMIT):
+                    custom_properties[KP2BW_META_FIELD_NAME] = meta_field
+                    self._generated_metadata_ids.add(entry_uuid)
+                elif meta_field[0] is not None:
+                    generated_attachments.append((KP2BW_META_FIELD_NAME, meta_field[0]))
 
         # Stamp the stable identity marker — always, independent of --metadata.
         # A plain-text field carrying the source KeePass entry UUID so dedup keys
@@ -686,13 +699,12 @@ class Converter:
         if fido2_credentials:
             logger.log(VERBOSE, f"  Migrating passkey for entry: {entry.title}")
 
-        # Build notes, prepending [EXPIRED] marker if applicable
-        notes = ""
-        if entry.notes and len(entry.notes) <= MAX_BW_ITEM_LENGTH:
-            notes = entry.notes
-        if entry.expired:
-            expired_prefix = "[EXPIRED] "
-            notes = expired_prefix + notes
+        # Budget the complete notes, including the generated expiry marker.
+        expired_prefix = "[EXPIRED] " if entry.expired else ""
+        notes = expired_prefix + (entry.notes or "")
+        if not fits_field(notes, NOTES_LIMIT):
+            generated_attachments.append(("notes", entry.notes or ""))
+            notes = expired_prefix
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
         firstlevel = self._get_folder_firstlevel(entry)
@@ -740,7 +752,7 @@ class Converter:
         #     Opting in via ``--include-oversize-secrets`` offloads it too.
         # The value itself is never logged in either branch.
         label = entry.title or "_untitled"
-        attachments: list[AttachmentItem] = []
+        attachments: list[AttachmentItem] = generated_attachments
         if self._archive_history:
             archive = history_archive(entry, entry._kp.binaries if entry._kp else [])
             if archive is not None:
@@ -760,9 +772,9 @@ class Converter:
                         archive.missing_binaries,
                     )
         for key, value in custom_props.items():
-            if value is None or len(value) <= MAX_BW_ITEM_LENGTH:
+            if value is None or fits_field(value, FIELD_VALUE_LIMIT):
                 continue
-            if key in otp_result.consumed_keys:
+            if key in otp_result.consumed_keys or is_url_attribute_key(key):
                 continue
             if (
                 key.startswith(KPEX_PASSKEY_PREFIX)
@@ -772,7 +784,7 @@ class Converter:
                 if self._include_oversize_secrets:
                     logger.warning(
                         f"{label}: secret field '{key}' exceeds the "
-                        f"{MAX_BW_ITEM_LENGTH}-character inline limit; offloading "
+                        f"{FIELD_VALUE_LIMIT}-character encrypted field limit; offloading "
                         f"it to the attachment '{key}.txt' "
                         "(--include-oversize-secrets)."
                     )
@@ -780,23 +792,19 @@ class Converter:
                 else:
                     logger.warning(
                         f"{label}: secret field '{key}' exceeds the "
-                        f"{MAX_BW_ITEM_LENGTH}-character inline limit and was not "
+                        f"{FIELD_VALUE_LIMIT}-character encrypted field limit and was not "
                         "migrated; re-run with --include-oversize-secrets to "
                         "offload it to an attachment."
                     )
                 continue
             attachments.append((key, value))
 
-        if entry.notes and len(entry.notes) > MAX_BW_ITEM_LENGTH:
-            attachments.append(
-                source_file("notes", "", 1, "notes.txt", entry.notes.encode())
-            )
-
         # Same value stamped as KP2BW_ID above; it is this entry's dedup key.
         entry_key: str = entry_uuid
         if entry.attachments:
             attachments += entry.attachments
 
+        validate_item(bw_item_object)
         self._entries[entry_key] = (
             folder,
             firstlevel,
@@ -1384,6 +1392,9 @@ class Converter:
             )
             return canonical
 
+        except FieldLimitError:
+            # Invalid destination payloads must abort preflight, including REF chains.
+            raise
         except ConversionError, KeyError, AttributeError:
             group = kp_entry.group
             group_path = group.path if group is not None else []
@@ -2840,6 +2851,11 @@ class Converter:
                     item,
                     [*attachments, *files],
                 )
+
+        # REF merging may add URIs or TOTP after initial conversion. Validate
+        # every final item before opening the destination transport.
+        for entry in self._entries.values():
+            validate_item(self._unpack_entry(entry)[2])
 
         # store aggregated entries in bw
         return self._create_bitwarden_items_for_entries()

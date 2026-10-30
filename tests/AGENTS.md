@@ -50,6 +50,10 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - `attachment_identity_test.py` checks collision allocation and legacy association. `e2e_attachment_identity_test.py`
   verifies distinct and identical same-named files, generated/original collisions, unchanged IDs and revisions,
   replacement of exactly one source, and retention when saving the association fails.
+
+- `field_limits_test.py` checks UTF-8/AES-CBC field boundaries, final prefixes and preflight rejection,
+  including separate REF items and recursive REF chains.
+  `e2e_field_limits_test.py` verifies personal and organization round trips, attachment bytes and unchanged reruns.
 - Fixtures are contract data; path and naming changes require docker + test updates together.
 - Checkpoint tests cover atomic replacement, process locks, revision invalidation and preservation of remote edits.
   `e2e_checkpoint_test.py` kills migration processes before upload, after upload, after mapping and after deletion,

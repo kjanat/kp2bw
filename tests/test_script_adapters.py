@@ -195,3 +195,6 @@ def test_cli_policy_state_script() -> None:
 
 def test_ssh_mapping_script() -> None:
     _run_script_main("ssh_mapping_test.py")
+
+def test_field_limits_script() -> None:
+    _run_script_main("field_limits_test.py")

@@ -29,13 +29,13 @@ with advantages over the built-in Bitwarden importer:
   </details>
 - <details>
     <summary><b>Custom properties &amp; attachments</b></summary>
-    Imported as Bitwarden custom fields or attachments (values &gt;10k chars auto-upload as files).
+    Imported as Bitwarden custom fields or attachments (oversized values upload as files).
     Same-named files are retained with distinct output names and tracked by attachment ID.
     Uploads run serially per item and concurrently across items. Uploaded files are synced and downloaded to verify their bytes before success is reported or an old copy is deleted. A verification failure makes the migration exit nonzero and retains the old copy.
   </details>
 - <details>
     <summary><b>Long notes handling</b></summary>
-    Notes exceeding 10k chars are uploaded as <code>notes.txt</code> attachments.
+    Oversized notes are uploaded as <code>notes.txt</code> attachments.
   </details>
 - <details>
     <summary><b>Idempotent re-runs that sync changes</b></summary>
@@ -299,11 +299,10 @@ See [TROUBLESHOOTING].
 For supported versions and private vulnerability reporting, see the [security policy](SECURITY.md). Use synthetic
 fixtures and redact evidence; do not share real vaults, credentials or production attachments.
 
-[^offload]: Bitwarden has a 10k character limit for text fields.
-
-    kp2bw can offload any field exceeding that limit (hidden OTP secrets, passkey attributes, KeePass-protected fields)
-    to a `.txt` file attachment instead of dropping it, so you don't lose data. This applies to long notes as well as
-    custom fields.
+[^offload]: Limits apply to encrypted fields, including UTF-8 and encryption overhead. Because `bw serve` does not
+    report the effective encryption format, kp2bw conservatively uses structured-field limits for both personal and
+    organization vaults. Oversized notes, custom values and generated metadata become attachments. Secret custom values
+    require `--include-oversize-secrets`; unsupported titles or login fields fail before migration without truncation.
 
 ["🧪 Test this PR"]: https://github.com/kjanat/kp2bw/pull/34#issuecomment-4763225590 "Example"
 [Bitwarden CLI]: https://bitwarden.com/help/cli/

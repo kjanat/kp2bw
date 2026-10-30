@@ -17,6 +17,9 @@ class ConversionError(Exception):
 class BitwardenAttachmentMissingError(BitwardenHttpError):
     """The CLI reached attachment storage, which reported a missing file body."""
 
+class FieldLimitError(ConversionError):
+    """Raised when a final item exceeds a destination field budget."""
+
 
 class BitwardenServeExitedError(ConversionError):
     """Fatal transport loss; per-item failure handlers must not swallow it."""

@@ -88,7 +88,7 @@ src/kp2bw/
   survives normal content updates, and is removed by `--strip-ids`. Removed source files are not automatically deleted.
   Content and attachment failures are non-fatal and counted; `convert()` returns the failure count and the CLI exits
   non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-membership sync still applies).
-- Oversize custom fields (value over `MAX_BW_ITEM_LENGTH`, 10k) are offloaded to a `<key>.txt` attachment instead of an
+- Oversize custom fields (encrypted value exceeds the field-specific budget in `_field_limits.py`) are offloaded to a `<key>.txt` attachment instead of an
   inline field (mirrors long notes → `notes.txt`), decided in `_add_bw_entry_to_entries_dict()`. Three carve-outs: a
   consumed OTP key is already in `login.totp`, so its raw field is dropped as a dedup (no warning); a hidden OTP secret,
   passkey attribute, or KeePass-protected field (`custom_protected`) survives nowhere else, so it is **not** written to
