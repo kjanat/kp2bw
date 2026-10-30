@@ -205,13 +205,15 @@ def check_legacy_ref_history() -> None:
         for field in old["fields"]:
             if field["name"] == "KeePass:KP2BW_HISTORY:1":
                 field["name"] = "KP2BW_HISTORY"
-        old["login"]["uris"] = []
+        old_login = old.get("login")
+        assert old_login is not None
+        old_login["uris"] = []
         # This fixture has no passkeys: the historical algorithm is exactly 3.8.1.
         original_stamp = pre_fido2_content_signature(old)
         for field in old["fields"]:
             if field["name"] == "KP2BW_SYNC":
                 field["value"] = original_stamp
-        old["login"]["uris"] = [{"uri": alias_url, "match": None}]
+        old_login["uris"] = [{"uri": alias_url, "match": None}]
         assert converter._legacy_ref_status(old, identifier) == "exact"
         old["notes"] = "destination edit"
         assert converter._legacy_ref_status(old, identifier) == "diverged"
