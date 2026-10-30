@@ -253,7 +253,9 @@ def bw_cli_version(bw_cmd: list[str], bw_cwd: str | None) -> str | None:
         )
     except OSError, subprocess.TimeoutExpired:
         return None
-    match = re.search(r"\d{4}\.\d+\.\d+(?:[-+.][0-9A-Za-z.-]+)?", result.stdout)
+    if result.returncode != 0:
+        return None
+    match = re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", result.stdout.strip())
     return match.group(0) if match else None
 
 
