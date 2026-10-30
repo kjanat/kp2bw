@@ -2345,7 +2345,6 @@ class Converter:
                     )
                 self._entries = {self._selection.source_id: selected}
                 return self._create_bitwarden_items_for_entries(bw)
-
         # load keepass data from database
         self._load_keepass_data()
 
