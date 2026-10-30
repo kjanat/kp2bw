@@ -27,8 +27,8 @@ from kp2bw._item_sync import (
     stamp_content,
     sync_stamp_matches,
 )
-from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw._ssh_mapping import parse_ssh_rules
+from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse, BwPasswordHistory
 from kp2bw.convert import Converter
 from kp2bw.exceptions import (

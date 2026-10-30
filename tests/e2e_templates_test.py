@@ -10,8 +10,8 @@ from unittest.mock import patch
 from e2e_vaultwarden_test import _login_session, _run, _run_migration
 from pykeepass import Entry, create_database
 
-from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw._item_sync import pre_history_content_signature
+from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
 
 
