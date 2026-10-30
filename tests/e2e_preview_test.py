@@ -15,6 +15,7 @@ from pykeepass import create_database
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.convert import Converter
 from kp2bw.preview import MigrationPreview
+from kp2bw.ssh_mapping import SshRule, parse_ssh_rules
 
 
 def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
@@ -24,6 +25,8 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
     entry.add_attachment(db.add_binary(b"preview attachment"), "file.txt")
     db.save()
     checkpoint = tmp / "preview-checkpoint.json"
+    selected_id: str | None = None
+    ssh_rules: list[SshRule] = []
 
     def converter() -> Converter:
         return Converter(
@@ -38,6 +41,8 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
             None,
             migrate_metadata=False,
             checkpoint_path=str(checkpoint),
+            entry_id=selected_id,
+            ssh_rules=ssh_rules,
         )
 
     def preview(expected: str) -> MigrationPreview:
@@ -119,6 +124,23 @@ def run_preview_test(tmp: Path, env: dict[str, str], password: str) -> None:
         item["notes"] = "destination edit"
         bw.update_item(item["id"], item)
     _ = preview("protected")
+    unrelated = db.add_entry(db.root_group, "Unrelated SSH ambiguity", "", "")
+    unrelated.set_custom_property("Kind", "SSH")
+    db.save()
+    selected_id = str(entry.uuid)
+    ssh_rules = parse_ssh_rules([
+        {
+            "field": {"name": "Kind", "value": "SSH"},
+            "fields": {"privateKey": "Password"},
+        },
+        {
+            "field": {"name": "Title", "value": "Unrelated SSH ambiguity"},
+            "fields": {"privateKey": "Password"},
+        },
+    ])
+    _ = preview("protected")
+    with patch.dict(os.environ, env):
+        assert converter().convert() == 0
     print("live preview predictions and read-only transport checks passed")
 
 

@@ -1083,46 +1083,6 @@ class Converter:
             for source in entries
             if read_entry_custom_properties(source).values.get("_etm_template") == "1"
         }
-        for source in entries if self.ssh_rules else []:
-            if (
-                (
-                    not self.include_recyclebin
-                    and self.is_in_recyclebin(source, recyclebin_group)
-                )
-                or (self.skip_expired and source.expired)
-                or (
-                    self.import_tags
-                    and not set(self.import_tags).intersection(source.tags)
-                )
-            ):
-                continue
-            props = read_entry_custom_properties(source).values
-            if props.get("_etm_template") == "1":
-                continue
-            fields = {
-                "Title": source.title,
-                "UserName": source.username,
-                "Password": source.password,
-                "URL": source.url,
-                "Notes": source.notes,
-                **props,
-            }
-            template = template_uuid(props.get("_etm_template_uuid") or "")
-            if template not in templates_present:
-                template = None
-            matching_rules = [
-                rule
-                for rule in self.ssh_rules
-                if rule.matches(
-                    self.generate_folder_name(source) or "", template, fields
-                )
-            ]
-            if len(matching_rules) > 1:
-                raise ConversionError(
-                    "An entry matches multiple SSH mapping rules; make the selectors unambiguous"
-                )
-            if matching_rules:
-                self.ssh_sources[source.uuid.hex.upper()] = (matching_rules[0], fields)
         if self.map_templates:
             templates: dict[str, TemplateRule] = {}
             for source in entries:
@@ -1214,6 +1174,46 @@ class Converter:
                 pending.extend(references.get(key, []))
                 pending.extend(inbound.get(key, set()))
             entries = [e for e in entries if e.uuid.hex.upper() in needed]
+        for source in entries if self.ssh_rules else []:
+            if self.selection is None and (
+                (
+                    not self.include_recyclebin
+                    and self.is_in_recyclebin(source, recyclebin_group)
+                )
+                or (self.skip_expired and source.expired)
+                or (
+                    self.import_tags
+                    and not set(self.import_tags).intersection(source.tags)
+                )
+            ):
+                continue
+            props = read_entry_custom_properties(source).values
+            if props.get("_etm_template") == "1":
+                continue
+            fields = {
+                "Title": source.title,
+                "UserName": source.username,
+                "Password": source.password,
+                "URL": source.url,
+                "Notes": source.notes,
+                **props,
+            }
+            template = template_uuid(props.get("_etm_template_uuid") or "")
+            if template not in templates_present:
+                template = None
+            matching_rules = [
+                rule
+                for rule in self.ssh_rules
+                if rule.matches(
+                    self.generate_folder_name(source) or "", template, fields
+                )
+            ]
+            if len(matching_rules) > 1:
+                raise ConversionError(
+                    "An entry matches multiple SSH mapping rules; make the selectors unambiguous"
+                )
+            if matching_rules:
+                self.ssh_sources[source.uuid.hex.upper()] = (matching_rules[0], fields)
         total_entries: int = len(entries)
         skipped_recyclebin = 0
         skipped_expired = 0
@@ -3439,6 +3439,7 @@ class Converter:
             except BitwardenClientError:
                 ssh_blocker = True
         claimed: set[str] = set()
+        attachment_organizations: dict[str, str | None] = {}
         previous_plans = self.attachment_plans
         self.attachment_plans = {}
         previous_checkpoint = self.checkpoint
@@ -3516,6 +3517,9 @@ class Converter:
                     continue
                 if not matches:
                     entry.outcome = "create"
+                    attachment_organizations[entry.source_id] = desired.get(
+                        "organizationId"
+                    )
                     if self.checkpoint is not None:
                         sources = self.attachment_sources(attachments)
                         entry.attachments = describe_attachments([
@@ -3534,6 +3538,9 @@ class Converter:
                     entry.upload_bytes = sum(a.bytes for a in entry.attachments)
                     continue
                 existing = transport.get_item(matches[0]["id"])
+                attachment_organizations[entry.source_id] = existing.get(
+                    "organizationId"
+                )
                 claimed.add(existing["id"])
                 entry.target_id = existing["id"]
                 outcome, uploads, _ = self.reconcile_existing_item(
@@ -3601,22 +3608,30 @@ class Converter:
         uploading = [
             entry for entry in result.entries if entry.uploads and not entry.blockers
         ]
-        if uploading:
+        by_organization: dict[str | None, list[PreviewEntry]] = {}
+        for entry in uploading:
+            by_organization.setdefault(
+                attachment_organizations[entry.source_id], []
+            ).append(entry)
+        for organization_id, entries in by_organization.items():
             try:
-                capability = target.attachment_capability()
+                capability = target.attachment_capability(organization_id)
             except BitwardenClientError:
                 capability = AttachmentCapability(
                     None,
                     reason="Attachment entitlement and free storage could not be verified from the active CLI profile",
                 )
-            result.attachment_capability = capability
-            required = sum(entry.upload_bytes for entry in uploading)
+            if len(by_organization) == 1:
+                result.attachment_capability = capability
+            for entry in entries:
+                entry.attachment_capability = capability
+            required = sum(entry.upload_bytes for entry in entries)
             exceeds_total = (
                 capability.storage_limit_bytes is not None
                 and required > capability.storage_limit_bytes
             )
             if capability.allowed is False or exceeds_total:
-                for entry in uploading:
+                for entry in entries:
                     entry.outcome = "blocked"
                     entry.blockers.append(
                         "Planned attachment bytes exceed the organization's entire storage allowance"
