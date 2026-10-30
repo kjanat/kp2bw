@@ -3,6 +3,7 @@
 import asyncio
 import atexit
 import copy
+import json
 import logging
 import ntpath
 import os
@@ -23,6 +24,7 @@ from rich.markup import escape
 from . import VERBOSE
 from ._attachments import ATTACHMENT_FIELD_PREFIX, records_from_fields
 from ._console import console
+from ._inventory import inventory_signature
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
@@ -770,6 +772,9 @@ class BitwardenServeClient:
     _bw_cmd: list[str]  # argv prefix for invoking bw (handles Windows shims)
     _bw_cwd: str | None  # cwd for bw subprocess calls (set for shim invocation)
     _bw_via_shell: bool  # True when bw runs through a cmd.exe wrapper
+    _inventory_session: str | None = None
+    _inventory_needs_check: bool = False
+    _inventory_cache: dict[str, list[Any]] | None = None
     _sleep: Callable[[float], None] = staticmethod(time.sleep)
     _async_sleep: Callable[[float], Awaitable[None]] = staticmethod(_asyncio_sleep)
 
@@ -1125,6 +1130,10 @@ class BitwardenServeClient:
             msg = body.get("message", "unknown error")
             raise BitwardenClientError(f"bw serve error on {method} {path}: {msg}")
 
+        if method == "POST" and path == "/sync" and self._inventory_session:
+            self._inventory_needs_check = True
+            self._inventory_cache = None
+
         return body.get("data", {})
 
     # ------------------------------------------------------------------
@@ -1137,9 +1146,101 @@ class BitwardenServeClient:
         Replaying an unlock is harmless, so it is retried on a transient reset.
         """
         logger.log(VERBOSE, "Unlocking vault via bw serve")
-        self._request(
+        response = self._request(
             "POST", "/unlock", json_body={"password": password}, idempotent=True
         )
+        session = response.get("raw")
+        if not isinstance(session, str) or not session:
+            raise BitwardenClientError("CLI unlock returned no inventory session")
+        self._inventory_session = session
+
+    def _verify_inventory(self) -> None:
+        """Verify post-sync HTTP lists against fresh CLI process snapshots.
+
+        A successful sync can precede the serve process's cache publication.
+        Bootstrap reads must not interpret that transient empty/stale cache as
+        an empty vault. These bounded read-only commands reuse the same profile
+        and HTTP unlock session; item and attachment operations remain HTTP.
+        """
+        kinds = ["folders", "items"]
+        if self._org_id:
+            kinds.append("org-collections")
+        expected: dict[str, str] = {}
+        for kind in kinds:
+            args = [*self._bw_cmd, "list", kind]
+            if kind == "org-collections":
+                args.extend(["--organizationid", self._org_id or ""])
+            try:
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=self._http_timeout,
+                    stdin=subprocess.DEVNULL,
+                    cwd=self._bw_cwd,
+                    env={
+                        **os.environ,
+                        "BW_NOINTERACTION": "true",
+                        "BW_SESSION": self._inventory_session or "",
+                        "VW_SESSION": self._inventory_session or "",
+                    },
+                )
+            except OSError, subprocess.TimeoutExpired:
+                raise BitwardenClientError(
+                    "Could not verify the post-sync CLI inventory"
+                ) from None
+            if result.returncode != 0:
+                raise BitwardenClientError(
+                    "Read-only CLI inventory verification failed"
+                )
+            try:
+                expected[kind] = inventory_signature(json.loads(result.stdout))
+            except ValueError:
+                raise BitwardenClientError(
+                    "CLI inventory verification returned invalid JSON"
+                ) from None
+        for attempt in range(6):
+            observed: dict[str, list[Any]] = {}
+            for kind in kinds:
+                params = (
+                    {"organizationId": self._org_id or ""}
+                    if kind == "org-collections"
+                    else None
+                )
+                data = self._request("GET", f"/list/object/{kind}", params=params)
+                rows = data.get("data")
+                if inventory_signature(rows) != expected[kind]:
+                    break
+                observed[kind] = cast(list[Any], rows)
+            else:
+                self._inventory_cache = observed
+                self._folders = {row["name"]: row["id"] for row in observed["folders"]}
+                if "org-collections" in observed:
+                    self._collections = {
+                        row["name"]: row["id"] for row in observed["org-collections"]
+                    }
+                self._inventory_needs_check = False
+                return
+            if attempt < 5:
+                self._sleep(min(0.1 * 2**attempt, 1.0))
+        raise BitwardenClientError(
+            "CLI HTTP inventory differs from the fresh CLI snapshot after sync; "
+            "stopping before using an incomplete inventory. Retry the migration."
+        )
+
+    def _inventory_rows(self, kind: str) -> list[Any]:
+        if self._inventory_needs_check:
+            self._verify_inventory()
+        if self._inventory_cache is not None and kind in self._inventory_cache:
+            return self._inventory_cache.pop(kind)
+        params = (
+            {"organizationId": self._org_id or ""}
+            if kind == "org-collections"
+            else None
+        )
+        data = self._request("GET", f"/list/object/{kind}", params=params)
+        return data.get("data", [])
 
     def _sync(self) -> None:
         """Synchronise vault state via ``POST /sync``.
@@ -1163,8 +1264,7 @@ class BitwardenServeClient:
 
     def list_folders(self) -> dict[str, str]:
         """Return ``{name: id}`` mapping of all vault folders."""
-        data = self._request("GET", "/list/object/folders")
-        folders: list[BwFolder] = data.get("data", [])
+        folders: list[BwFolder] = self._inventory_rows("folders")
         return {f["name"]: f["id"] for f in folders}
 
     def create_folder(self, name: str) -> str:
@@ -1203,15 +1303,7 @@ class BitwardenServeClient:
         intersection locally before any caller can index, report, or mutate an
         item; missing membership data must never widen a requested scope.
         """
-        params: dict[str, str] = {}
-        if folder_id is not None:
-            params["folderid"] = folder_id
-        if organization_id is not None:
-            params["organizationId"] = organization_id
-        if collection_id is not None:
-            params["collectionId"] = collection_id
-        data = self._request("GET", "/list/object/items", params=params or None)
-        items: list[BwItemResponse] = data.get("data", [])
+        items: list[BwItemResponse] = self._inventory_rows("items")
         return [
             item
             for item in items
@@ -1665,12 +1757,7 @@ class BitwardenServeClient:
         """Return ``{name: id}`` mapping of org collections."""
         if not self._org_id:
             return {}
-        data = self._request(
-            "GET",
-            "/list/object/org-collections",
-            params={"organizationId": self._org_id},
-        )
-        colls: list[BwCollection] = data.get("data", [])
+        colls: list[BwCollection] = self._inventory_rows("org-collections")
         return {c["name"]: c["id"] for c in colls}
 
     def create_org_collection(self, name: str) -> str | None:
