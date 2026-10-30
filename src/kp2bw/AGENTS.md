@@ -56,6 +56,12 @@ src/kp2bw/
 ## NOTES
 
 - `_history.py` extracts distinct previous passwords using the next password-changing version's modification time.
+  Native history is enabled by default; the hidden `KP2BW_HISTORY` field records hashes of imported records so unrelated destination
+  history is retained. Only marked items include native history in content signatures; unmarked existing items retain
+  their previous signature semantics. Native updates use conditional revisions and read-back verification. The
+  official CLI cannot replace supplied history and can implicitly add passwords on edits, so incompatible writes are
+  rejected before PUT; the tested `vw` CLI supports them. Historical REF values cannot be reconstructed reliably;
+  users can choose `--no-password-history --archive-history` to preserve those records without guessing passwords.
   Its opt-in archive preserves complete historical XML and available referenced binary bytes. Treat archive data as
   secret. `--archive-history` adds a `SourceFile` of kind `history`, so existing attachment identity handling protects
   filename collisions and unchanged reruns. REF aliases with archived history stay separate.

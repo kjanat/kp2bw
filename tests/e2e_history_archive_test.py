@@ -3,16 +3,19 @@
 import base64
 import json
 import os
+import subprocess
 import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from e2e_vaultwarden_test import _login_session, _run, _run_migration
+from e2e_vaultwarden_test import _get_session, _login_session, _run, _run_migration
 from pykeepass import create_database
 
 from kp2bw._attachments import records_from_fields, source_file
+from kp2bw._history import history_signature
+from kp2bw._item_sync import content_signature, stamp_content, sync_stamp_matches
 from kp2bw.bw_serve import BitwardenServeClient
 
 
@@ -57,6 +60,7 @@ def main() -> None:
         source_id = str(entry.uuid).replace("-", "").upper()
         history_id = source_file("history", "", 1, "history.json", b"").source_id
         item_id: str | None = None
+        expected_history = [("old password", "2020-02-01T00:00:00.000Z")]
 
         def read():
             nonlocal item_id
@@ -65,6 +69,9 @@ def main() -> None:
                 assert found is not None, "Historical test item missing"
                 item_id = found["id"]
                 item = client.get_item(item_id)
+                assert history_signature(item) == expected_history, (
+                    "Native history values or timestamps differ"
+                )
                 records = records_from_fields(item["fields"])
                 archive_id = records[history_id].attachment_id
                 archive = client.get_attachment(item_id, archive_id)
@@ -108,6 +115,99 @@ def main() -> None:
             assert updated != initial, "New historical record was not archived"
             _run_migration(path, "test", password, env)
             assert read()[0] == updated, "Updated archive did not settle into a no-op"
+
+            # Check a fresh sync/export, independent of serve's decrypted cache.
+            session = _get_session(env, password)
+            _run(["bw", "sync", "--session", session], env=env)
+            exported = json.loads(
+                _run(
+                    ["bw", "export", "--format", "json", "--raw", "--session", session],
+                    env=env,
+                )
+            )
+            exported_item = next(
+                item for item in exported["items"] if item["id"] == item_id
+            )
+            assert history_signature(exported_item) == expected_history
+
+            with patch.dict(os.environ, env), BitwardenServeClient(password) as client:
+                supports_updates = client._supports_history_updates()
+            entry.history[0].password = "corrected historical password"
+            db.save()
+            command_env = {
+                **env,
+                "KP2BW_KEEPASS_PASSWORD": "test",
+                "KP2BW_BITWARDEN_PASSWORD": password,
+            }
+            result = subprocess.run(
+                ["uv", "run", "kp2bw", str(path), "--no-metadata", "-y"],
+                env=command_env,
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+            assert result.returncode == (0 if supports_updates else 1), (
+                "Unexpected history-update result"
+            )
+            if supports_updates:
+                expected_history = [
+                    ("corrected historical password", "2020-02-01T00:00:00.000Z")
+                ]
+                updated = read()[0]
+                _run_migration(path, "test", password, env)
+                assert read()[0] == updated
+                assert item_id is not None
+                # Seed a verified destination-only record and then change the
+                # imported history. The merge must retain the unrelated value.
+                with (
+                    patch.dict(os.environ, env),
+                    BitwardenServeClient(password) as client,
+                ):
+                    item = client.get_item(item_id)
+                    histories = item.get("passwordHistory")
+                    assert histories is not None
+                    histories.append({
+                        "password": "destination-only history",
+                        "lastUsedDate": "2019-01-01T00:00:00.000Z",
+                    })
+                    stamp_content(item)
+                    client.update_item(item_id, item)
+                entry.history[0].password = "second correction"
+                db.save()
+                _run_migration(path, "test", password, env)
+                expected_history = [
+                    ("second correction", "2020-02-01T00:00:00.000Z"),
+                    ("destination-only history", "2019-01-01T00:00:00.000Z"),
+                ]
+                updated = read()[0]
+                _run_migration(path, "test", password, env)
+                assert read()[0] == updated
+            else:
+                assert "No item update was sent" in " ".join(result.stderr.split())
+                assert read()[0] == updated, (
+                    "Unsupported update changed the item or its attachments"
+                )
+
+            assert item_id is not None
+            with patch.dict(os.environ, env), BitwardenServeClient(password) as client:
+                item = client.get_item(item_id)
+                original_stamp = content_signature(item)
+                if supports_updates:
+                    histories = item.get("passwordHistory")
+                    assert histories is not None
+                    histories[0]["password"] = "manual history edit"
+                    expected_history[0] = (
+                        "manual history edit",
+                        "2020-02-01T00:00:00.000Z",
+                    )
+                else:
+                    item["notes"] = "manual destination edit"
+                assert not sync_stamp_matches(item, original_stamp)
+                client.update_item(item_id, item)
+            protected = read()[0]
+            _run_migration(path, "test", password, env)
+            assert read()[0] == protected, "A manual edit was overwritten"
         finally:
             if item_id is not None:
                 with (
@@ -115,9 +215,7 @@ def main() -> None:
                     BitwardenServeClient(password) as client,
                 ):
                     client._request("DELETE", f"/object/item/{item_id}")
-    print(
-        "live history archive, historical bytes, filename collisions and reruns passed"
-    )
+    print("live native history, export, update safety, archive and reruns passed")
 
 
 if __name__ == "__main__":

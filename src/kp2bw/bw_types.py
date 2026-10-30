@@ -143,7 +143,7 @@ class BwPasswordHistory(TypedDict):
     """Previous password and the instant it stopped being current."""
 
     password: str
-    lastUsedDate: str
+    lastUsedDate: str | None
 
 
 class _BwItemCommon(TypedDict):

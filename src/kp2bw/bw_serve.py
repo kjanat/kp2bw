@@ -22,6 +22,7 @@ from rich.markup import escape
 from . import VERBOSE
 from ._attachments import ATTACHMENT_FIELD_PREFIX, records_from_fields
 from ._console import console
+from ._history import HISTORY_FIELD_NAME, has_managed_history, history_signature
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
@@ -29,7 +30,7 @@ from ._item_sync import (
     stamp_content,
     sync_stamp_generation,
 )
-from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
+from .bw_types import BwCollection, BwField, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import (
     BitwardenClientError,
     BitwardenHttpError,
@@ -1184,6 +1185,8 @@ class BitwardenServeClient:
         """Create a single vault item via HTTP and return its ID."""
         data = self._request("POST", "/object/item", json_body=item)
         item_id: str = data["id"]
+        if has_managed_history(item):
+            self._verify_history(item_id, item)
         logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
 
@@ -1224,17 +1227,89 @@ class BitwardenServeClient:
         copy, so a caller can still hand the original (id-bearing) object to
         :meth:`update_dedup_entry`.
         """
+        self._guard_history_update(item_id, item)
         body = self._item_update_body(item)
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
+        if has_managed_history(item):
+            self._verify_history(item_id, item)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
 
     def update_item_if_revision(
         self, item_id: str, item: BwItemResponse, *, expected_revision: str
     ) -> None:
         """Replace an item only if the server still knows the observed revision."""
+        self._guard_history_update(item_id, item)
         body = self._item_update_body(item, expected_revision=expected_revision)
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
+        if has_managed_history(item):
+            self._verify_history(item_id, item)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+
+    def _supports_history_updates(self) -> bool:
+        """Recognize the tested CLI without inferring capabilities from versions."""
+        cached = getattr(self, "_history_updates_supported", None)
+        if cached is not None:
+            return cached
+        try:
+            result = subprocess.run(
+                [*self._bw_cmd, "--help"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                stdin=subprocess.DEVNULL,
+                cwd=self._bw_cwd,
+            )
+            supported = (
+                result.returncode == 0
+                and re.search(r"(?m)^Usage: vw(?:\s|$)", result.stdout) is not None
+            )
+        except OSError, subprocess.TimeoutExpired:
+            supported = False
+        self._history_updates_supported = supported
+        return supported
+
+    def _guard_history_update(self, item_id: str, item: BwItemResponse) -> None:
+        if not has_managed_history(item) or self._supports_history_updates():
+            return
+        existing = self.get_item(item_id)
+
+        def hidden(current: BwItemResponse) -> list[tuple[str, str]]:
+            return [
+                (field.get("name", ""), field.get("value", ""))
+                for field in current.get("fields") or []
+                if field.get("type") == 1
+            ]
+
+        if (
+            history_signature(existing) != history_signature(item)
+            or (existing.get("login") or {}).get("password")
+            != (item.get("login") or {}).get("password")
+            or hidden(existing) != hidden(item)
+        ):
+            raise BitwardenClientError(
+                f"Item {item_id}: this CLI cannot retain the requested password history update; use @kjanat/vaultwarden-cli through the bw adapter. No item update was sent."
+            )
+
+    def _verify_history(
+        self, item_id: str, expected: BwItemCreate | BwItemResponse
+    ) -> None:
+        self.sync(force=True)
+        actual = self.get_item(item_id)
+
+        def marker(item: BwItemCreate | BwItemResponse) -> list[BwField]:
+            return [
+                field
+                for field in item.get("fields") or []
+                if field.get("name") == HISTORY_FIELD_NAME
+            ]
+
+        if history_signature(actual) != history_signature(expected) or [
+            field.get("value") for field in marker(actual)
+        ] != [field.get("value") for field in marker(expected)]:
+            raise BitwardenClientError(
+                f"Item {item_id}: password history could not be verified after writing; no further writes attempted"
+            )
 
     @staticmethod
     def _item_update_body(

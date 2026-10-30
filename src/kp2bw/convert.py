@@ -40,7 +40,14 @@ from ._attachments import (
     source_file,
 )
 from ._console import console
-from ._history import history_archive
+from ._history import (
+    HISTORY_FIELD_NAME,
+    apply_native_history,
+    has_managed_history,
+    history_archive,
+    imported_history_count,
+    native_password_history,
+)
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
@@ -183,6 +190,7 @@ def _print_summary(
     n_update_failed: int,
     n_attach_failed: int,
     n_create_failed: int,
+    n_history: int = 0,
 ) -> None:
     """Print a final migration summary to the shared rich console."""
     m, s = divmod(int(elapsed), 60)
@@ -200,6 +208,7 @@ def _print_summary(
                 n_update_failed,
                 n_attach_failed,
                 n_create_failed,
+                n_history,
                 1,
             )
         )
@@ -220,6 +229,8 @@ def _print_summary(
         )
     if n_attachments:
         console.print(f"  [cyan]{n_attachments:{w}d}[/cyan] attachments uploaded")
+    if n_history:
+        console.print(f"  [cyan]{n_history:{w}d}[/cyan] previous passwords imported")
     if n_create_failed:
         console.print(
             f"  [red]{n_create_failed:{w}d}[/red] entries failed to create "
@@ -373,6 +384,7 @@ class Converter:
         interpret_uri_syntax: bool = True,
         totp_pps: bool = False,
         archive_history: bool = False,
+        migrate_password_history: bool = True,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._attachment_plans: dict[str, AttachmentPlan] = {}
@@ -396,6 +408,7 @@ class Converter:
         self._interpret_uri_syntax = interpret_uri_syntax
         self._totp_pps = totp_pps
         self._archive_history = archive_history
+        self._migrate_password_history = migrate_password_history
         self._kp_ref_entries = []
         self._entries = {}
         self._ref_entries_by_uuid = {}
@@ -671,6 +684,17 @@ class Converter:
         # KP2BW_ID it is metadata, not a secret, and a hidden field is only
         # UI-masked, not protected. Excluded from the content signature itself, so
         # it never makes a re-run look "changed".
+        previous_passwords = (
+            native_password_history(entry) if self._migrate_password_history else []
+        )
+        if previous_passwords:
+            apply_native_history(bw_item_object, previous_passwords)
+            logger.log(
+                VERBOSE,
+                "Prepared %d previous passwords for entry %s",
+                len(previous_passwords),
+                entry_uuid,
+            )
         self._stamp_content(bw_item_object)
 
         # get attachments to store later on. A value over the inline size limit
@@ -977,7 +1001,7 @@ class Converter:
         }
         if unmerged_custom_properties:
             return "custom fields that cannot be merged"
-        if self._archive_history and entry.history:
+        if (self._archive_history or self._migrate_password_history) and entry.history:
             return "historical records that cannot be merged"
         if entry.notes or entry.attachments or entry.expired:
             return "notes, attachments, or expiry state that cannot be merged"
@@ -1582,6 +1606,17 @@ class Converter:
                 desired_login["fido2Credentials"] = kept
         payload["login"] = desired_login
 
+        if has_managed_history(desired):
+            apply_native_history(
+                payload, desired.get("passwordHistory") or [], existing=existing
+            )
+        elif has_managed_history(existing):
+            payload["fields"].extend(
+                copy.copy(field)
+                for field in existing["fields"]
+                if field.get("name") == HISTORY_FIELD_NAME
+            )
+
         target_colls = desired.get("collectionIds") or []
         existing_colls = existing.get("collectionIds") or []
         missing = [c for c in target_colls if c not in existing_colls]
@@ -1660,6 +1695,16 @@ class Converter:
         try:
             # Content sync: PUT only when the KeePass-derived content changed
             # (keeps re-runs idempotent).
+            if (
+                has_managed_history(existing)
+                and self._is_user_modified(existing)
+                and not self._force_update_all
+            ):
+                logger.warning(
+                    "Item %s: password history or managed content was edited; preserving your edit",
+                    item_id,
+                )
+                return "protected", [], {}
             update_payload = self._build_update_payload(existing, bw_item)
             content_differs = self._content_differs(existing, update_payload)
             sync_stamp_stale = self._is_user_modified(existing)
@@ -1721,7 +1766,26 @@ class Converter:
                             payload_login["passwordRevisionDate"] = existing_login.get(
                                 "passwordRevisionDate"
                             )
-                bw.update_item(item_id, payload)
+                if has_managed_history(payload):
+                    fresh = bw.get_item(item_id)
+                    if self._content_signature(fresh) != self._content_signature(
+                        existing
+                    ):
+                        logger.warning(
+                            "Item %s changed during reconciliation; preserving the concurrent edit",
+                            item_id,
+                        )
+                        return "protected", [], {}
+                    revision = fresh.get("revisionDate")
+                    if not revision:
+                        raise ConversionError(
+                            "Native history update requires an item revision"
+                        )
+                    bw.update_item_if_revision(
+                        item_id, payload, expected_revision=revision
+                    )
+                else:
+                    bw.update_item(item_id, payload)
                 bw.update_dedup_entry(kp_uuid, payload)
                 if legacy_ref_output:
                     logger.log(VERBOSE, f"-- Entry {name!r}: legacy REF state upgraded")
@@ -1753,10 +1817,9 @@ class Converter:
                         f"-- Entry {name!r}: added to {len(missing)} collection(s)",
                     )
                     outcome = "collection"
-        except BitwardenClientError as exc:
+        except (BitwardenClientError, ConversionError) as exc:
             logger.warning(
-                f"-- Entry {name!r}: update failed, leaving the existing "
-                f"item unchanged: {exc}"
+                f"-- Entry {name!r}: update failed; no further changes attempted: {exc}"
             )
             # The content/collection PUT was rejected, so leave the item wholly
             # untouched: syncing attachments now would half-mutate it (stale
@@ -1884,6 +1947,7 @@ class Converter:
         n_attachments = 0
         n_attach_failed = 0
         n_update_failed = 0
+        n_history = 0
         t_start = time.monotonic()
 
         progress = Progress(
@@ -1964,6 +2028,9 @@ class Converter:
                     )
                     if outcome == "updated":
                         n_updated += 1
+                        n_history += imported_history_count(
+                            self._build_update_payload(existing, bw_item)
+                        )
                     elif outcome == "collection":
                         n_collection_update += 1
                     elif outcome == "protected":
@@ -2022,6 +2089,10 @@ class Converter:
                 )
             else:
                 key_to_id = {}
+
+            n_history += sum(
+                imported_history_count(import_entries[key][1]) for key in key_to_id
+            )
 
             # --- Phase 3: Parallel attachment uploads -----------------------
             # Newly-created items (resolve their server-assigned IDs) and
@@ -2115,6 +2186,7 @@ class Converter:
             n_update_failed,
             n_attach_failed,
             n_create_failed,
+            n_history,
         )
         return n_update_failed + n_attach_failed + n_create_failed
 

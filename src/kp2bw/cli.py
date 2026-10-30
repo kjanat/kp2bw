@@ -313,6 +313,12 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--password-history",
+        help="Import up to five distinct previous KeePass passwords (default: on).",
+        action=BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
         "--uri-match",
         dest="uri_match",
         metavar="MODE",
@@ -779,6 +785,9 @@ def main() -> None:
         archive_history = _resolve_bool_option(
             args.archive_history, "KP2BW_ARCHIVE_HISTORY", default=False
         )
+        migrate_password_history = _resolve_bool_option(
+            args.password_history, "KP2BW_PASSWORD_HISTORY", default=True
+        )
         # Personal folders are a personal-vault concept; under --bitwarden-org
         # they duplicate the collection tree, so default them off there. Explicit
         # --folder/--no-folder or KP2BW_CREATE_FOLDERS still wins (issue #33).
@@ -972,6 +981,7 @@ def main() -> None:
         force_update=force_update,
         include_oversize_secrets=include_oversize_secrets,
         archive_history=archive_history,
+        migrate_password_history=migrate_password_history,
         create_folders=create_folders,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,

@@ -1,18 +1,149 @@
 """Lossless history archives and native previous-password extraction."""
 
 import base64
+import copy
 import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import pairwise
+from typing import cast
 
 from lxml import etree
 from pykeepass.entry import Entry
 
-from .bw_types import BwPasswordHistory
+from .bw_types import BwField, BwItemCreate, BwItemResponse, BwPasswordHistory
 from .exceptions import ConversionError
+
+HISTORY_FIELD_NAME = "KP2BW_HISTORY"
+
+
+def has_managed_history(item: BwItemCreate | BwItemResponse) -> bool:
+    return any(
+        field.get("name") == HISTORY_FIELD_NAME for field in item.get("fields") or []
+    )
+
+
+def _history_time(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return _timestamp(datetime.fromisoformat(value))
+    except (ValueError, TypeError) as exc:
+        raise ConversionError("Password history contains an invalid timestamp") from exc
+
+
+def history_signature(
+    item: BwItemCreate | BwItemResponse,
+) -> list[tuple[str, str | None]]:
+    """Normalize equivalent UTC timestamp spellings without exposing values."""
+    return [
+        (record["password"], _history_time(record["lastUsedDate"]))
+        for record in item.get("passwordHistory") or []
+    ]
+
+
+def _record_hash(record: BwPasswordHistory) -> str:
+    value = (record["password"], _history_time(record["lastUsedDate"]))
+    return hashlib.sha256(json.dumps(value, ensure_ascii=True).encode()).hexdigest()
+
+
+def _managed_records(item: BwItemCreate | BwItemResponse) -> set[str]:
+    fields = [
+        field
+        for field in item.get("fields") or []
+        if field.get("name") == HISTORY_FIELD_NAME
+    ]
+    if not fields:
+        return set()
+    if (
+        len(fields) != 1
+        or fields[0].get("type") != 1
+        or fields[0].get("linkedId") is not None
+    ):
+        raise ConversionError("Ambiguous password history metadata")
+    try:
+        metadata = json.loads(fields[0].get("value") or "")
+    except ValueError as exc:
+        raise ConversionError("Invalid password history metadata") from exc
+    if not isinstance(metadata, dict):
+        raise ConversionError("Invalid password history metadata")
+    metadata = cast(dict[str, object], metadata)
+    if (
+        set(metadata) != {"version", "records"}
+        or type(metadata["version"]) is not int
+        or metadata["version"] != 1
+    ):
+        raise ConversionError("Unknown password history metadata")
+    records = metadata["records"]
+    if not isinstance(records, list):
+        raise ConversionError("Invalid password history record identities")
+    records = cast(list[object], records)
+    if len(records) > 5 or any(
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(char not in "0123456789abcdef" for char in value)
+        for value in records
+    ):
+        raise ConversionError("Invalid password history record identities")
+    return {value for value in records if isinstance(value, str)}
+
+
+def apply_native_history(
+    item: BwItemCreate | BwItemResponse,
+    source: list[BwPasswordHistory],
+    *,
+    existing: BwItemResponse | None = None,
+) -> None:
+    """Replace only previously imported records; retain unrelated vault history.
+
+    Native history has five slots. Refuse a merge which cannot fit rather than
+    silently evicting an unrelated destination record. The opt-in archive has
+    no such historical-record limit.
+    """
+    old_managed: set[str] = (
+        _managed_records(existing) if existing is not None else set()
+    )
+    unrelated = (
+        [
+            copy.copy(record)
+            for record in (existing.get("passwordHistory") or [])
+            if _record_hash(record) not in old_managed
+        ]
+        if existing is not None
+        else []
+    )
+    unrelated_passwords = {record["password"] for record in unrelated}
+    imported = [
+        copy.copy(record)
+        for record in source
+        if record["password"] not in unrelated_passwords
+    ]
+    if len(imported) + len(unrelated) > 5:
+        raise ConversionError(
+            "Native history has only five slots; preserving unrelated Bitwarden history"
+        )
+    item["passwordHistory"] = [*imported, *unrelated]
+    fields: list[BwField] = [
+        field
+        for field in item.get("fields") or []
+        if field.get("name") != HISTORY_FIELD_NAME
+    ]
+    fields.append({
+        "name": HISTORY_FIELD_NAME,
+        "type": 1,
+        "value": json.dumps(
+            {"version": 1, "records": [_record_hash(record) for record in imported]},
+            sort_keys=True,
+        ),
+    })
+    item["fields"] = fields
+
+
+def imported_history_count(item: BwItemCreate | BwItemResponse) -> int:
+    """Count source records represented natively, excluding unrelated history."""
+    return len(_managed_records(item))
 
 
 def _utc(value: datetime | None) -> datetime:
@@ -47,6 +178,10 @@ def native_password_history(entry: Entry) -> list[BwPasswordHistory]:
     seen = {entry.password or ""}
     for older, newer in reversed(list(pairwise(versions))):
         password = older.password or ""
+        if "{REF:" in password.upper():
+            raise ConversionError(
+                "Historical password references cannot be resolved at their original time; use --no-password-history --archive-history to retain their records"
+            )
         if password == (newer.password or "") or password in seen:
             continue
         seen.add(password)

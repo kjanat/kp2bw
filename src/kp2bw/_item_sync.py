@@ -4,6 +4,7 @@ import hashlib
 import re
 from typing import Literal
 
+from ._history import has_managed_history, history_signature
 from .bw_types import (
     BwFido2Credential,
     BwField,
@@ -162,7 +163,10 @@ def content_signature(item: BwItemResponse | BwItemCreate) -> str:
     """Return a digest over exactly the item content kp2bw manages."""
     parts = _content_parts(item)
     fido2 = fido2_signature(item.get("login"))
-    blob = repr((*parts, fido2) if fido2 else parts)
+    content = (*parts, fido2) if fido2 else parts
+    blob = repr(
+        (*content, history_signature(item)) if has_managed_history(item) else content
+    )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -189,6 +193,8 @@ def sync_stamp_generation(
     """Return which signature algorithm produced *stamp* for *item*, if any."""
     if stamp == content_signature(item):
         return "current"
+    if has_managed_history(item):
+        return None
     if stamp == pre_fido2_content_signature(item):
         return "pre_fido2"
     if stamp == legacy_content_signature(item):
