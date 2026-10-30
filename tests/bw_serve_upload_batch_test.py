@@ -4,6 +4,7 @@ import asyncio
 import io
 import logging
 from typing import cast
+from unittest.mock import patch
 
 import httpx
 
@@ -115,19 +116,20 @@ async def _check_batch(failure: str = "") -> None:
 
 
 def _check_missing_item_recovery() -> None:
-    for initial_status, message, recover in (
-        (400, "Not found.", True),
-        (404, "missing", True),
-        (400, "Not found.", False),
-        (400, "Vault is locked.", False),
-        (403, "Permission denied", False),
+    for initial_status, message, recover_after in (
+        (400, "Not found.", 3),
+        (400, "Not found.", 7),
+        (404, "missing", 3),
+        (400, "Not found.", 0),
+        (400, "Vault is locked.", 0),
+        (403, "Permission denied", 0),
     ):
         requests: list[tuple[str, str]] = []
 
         def respond(
             request: httpx.Request,
             requests: list[tuple[str, str]] = requests,
-            recover: bool = recover,
+            recover_after: int = recover_after,
             initial_status: int = initial_status,
             message: str = message,
         ) -> httpx.Response:
@@ -135,7 +137,7 @@ def _check_missing_item_recovery() -> None:
             if request.method == "POST":
                 assert request.url.params["force"] == "true"
                 return httpx.Response(200, json={"success": True, "data": {}})
-            if len(requests) == 3 and recover:
+            if recover_after and len(requests) >= recover_after:
                 return httpx.Response(
                     200, json={"success": True, "data": {"id": "item"}}
                 )
@@ -144,19 +146,27 @@ def _check_missing_item_recovery() -> None:
             )
 
         client = object.__new__(BitwardenServeClient)
-        with httpx.Client(
-            transport=httpx.MockTransport(respond), base_url="http://bw.test"
-        ) as http:
+        with (
+            httpx.Client(
+                transport=httpx.MockTransport(respond), base_url="http://bw.test"
+            ) as http,
+            patch("kp2bw.bw_serve.time.sleep") as sleep,
+        ):
             client._http = http
             try:
                 item = client.get_item("item")
             except BitwardenHttpError:
-                assert not recover
+                assert not recover_after
             else:
-                assert recover and item["id"] == "item"
+                assert recover_after and item["id"] == "item"
         expected = [("GET", "/object/item/item")]
         if message == "Not found." or initial_status == 404:
-            expected += [("POST", "/sync?force=true"), ("GET", "/object/item/item")]
+            reads = recover_after - 2 if recover_after else 6
+            expected += [("POST", "/sync?force=true")]
+            expected += [("GET", "/object/item/item")] * reads
+            assert sleep.call_count == reads - 1
+        else:
+            sleep.assert_not_called()
         assert requests == expected
 
 

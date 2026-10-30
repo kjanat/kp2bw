@@ -1197,14 +1197,26 @@ class BitwardenServeClient:
             # The official CLI can temporarily lose an item from its local
             # cache after a successful upload/sync. Force a fresh server read;
             # the normal sync can skip fetching based on its revision timestamp.
-            # Retry only this read, once. A still-missing item remains a failure.
+            # The CLI publishes its refreshed cache asynchronously. Poll only
+            # the read; never replay a mutation while waiting for visibility.
             logger.log(
                 VERBOSE,
                 "Item %s not found in CLI cache; forcing sync and retrying read",
                 item_id,
             )
             self._request("POST", "/sync", params={"force": "true"}, idempotent=True)
-            data = self._request("GET", path)
+            attempt = 0
+            while True:
+                try:
+                    data = self._request("GET", path)
+                    break
+                except BitwardenHttpError as retry_error:
+                    if attempt == 5 or not _is_missing_item_error(
+                        retry_error.status_code, str(retry_error)
+                    ):
+                        raise
+                    time.sleep(min(0.1 * 2**attempt, 1.0))
+                    attempt += 1
         return cast(BwItemResponse, data)
 
     def update_item(self, item_id: str, item: BwItemResponse) -> None:
