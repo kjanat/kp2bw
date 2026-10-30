@@ -79,6 +79,8 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - Printing raw secrets/session data in helper command output.
 - Editing fixture content ad hoc without updating assertions and compose setup.
 - Treating e2e rerun duplicates as acceptable behavior.
+- `bw_serve_inventory_test.py` simulates empty, partial and stale-revision inventories after sync. It verifies recovery
+  before dedup, bounded failure without a usable index, and revalidation after another sync.
 
 ## COMMANDS
 
