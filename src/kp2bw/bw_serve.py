@@ -1853,14 +1853,17 @@ class BitwardenServeClient:
             return failed
         try:
             self.sync()
-        except (BitwardenClientError, httpx.HTTPError):
+        except (BitwardenClientError, httpx.HTTPError) as exc:
             logger.error(
-                "Could not sync uploaded attachments for verification; retaining old copies"
+                "Could not sync uploaded attachments for verification (%s); retaining old copies",
+                type(exc).__name__,
             )
             return [*failed, *((item_id, filename) for item_id, filename, _ in pending)]
 
         by_item: dict[str, BwItemResponse | None] = {}
         for item_id, filename, desired in pending:
+            stage = "reading item metadata"
+            reason = "item metadata unavailable"
             try:
                 if item_id not in by_item:
                     # Cache failures too: don't repeat a failing item fetch for
@@ -1878,15 +1881,25 @@ class BitwardenServeClient:
                         and attachment.get("id")
                     ]
                 )
+                stage = "downloading attachment"
+                reason = (
+                    "item metadata unavailable"
+                    if item is None
+                    else "downloaded bytes differ"
+                    if candidates
+                    else "no matching attachment in synced item metadata"
+                )
                 verified = any(
                     self.get_attachment(item_id, attachment_id) == desired
                     for attachment_id in candidates
                 )
-            except (BitwardenClientError, httpx.HTTPError):
+            except (BitwardenClientError, httpx.HTTPError) as exc:
+                reason = f"{stage}: {type(exc).__name__}"
                 verified = False
             if not verified:
                 logger.error(
-                    f"Could not verify uploaded attachment {filename!r} on item {item_id}; retaining old copies"
+                    f"Could not verify uploaded attachment {filename!r} on item {item_id} "
+                    f"({reason}); retaining old copies"
                 )
                 failed.append((item_id, filename))
         return failed
