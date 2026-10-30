@@ -53,6 +53,7 @@ from ._item_sync import (
     sync_stamp_matches,
 )
 from ._source_fields import source_field_name, source_field_origin
+from ._ssh_mapping import SshRule, apply_ssh_rule
 from ._templates import TemplateRule, apply_template, recognize_template, template_uuid
 from .bw_serve import (
     BitwardenServeClient,
@@ -374,6 +375,7 @@ class Converter:
         totp_pps: bool = False,
         map_templates: bool = False,
         template_map: dict[str, TemplateRule] | None = None,
+        ssh_rules: tuple[SshRule, ...] = (),
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
         self._attachment_plans: dict[str, AttachmentPlan] = {}
@@ -398,6 +400,8 @@ class Converter:
         self._totp_pps = totp_pps
         self._map_templates = map_templates
         self._template_map = template_map or {}
+        self._ssh_rules = ssh_rules
+        self._ssh_sources: dict[str, tuple[SshRule, dict[str, str | None]]] = {}
         self._entry_templates: dict[str, TemplateRule] = {}
         self._kp_ref_entries = []
         self._entries = {}
@@ -822,6 +826,40 @@ class Converter:
 
         entries: list[Entry] = kp.entries or []
         self._entry_templates = {}
+        self._ssh_sources = {}
+        templates_present = {
+            source.uuid.hex.upper()
+            for source in entries
+            if _read_entry_custom_properties(source).values.get("_etm_template") == "1"
+        }
+        for source in entries if self._ssh_rules else []:
+            props = _read_entry_custom_properties(source).values
+            if props.get("_etm_template") == "1":
+                continue
+            fields = {
+                "Title": source.title,
+                "UserName": source.username,
+                "Password": source.password,
+                "URL": source.url,
+                "Notes": source.notes,
+                **props,
+            }
+            template = template_uuid(props.get("_etm_template_uuid") or "")
+            if template not in templates_present:
+                template = None
+            selected = [
+                rule
+                for rule in self._ssh_rules
+                if rule.matches(
+                    self._generate_folder_name(source) or "", template, fields
+                )
+            ]
+            if len(selected) > 1:
+                raise ConversionError(
+                    "An entry matches multiple SSH mapping rules; make the selectors unambiguous"
+                )
+            if selected:
+                self._ssh_sources[source.uuid.hex.upper()] = (selected[0], fields)
         if self._map_templates:
             templates: dict[str, TemplateRule] = {}
             for source in entries:
@@ -849,10 +887,10 @@ class Converter:
         logger.info(f"Found {total_entries} entries in KeePass DB. Parsing now...")
         for entry in entries:
             if (
-                self._map_templates
-                and _read_entry_custom_properties(entry).values.get("_etm_template")
-                == "1"
-            ):
+                self._map_templates or self._ssh_rules
+            ) and _read_entry_custom_properties(entry).values.get(
+                "_etm_template"
+            ) == "1":
                 continue
             # Skip recycle bin entries unless explicitly included
             if not self._include_recyclebin and self._is_in_recyclebin(
@@ -1572,6 +1610,7 @@ class Converter:
                 "Cannot change item type while it contains a Bitwarden passkey"
             )
         payload: BwItemResponse = copy.copy(existing)
+        payload["sshKey"] = copy.deepcopy(desired.get("sshKey"))
         payload["type"] = desired["type"]
         payload["card"] = copy.deepcopy(desired["card"])
         payload["identity"] = copy.deepcopy(desired["identity"])
@@ -1658,10 +1697,17 @@ class Converter:
             "skipped"
         )
 
-        # Native types are reconciled only when template mapping is enabled.
+        if existing.get("type") == 5 and bw_item["type"] != 5:
+            logger.warning(
+                "Entry %s no longer yields a native SSH key; preserving its existing SSH item",
+                kp_uuid,
+            )
+            return "failed", [], {}
+        # Native types are reconciled only when their mapping is enabled.
         # The dedup index never adopts unstamped non-login items by name.
         if existing.get("type") != BW_ITEM_TYPE_LOGIN and (
-            existing.get("type") not in (2, 3, 4) or not self._map_templates
+            not (existing.get("type") in (2, 3, 4) and self._map_templates)
+            and not (existing.get("type") == 5 and self._ssh_rules)
         ):
             logger.log(
                 VERBOSE,
@@ -1929,6 +1975,11 @@ class Converter:
                 collection_id=fixed_coll_id,
             ) as bw,
         ):
+            if any(
+                self._unpack_entry(value)[2]["type"] == 5
+                for value in self._entries.values()
+            ):
+                bw.require_ssh_supported()
             # --- Phase 1: Partition entries and resolve collections ----------
             import_entries: dict[str, tuple[str | None, BwItemCreate]] = {}
             attachment_map: dict[str, list[AttachmentItem]] = {}
@@ -2161,6 +2212,25 @@ class Converter:
                     item = self._unpack_entry(entry_value)[2]
                     for warning in apply_template(item, rule):
                         logger.warning("Entry %s: %s", identifier, warning)
+
+        for identifier, entry_value in self._entries.items():
+            if selected := self._ssh_sources.get(identifier):
+                rule, source_fields = selected
+                folder, firstlevel, item, attachments = self._unpack_entry(entry_value)
+                fields = {
+                    **source_fields,
+                    "UserName": item["login"]["username"],
+                    "Password": item["login"]["password"],
+                }
+                files, warnings = apply_ssh_rule(item, fields, rule)
+                for warning in warnings:
+                    logger.warning("Entry %s: %s", identifier, warning)
+                self._entries[identifier] = (
+                    folder,
+                    firstlevel,
+                    item,
+                    [*attachments, *files],
+                )
 
         # store aggregated entries in bw
         return self._create_bitwarden_items_for_entries()

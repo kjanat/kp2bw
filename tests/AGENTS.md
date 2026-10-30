@@ -96,3 +96,6 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 - `templates_test.py` checks explicit template recognition, lossless field fallback, source KDBX loading and native-field
   signatures. `e2e_templates_test.py` runs native card/identity/secure-note creation, updates, unchanged reruns and manual
   edit protection with each CLI in the integration matrix.
+- `e2e_ssh_test.py` checks native key creation, rotation, unchanged revisions, unsupported-source retention and manual
+  edit protection with both CLIs. Its standalone entrypoint reuses a verified test profile. `ssh_mapping_test.py`
+  verifies policy rejection precedes folder, collection and item operations.

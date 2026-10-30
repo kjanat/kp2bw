@@ -134,7 +134,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
        [--metadata | --no-metadata] [--update | --no-update] [--force-update]
-       [--map-templates] [--template-map JSON]
+       [--map-templates] [--template-map JSON] [--ssh-map JSON]
        [--include-oversize-secrets] [--folder | --no-folder] [--uri-match MODE]
        [--totp-pps | --no-totp-pps]
        [--interpret-uri-syntax | --no-interpret-uri-syntax]
@@ -161,6 +161,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--force-update`                         | Overwrite items even if edited in Bitwarden since the last run (default: protect such edits)                                                                                                        | `KP2BW_FORCE_UPDATE`                  |
 | `--map-templates` / `--no-map-templates` | Map referenced templates to native cards, identities and secure notes (default: off)                                                                                                                | `KP2BW_MAP_TEMPLATES`                 |
 | `--template-map JSON`                    | [Override template types and field mappings](docs/template-mapping.md); requires `--map-templates`                                                                                                  | `KP2BW_TEMPLATE_MAP`                  |
+| `--ssh-map JSON`                         | [Map selected entries to native SSH keys](docs/ssh-mapping.md)                                                                                                                                      | `KP2BW_SSH_MAP`                       |
 | `--include-oversize-secrets`             | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off)                                                                                           | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
 | `--uri-match MODE`                       | Match mode for plain URLs: `default`(default, account default)/`domain`/`host`/`startswith`/`exact`/`regex`/`never`                                                                                 | `KP2BW_URI_MATCH`                     |
 | `--interpret-uri-syntax`                 | Honor KeePassXC quote/wildcard URL syntax on additional URLs (default: on; `--no-…` for literal)                                                                                                    | `KP2BW_INTERPRET_URI_SYNTAX`          |

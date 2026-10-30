@@ -162,8 +162,14 @@ def content_signature(item: BwItemResponse | BwItemCreate) -> str:
     """Return a digest over exactly the item content kp2bw manages."""
     if item.get("type", 1) != 1:
         native = (
-            item.get("card") or item.get("identity") or item.get("secureNote") or {}
-        )
+            item.get("card")
+            if item.get("type") == 3
+            else item.get("identity")
+            if item.get("type") == 4
+            else item.get("sshKey")
+            if item.get("type") == 5
+            else item.get("secureNote")
+        ) or {}
         blob = repr((
             item.get("type"),
             item.get("name") or "",

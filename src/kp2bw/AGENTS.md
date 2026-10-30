@@ -185,3 +185,9 @@ src/kp2bw/
   to marked templates are classified. Native card/identity/secure-note fields enter content signatures; old login-only
   stamp algorithms cannot authenticate them. Internal parsed source login data remains available for provenance but is
   omitted by HTTP create/update for native items. Its nonempty values are retained in a custom field.
+- `--ssh-map` selects native SSH conversion explicitly by group, template UUID or field value. `_ssh_keys.py` validates
+  RSA/Ed25519 material and derives the public key and fingerprint; `_ssh_mapping.py` retains original source fields.
+  `_cli_policy_state.py` reads only fresh account/server-matched policy metadata from the active CLI profile, and
+  `_ssh_policy.py` applies organization membership exemptions and item restrictions. `require_ssh_supported()` checks
+  these policies and server capability before conversion creates folders, collections or items. Missing metadata fails
+  closed. Native SSH fields participate in content signatures, including manual-edit protection.

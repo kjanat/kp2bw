@@ -163,3 +163,19 @@ def test_attachment_identity_script() -> None:
 
 def test_templates_script() -> None:
     _run_script_main("templates_test.py")
+
+
+def test_ssh_keys_script() -> None:
+    _run_script_main("ssh_keys_test.py")
+
+
+def test_ssh_policy_script() -> None:
+    _run_script_main("ssh_policy_test.py")
+
+
+def test_cli_policy_state_script() -> None:
+    _run_script_main("cli_policy_state_test.py")
+
+
+def test_ssh_mapping_script() -> None:
+    _run_script_main("ssh_mapping_test.py")

@@ -37,6 +37,7 @@ __all__ = [
     "BwItemCreate",
     "BwItemLogin",
     "BwItemResponse",
+    "BwSshKey",
     "BwUri",
     "Group",
     "ItemCard",
@@ -138,6 +139,14 @@ class BwItemLogin(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+class BwSshKey(TypedDict):
+    """Native SSH item fields, including values older clients cannot derive."""
+
+    privateKey: str
+    publicKey: str
+    keyFingerprint: str
+
+
 class _BwItemCommon(TypedDict):
     """Fields shared across both the create payload and every API response.
 
@@ -164,6 +173,7 @@ class _BwItemCommon(TypedDict):
     secureNote: ItemSecureNote | None
     card: ItemCard | None
     identity: ItemIdentity | None
+    sshKey: NotRequired[BwSshKey | None]
 
 
 class BwItemCreate(_BwItemCommon):

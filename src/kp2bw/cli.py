@@ -16,6 +16,7 @@ from rich.markup import escape
 
 from . import VERBOSE, __title__, __version__
 from ._console import console
+from ._ssh_mapping import parse_ssh_rules
 from ._templates import parse_template_overrides
 from .bw_serve import (
     KP2BW_ID_FIELD_NAME,
@@ -299,6 +300,12 @@ def _argparser() -> MyArgParser:
         dest="force_update",
         help="Overwrite items changed in Bitwarden.",
         action="store_true",
+        default=None,
+    )
+    parser.add_argument(
+        "--ssh-map",
+        metavar="JSON",
+        help="Explicit group, template or field mappings for native SSH items.",
         default=None,
     )
     parser.add_argument(
@@ -779,6 +786,16 @@ def main() -> None:
         force_update = _resolve_bool_option(
             args.force_update, "KP2BW_FORCE_UPDATE", default=False
         )
+        ssh_rules = ()
+        if ssh_map_path := _with_env(args.ssh_map, "KP2BW_SSH_MAP"):
+            try:
+                ssh_rules = parse_ssh_rules(
+                    json.loads(Path(ssh_map_path).read_text(encoding="utf-8"))
+                )
+            except OSError, UnicodeError, json.JSONDecodeError:
+                raise ValueError("Could not read SSH map as UTF-8 JSON") from None
+            except ConversionError as exc:
+                raise ValueError(str(exc)) from None
         map_templates = _resolve_bool_option(
             args.map_templates, "KP2BW_MAP_TEMPLATES", default=False
         )
@@ -994,6 +1011,7 @@ def main() -> None:
         include_oversize_secrets=include_oversize_secrets,
         map_templates=map_templates,
         template_map=template_map,
+        ssh_rules=ssh_rules,
         create_folders=create_folders,
         uri_match=uri_match,
         interpret_uri_syntax=interpret_uri_syntax,

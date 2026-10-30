@@ -10,10 +10,12 @@ import re
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import FrameType, TracebackType
 from typing import Any, NamedTuple, Self, cast
 
@@ -22,6 +24,7 @@ from rich.markup import escape
 
 from . import VERBOSE
 from ._attachments import ATTACHMENT_FIELD_PREFIX, records_from_fields
+from ._cli_policy_state import read_policy_state
 from ._console import console
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
@@ -30,6 +33,7 @@ from ._item_sync import (
     stamp_content,
     sync_stamp_generation,
 )
+from ._ssh_policy import require_ssh_policy_allowed
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import (
     BitwardenClientError,
@@ -1148,6 +1152,92 @@ class BitwardenServeClient:
         """
         logger.log(VERBOSE, "Syncing vault via bw serve")
         self._request("POST", "/sync", idempotent=True)
+
+    def require_ssh_supported(self) -> None:
+        """Verify the active server and fresh organization policy before writes."""
+        started = datetime.now(UTC)
+        self.sync(force=True)
+        response = self._request("GET", "/status")
+        status = response.get("template")
+        if not isinstance(status, dict):
+            raise BitwardenClientError("Cannot verify SSH support: missing CLI status")
+        metadata = read_policy_state(
+            cast(dict[str, object], status), synced_after=started
+        )
+        require_ssh_policy_allowed(
+            metadata.organizations, metadata.policies, self._org_id
+        )
+        if metadata.kind == "bitwarden":
+            version = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", self._bw_version)
+            if version is None or tuple(map(int, version.groups())) < (2025, 1, 3):
+                raise BitwardenClientError(
+                    "The active CLI has no verified native SSH support"
+                )
+        context = ssl.create_default_context()
+        if extra_ca := os.environ.get("NODE_EXTRA_CA_CERTS"):
+            try:
+                context.load_verify_locations(cafile=extra_ca)
+            except OSError, ssl.SSLError:
+                raise BitwardenClientError(
+                    "Cannot verify SSH support: invalid extra CA file"
+                ) from None
+        try:
+            with httpx.Client(
+                verify=context, timeout=15.0, follow_redirects=False
+            ) as client:
+                config_response = client.get(metadata.api_url + "/config")
+                config_response.raise_for_status()
+                config: object = config_response.json()
+                if not isinstance(config, dict):
+                    raise BitwardenClientError(
+                        "Cannot verify SSH support: invalid server configuration"
+                    )
+                config_data = cast(dict[str, object], config)
+                flags = config_data.get("featureStates")
+                if (
+                    isinstance(flags, dict)
+                    and cast(dict[str, object], flags).get("ssh-key-vault-item")
+                    is False
+                ):
+                    raise BitwardenClientError(
+                        "The target server has disabled SSH items"
+                    )
+                server = config_data.get("server")
+                name = (
+                    cast(dict[str, object], server).get("name")
+                    if isinstance(server, dict)
+                    else "Bitwarden"
+                )
+                if name == "Vaultwarden":
+                    version_response = client.get(metadata.api_url + "/version")
+                    version_response.raise_for_status()
+                    raw_version = version_response.json()
+                    minimum = (1, 33, 0)
+                elif name in (None, "Bitwarden"):
+                    raw_version = config_data.get("version")
+                    minimum = (2025, 1, 1)
+                else:
+                    raise BitwardenClientError(
+                        "Cannot verify SSH support on this server implementation"
+                    )
+                match = (
+                    re.fullmatch(
+                        r"(\d+)\.(\d+)\.(\d+)(?:\+[A-Za-z0-9.-]+)?", raw_version
+                    )
+                    if isinstance(raw_version, str)
+                    else None
+                )
+                if match is None or tuple(map(int, match.groups())) < minimum:
+                    raise BitwardenClientError(
+                        "The target server has no verified native SSH support"
+                    )
+        except (httpx.HTTPError, ValueError) as exc:
+            raise BitwardenClientError(
+                f"Cannot verify SSH server support ({type(exc).__name__})"
+            ) from None
+        # Sync can replace the CLI's cache. Refresh the dedup view before any
+        # item update or attachment reconciliation uses it.
+        self._build_dedup_index()
 
     def sync(self, *, force: bool = False) -> None:
         """Synchronise the vault, optionally bypassing the CLI revision cache."""
