@@ -283,8 +283,7 @@ def assert_get_attachment_retries_rate_limit() -> None:
 
 
 def _upload(script: _Script) -> list[float]:
-    inst = object.__new__(BitwardenServeClient)
-    sleeps: list[float] = []
+    inst, sleeps = _client(script)
 
     async def record(seconds: float) -> None:
         sleeps.append(seconds)
@@ -297,7 +296,10 @@ def _upload(script: _Script) -> list[float]:
         ) as client:
             await inst.upload_attachment(client, "item-1", "notes.txt", b"hello")
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        inst._http.close()
     return sleeps
 
 
@@ -313,13 +315,22 @@ def assert_upload_attachment_retries_rate_limit() -> None:
 def assert_upload_sync_retries_rate_limit() -> None:
     script = _Script([
         _serve_error("Not found."),
+        _serve_error("Not found."),
         _serve_error(_LEGACY_MESSAGE),
         _serve_ok({}),
         _serve_ok({"id": "item-1"}),
+        _serve_ok({"id": "attachment-1"}),
     ])
     sleeps = _upload(script)
     paths = [path for _, path in script.requests]
-    if paths != ["/attachment", "/sync", "/sync", "/attachment"] or sleeps != [1.0]:
+    if paths != [
+        "/attachment",
+        "/object/item/item-1",
+        "/sync",
+        "/sync",
+        "/object/item/item-1",
+        "/attachment",
+    ] or sleeps != [1.0]:
         raise AssertionError(
             f"the self-heal sync must be retried, got {paths} {sleeps}"
         )
