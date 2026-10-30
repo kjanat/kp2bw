@@ -119,6 +119,35 @@ def check_fatal_attachment_read() -> None:
 
 def main() -> None:
     check_fatal_attachment_read()
+    for absent in (True, False):
+        raw: dict[str, object] = dict(_make_existing())
+        if absent:
+            raw.pop("fields")
+        else:
+            raw["fields"] = None
+        client = FakeBw()
+        desired = _make_desired()
+        desired["fields"].append({
+            "name": "KP2BW_ID",
+            "value": "legacy-source",
+            "type": 0,
+        })
+        outcome, _, _ = UpdateTestConverter().reconcile(
+            _as_bw(client),
+            cast(BwItemResponse, raw),
+            None,
+            desired,
+            [],
+            fixed_coll_id=None,
+            force_update=True,
+        )
+        assert outcome == "updated"
+        assert any(
+            field["name"] == "KP2BW_ID" for field in client.updates[0][1]["fields"]
+        )
+        assert any(
+            field["name"] == "KP2BW_SYNC" for field in client.updates[0][1]["fields"]
+        )
     existing = _make_existing(
         collectionIds=["old"],
         fields=fields_from_records({
@@ -172,6 +201,30 @@ def main() -> None:
     recovered_initial = plan_attachments(sources, {}, remote, data.__getitem__)
     assert not recovered_initial.uploads and not recovered_initial.stale
     assert recovered_initial.records == records
+    for missing in (sources[0], sources[4]):
+        # Includes distinct and identical bytes: the other source already has
+        # its own recorded ID, so only this unsuffixed upload remains unclaimed.
+        partial = {
+            key: value for key, value in records.items() if key != missing.source_id
+        }
+        for _ in range(2):
+            recovered_partial = plan_attachments(
+                sources, partial, remote, data.__getitem__
+            )
+            assert not recovered_partial.uploads and not recovered_partial.stale
+            assert recovered_partial.records == records
+            assert recovered_partial.previous_records == partial
+    ambiguous_partial = {
+        key: value
+        for key, value in records.items()
+        if key not in {s.source_id for s in sources[4:]}
+    }
+    try:
+        plan_attachments(sources, ambiguous_partial, remote, data.__getitem__)
+    except ConversionError:
+        pass
+    else:
+        raise AssertionError("Identical unassociated sources were guessed")
     fields = fields_from_records(records)
     assert records_from_fields(fields) == records
     try:
