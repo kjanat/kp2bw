@@ -176,3 +176,8 @@ src/kp2bw/
   `tests/bw_serve_upload_batch_test.py`, `tests/e2e_attachment_batch_test.py`.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.
+
+- `_fixups.py` registers field-local upgrades for `--fixup`: URI fields and legacy YAML metadata. It validates every
+  transformation on a copy, checks current/legacy sync stamps, rereads the complete update body, then issues one
+  revision-conditional PUT. Personal scope explicitly excludes organization items. Unknown/ambiguous data fails per
+  item without exposing field values; changed stamps are skipped. The existing URI-only command remains separate.

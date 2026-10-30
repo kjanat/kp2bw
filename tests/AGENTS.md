@@ -89,3 +89,7 @@ uv run python tests/e2e_vaultwarden_test.py
 docker compose -f tests/docker-compose.yml build
 docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-code-from test
 ```
+
+- `fixups_test.py` covers metadata schema validation, atomic per-item upgrades, sync stamps, races, personal/org/collection
+  scope and CLI routing without KeePass. `e2e_fixups_test.py` verifies persisted JSON and URI values, protected controls,
+  unchanged reruns and the URI-only command with both CLIs.

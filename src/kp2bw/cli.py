@@ -15,6 +15,7 @@ from rich.markup import escape
 
 from . import VERBOSE, __title__, __version__
 from ._console import console
+from ._fixups import FixupOptions, run_fixups
 from .bw_serve import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
@@ -336,6 +337,12 @@ def _argparser() -> MyArgParser:
         default=None,
     )
     parser.add_argument(
+        "--fixup",
+        action="store_true",
+        default=None,
+        help="Upgrade known legacy Bitwarden fields without KeePass.",
+    )
+    parser.add_argument(
         "--migrate-uris",
         dest="migrate_uris",
         help="Fold legacy URL fields into login URIs, then exit.",
@@ -537,6 +544,47 @@ def _run_migrate_uris(
             f"No items carried legacy URL fields in {escape(scope)} "
             f"({result.scanned} scanned); nothing to do."
         )
+
+
+def _run_fixup(
+    password_arg: str | None,
+    *,
+    org_id: str | None,
+    collection_id: str | None,
+    skip_confirm: bool,
+    uri_match: UriMatchValue,
+    interpret_uri_syntax: bool,
+) -> None:
+    try:
+        if not skip_confirm:
+            console.print(
+                f"Upgrade known legacy URL and metadata fields in {escape(_describe_scope(org_id, collection_id))}."
+            )
+            if not _confirm("Apply fixups? [y/n]: "):
+                console.print("Aborted; nothing changed.")
+                return
+        password = _read_password(
+            password_arg, "Please enter your Bitwarden password: "
+        )
+        with BitwardenServeClient(
+            password, org_id=org_id, collection_id=collection_id
+        ) as bw:
+            result = run_fixups(
+                bw,
+                org_id=org_id,
+                collection_id=collection_id,
+                options=FixupOptions(uri_match, interpret_uri_syntax),
+            )
+    except KeyboardInterrupt:
+        console.print("Interrupted.")
+        sys.exit(130)
+    except (BitwardenClientError, ConversionError) as exc:
+        _fail(exc)
+    console.print(
+        f"Fixup: {result.scanned} scanned, {result.migrated} migrated, {result.skipped} skipped, {result.failed} failed."
+    )
+    if result.failed:
+        sys.exit(1)
 
 
 def _print_uri_report(uris: list[str], source: str) -> None:
@@ -784,6 +832,7 @@ def main() -> None:
         strip_ids = _resolve_bool_option(
             args.strip_ids, "KP2BW_STRIP_IDS", default=False
         )
+        fixup = _resolve_bool_option(args.fixup, "KP2BW_FIXUP", default=False)
         migrate_uris = _resolve_bool_option(
             args.migrate_uris, "KP2BW_MIGRATE_URIS", default=False
         )
@@ -824,7 +873,11 @@ def main() -> None:
 
     # Bitwarden-only modes read no KeePass database, so the path requirement
     # (and the KeePass password prompt below) is skipped for them.
-    bitwarden_only = strip_ids or migrate_uris or report_uris == "bitwarden"
+    if fixup and (strip_ids or migrate_uris or report_uris):
+        _argparser().error("--fixup cannot be combined with another maintenance mode")
+    if fixup and args.bw_coll in {"auto", "nested"}:
+        _argparser().error("--fixup requires a fixed collection ID")
+    bitwarden_only = fixup or strip_ids or migrate_uris or report_uris == "bitwarden"
     if not bitwarden_only and not args.keepass_file:
         _ = sys.stderr.write(
             "ERROR: KeePass database path is required "
@@ -890,6 +943,17 @@ def main() -> None:
             bitwarden_password_arg=args.bw_pw,
             org_id=args.bw_org,
             collection_id=args.bw_coll,
+        )
+        return
+
+    if fixup:
+        _run_fixup(
+            args.bw_pw,
+            org_id=args.bw_org,
+            collection_id=args.bw_coll,
+            skip_confirm=skip_confirm,
+            uri_match=uri_match,
+            interpret_uri_syntax=interpret_uri_syntax,
         )
         return
 

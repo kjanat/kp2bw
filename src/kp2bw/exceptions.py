@@ -16,3 +16,7 @@ class ConversionError(Exception):
 
 class BitwardenServeExitedError(ConversionError):
     """Fatal transport loss; per-item failure handlers must not swallow it."""
+
+
+class FixupDataError(ConversionError):
+    """A legacy item representation cannot be upgraded losslessly."""

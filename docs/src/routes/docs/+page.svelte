@@ -155,6 +155,13 @@
 				'Read-only report of registrable domains containing multiple URI hosts. KeePass source needs FILE; Bitwarden source honors organization and collection scope.',
 		},
 		{
+			flag: '--fixup',
+			env: 'KP2BW_FIXUP',
+			default: 'Off',
+			detail:
+				'Upgrade legacy URL/app fields and YAML metadata in Bitwarden without KeePass. Personal vault by default; -o and a fixed -c select organization scope. Preserve modified items and reject ambiguous data. Recognized unstamped fields are upgraded losslessly and stamped. Repeated runs write nothing; failures return exit code 1.',
+		},
+		{
 			flag: '--migrate-uris',
 			env: 'KP2BW_MIGRATE_URIS',
 			default: 'Off',
@@ -279,8 +286,8 @@ python -m kp2bw [OPTIONS] FILE</code></pre>
 					<article>
 						<h3>Bitwarden-only</h3>
 						<p>
-							<code>--report-uris bitwarden</code>, <code>--migrate-uris</code>,
-							and
+							<code>--report-uris bitwarden</code>, <code>--fixup</code>, <code
+							>--migrate-uris</code>, and
 							<code>--strip-ids</code> need no <code>FILE</code> or KeePass
 							password.
 						</p>

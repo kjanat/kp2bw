@@ -369,8 +369,8 @@ def assert_same_revision_http_error_is_not_a_conflict() -> None:
 
 def assert_conditional_update_body_carries_revision() -> None:
     item = _login("conditional", ["KP2A_URL"], "https://legacy.example")
-    plain = BitwardenServeClient._item_update_body(item)
-    conditional = BitwardenServeClient._item_update_body(
+    plain = BitwardenServeClient.item_update_body(item)
+    conditional = BitwardenServeClient.item_update_body(
         item, expected_revision=item["revisionDate"]
     )
 
