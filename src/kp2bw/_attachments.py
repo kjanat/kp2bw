@@ -229,7 +229,26 @@ def plan_attachments(
             filename = available_name(source) if name in allocated else name
             selected = replace(source, filename=filename)
             if current != source.data or filename != name:
-                uploads.append(selected)
+                candidates = [
+                    attachment_id
+                    for attachment_id in by_name.get(filename, [])
+                    if attachment_id not in claimed
+                    and content(attachment_id) == source.data
+                ]
+                if len(candidates) > 1:
+                    raise ConversionError(
+                        "Pending replacement has ambiguous attachment IDs; no files were changed"
+                    )
+                if candidates:
+                    attachment_id = candidates[0]
+                    associated[source.source_id] = FileRecord(
+                        attachment_id,
+                        hashlib.sha256(filename.encode()).hexdigest(),
+                        source.digest,
+                    )
+                    claimed.add(attachment_id)
+                else:
+                    uploads.append(selected)
                 stale[source.source_id] = record.attachment_id
         else:
             filename = source.original_name

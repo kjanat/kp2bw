@@ -67,7 +67,8 @@ src/kp2bw/
   duplicate originals use their ordinal among same-named references because KeePass binary indexes are not stable IDs.
   Stored hashes detect destination edits. Legacy matching must be unique; ambiguity fails without changing files.
   Replacement bytes and the updated association must both be verified before deleting that source's old ID. Failed
-  association writes retain old copies and make the run fail. Attachment metadata participates in content stamps,
+  association writes retain old copies and make the run fail. Reruns reuse a uniquely verified pending replacement
+  before uploading another copy, and recheck its bytes before persisting the association. Attachment metadata participates in content stamps,
   survives normal content updates, and is removed by `--strip-ids`. Removed source files are not automatically deleted.
   Content and attachment failures are non-fatal and counted; `convert()` returns the failure count and the CLI exits
   non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-membership sync still applies).
