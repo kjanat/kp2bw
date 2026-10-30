@@ -72,6 +72,54 @@ with advantages over the built-in Bitwarden importer:
 
 > Fork of [jampe/kp2bw].
 
+## Container
+
+Release images are available as `ghcr.io/kjanat/kp2bw:<version>` for Linux amd64 and arm64. Version tags are not
+overwritten by the release workflow; `:latest` follows stable releases. Each image includes Python, Node and the exact
+Bitwarden CLI used in its image tests. Inspect that version with `docker run --rm --entrypoint bw
+ghcr.io/kjanat/kp2bw:latest --version`.
+
+Keep login state and logs in a persistent volume; mount the database directory read-only. No published ports are needed.
+The default command is `kp2bw`; use `--entrypoint bw` to configure the server or log in with password/2FA prompts.
+
+Bash:
+
+```bash
+docker volume create kp2bw-state
+# Optional: use your server instead of Bitwarden Cloud.
+docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data \
+  --entrypoint bw ghcr.io/kjanat/kp2bw:latest config server https://vault.example.com
+docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data \
+  --entrypoint bw ghcr.io/kjanat/kp2bw:latest login
+docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data \
+  --mount "type=bind,src=$PWD/vault,dst=/source,readonly" \
+  ghcr.io/kjanat/kp2bw:latest /source/vault.kdbx --keepass-keyfile /source/key.key
+```
+
+PowerShell:
+
+```powershell
+docker volume create kp2bw-state
+docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data `
+  --entrypoint bw ghcr.io/kjanat/kp2bw:latest config server https://vault.example.com
+docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data `
+  --entrypoint bw ghcr.io/kjanat/kp2bw:latest login
+docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data `
+  --mount "type=bind,src=$($PWD.Path)/vault,dst=/source,readonly" `
+  ghcr.io/kjanat/kp2bw:latest /source/vault.kdbx --keepass-keyfile /source/key.key
+```
+
+Omit `--keepass-keyfile` if the database has none. The examples import into the personal vault; append `--bitwarden-org
+<ID> --bitwarden-collection <ID>` for an organization. Other kp2bw arguments pass through unchanged. For unattended
+runs, pass existing host variables with Docker's `--env KP2BW_KEEPASS_PASSWORD`, `--env KP2BW_BITWARDEN_PASSWORD` and
+`--env KP2BW_YES` before the image name; omit `-it`.
+
+The image runs as UID/GID **10001**, with `BITWARDENCLI_APPDATA_DIR=/data/bw` and logs in `/data/logs`. Docker
+initializes named volumes with the required ownership. For bind-mounted state, give UID 10001 write access; for the
+source directory and keyfile, give it traversal/read access (for example through a per-user ACL). Replacing the
+container retains authentication when `/data` is reused. `docker stop` forwards termination to kp2bw and its child
+server. `--help`, `--version` and `--doctor` work through the normal entrypoint.
+
 ## Usage/Installation
 
 ```bash

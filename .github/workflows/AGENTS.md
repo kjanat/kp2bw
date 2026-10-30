@@ -47,3 +47,7 @@ bun run typecheck
 docker compose -f tests/docker-compose.yml build
 docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-code-from test
 ```
+
+- `container.yml` tests the production OCI image natively on amd64/arm64. Release calls consume the wheel artifact from
+  the successful main publish job; stubs do not call it. Publish only the tested image archives, with version-tag
+  overwrite refusal and a stable-release-only `latest` update. PR validation has no package-write permission.

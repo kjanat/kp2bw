@@ -129,3 +129,8 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 - `fixups_test.py` covers metadata schema validation, atomic per-item upgrades, sync stamps, races, personal/org/collection
   scope and CLI routing without KeePass. `e2e_fixups_test.py` verifies persisted JSON and URI values, protected controls,
   unchanged reruns and the URI-only command with both CLIs.
+
+
+- `container_image_test.py` runs the production image against a disposable server using a fresh named state volume.
+  It verifies non-root execution, read-only database/keyfile input, login persistence across containers, attachment bytes,
+  unchanged reruns and SIGTERM teardown. The container workflow runs it natively on both supported architectures.
