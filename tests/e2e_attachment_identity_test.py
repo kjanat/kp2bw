@@ -9,10 +9,87 @@ from unittest.mock import patch
 from e2e_vaultwarden_test import login_session, run, run_migration
 from pykeepass import create_database
 
-from kp2bw.attachments import records_from_fields, source_file
+from kp2bw.attachments import plan_attachments, records_from_fields, source_file
 from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw.bw_types import BwItemCreate
 from kp2bw.convert import Converter
 from kp2bw.exceptions import BitwardenClientError
+
+
+def check_legacy_collision_retry(
+    bw: BitwardenServeClient, converter: Converter
+) -> None:
+    sources = [
+        source_file("original", "legacy.txt", index, "legacy.txt", data)
+        for index, data in enumerate((b"first legacy", b"second legacy"), 1)
+    ]
+    item_id = bw.create_item(
+        BwItemCreate(
+            name="Legacy collision retry",
+            type=1,
+            organizationId=None,
+            collectionIds=[],
+            folderId=None,
+            notes=None,
+            favorite=False,
+            fields=[],
+            secureNote=None,
+            card=None,
+            identity=None,
+            login={
+                "username": "",
+                "password": "",
+                "uris": [],
+                "totp": None,
+                "passwordRevisionDate": None,
+            },
+        )
+    )
+    try:
+        assert not bw.upload_attachments([
+            (item_id, [(source.original_name, source.data) for source in sources])
+        ])
+        bw.sync(force=True)
+        full = bw.get_item(item_id)
+        remote = [(a["id"], a["fileName"]) for a in full.get("attachments") or []]
+        plan = plan_attachments(
+            sources, {}, remote, lambda aid: bw.get_attachment(item_id, aid)
+        )
+        assert len(plan.uploads) == 1
+        pending = plan.uploads[0]
+        assert not bw.upload_attachments([
+            (item_id, [(pending.filename, pending.data)])
+        ])
+        bw.sync(force=True)
+        # Model batch verification failing after the server accepted the bytes.
+        converter.persist_attachment_plan(
+            bw, item_id, plan, {(item_id, pending.filename)}
+        )
+        full = bw.get_item(item_id)
+        records = records_from_fields(full["fields"])
+        assert records == plan.records
+        remote = [(a["id"], a["fileName"]) for a in full.get("attachments") or []]
+        assert len(remote) == 3
+        for _ in range(2):
+            retry = plan_attachments(
+                sources, records, remote, lambda aid: bw.get_attachment(item_id, aid)
+            )
+            assert not retry.uploads
+            assert retry.sources[1].filename == pending.filename
+        converter.persist_attachment_plan(bw, item_id, retry, set())
+        for stale_id in retry.stale.values():
+            bw.delete_attachment(item_id, stale_id)
+        bw.sync(force=True)
+        full = bw.get_item(item_id)
+        records = records_from_fields(full["fields"])
+        remote = [(a["id"], a["fileName"]) for a in full.get("attachments") or []]
+        assert len(remote) == 2
+        unchanged = plan_attachments(
+            sources, records, remote, lambda aid: bw.get_attachment(item_id, aid)
+        )
+        assert not unchanged.uploads and not unchanged.stale
+    finally:
+        bw.request("DELETE", f"/object/item/{item_id}")
 
 
 def main() -> None:
@@ -225,6 +302,7 @@ def main() -> None:
         ):
             assert converter.convert() == 0
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            check_legacy_collision_retry(bw, converter)
             item = bw.get_item_by_uuid(entry.uuid.hex.upper())
             assert item is not None
             bw.request("DELETE", f"/object/item/{item['id']}")

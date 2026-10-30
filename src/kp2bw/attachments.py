@@ -268,13 +268,23 @@ def plan_attachments(
                 raise ConversionError(
                     "A mapped attachment was edited in the destination; no files were changed"
                 )
-            filename = available_name(source) if name in allocated else name
-            selected = replace(source, filename=filename)
-            if current != source.data or filename != name:
+            collision = name in allocated
+            filename = name
+            if current != source.data or collision:
+                pattern = allocated_name_pattern(source)
                 candidates = [
-                    attachment_id
-                    for attachment_id in by_name.get(filename, [])
+                    (attachment_id, candidate_name)
+                    for attachment_id, candidate_name in remote
                     if attachment_id not in claimed
+                    and candidate_name not in allocated
+                    and (
+                        (not collision and candidate_name == name)
+                        or (
+                            collision
+                            and pattern.fullmatch(candidate_name)
+                            and candidate_name not in desired_counts
+                        )
+                    )
                     and content(attachment_id) == source.data
                 ]
                 if len(candidates) > 1:
@@ -282,7 +292,7 @@ def plan_attachments(
                         "Pending replacement has ambiguous attachment IDs; no files were changed"
                     )
                 if candidates:
-                    attachment_id = candidates[0]
+                    attachment_id, filename = candidates[0]
                     associated[source.source_id] = FileRecord(
                         attachment_id,
                         hashlib.sha256(filename.encode()).hexdigest(),
@@ -290,8 +300,10 @@ def plan_attachments(
                     )
                     claimed.add(attachment_id)
                 else:
-                    uploads.append(selected)
+                    filename = available_name(source) if collision else name
+                    uploads.append(replace(source, filename=filename))
                 stale[source.source_id] = record.attachment_id
+            selected = replace(source, filename=filename)
         else:
             filename = source.original_name
             if filename in allocated or filename in by_name:
