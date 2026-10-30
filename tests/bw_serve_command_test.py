@@ -336,6 +336,18 @@ def assert_login_compat_hint_degrades_to_plain_url() -> None:
 
 
 def main() -> None:
+    for version in ("2026.10.1", "0.1.3", "0.2.0-rc.1"):
+        for returncode in (0, 1):
+            with patch.object(
+                bw_serve.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    [], returncode, version + "\n", ""
+                ),
+            ):
+                assert bw_serve.bw_cli_version(["bw"], None) == (
+                    version if returncode == 0 else None
+                )
     assert_resolve_plain_on_posix()
     assert_resolve_windows_exe_direct()
     assert_resolve_prefers_cmd_over_ps1()
