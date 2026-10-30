@@ -64,6 +64,15 @@ def check_native_updates() -> None:
         "old source",
         "destination only",
     ]
+    empty_source = _make_desired()
+    cleared = Converter._build_update_payload(
+        item, empty_source, migrate_password_history=True
+    )
+    assert cleared.get("passwordHistory") == remote.get("passwordHistory")
+    kept = Converter._build_update_payload(
+        item, empty_source, migrate_password_history=False
+    )
+    assert kept.get("passwordHistory") == item.get("passwordHistory")
     repeated = copy.deepcopy(item)
     apply_native_history(repeated, source, existing=item)
     assert repeated == item
