@@ -376,7 +376,7 @@ def assert_missing_attachment_is_uploaded() -> None:
         atts,
         fixed_coll_id=None,
     )
-    if [name for name, _ in (cast(tuple[str, str], a) for a in missing)] != ["notes"]:
+    if [conv._attachment_filename(a) for a in missing] != ["notes.txt"]:
         raise AssertionError(
             f"missing notes attachment should be queued, got {missing!r}"
         )
@@ -428,8 +428,8 @@ def assert_changed_attachment_is_refreshed() -> None:
         atts,
         fixed_coll_id=None,
     )
-    names = [name for name, _ in (cast(tuple[str, str], a) for a in missing)]
-    if names != ["notes"]:
+    names = [conv._attachment_filename(a) for a in missing]
+    if names != ["notes.txt"]:
         raise AssertionError(
             f"changed attachment should be re-uploaded, got {missing!r}"
         )

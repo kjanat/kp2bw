@@ -20,6 +20,7 @@ import httpx
 from rich.markup import escape
 
 from . import VERBOSE
+from ._attachments import ATTACHMENT_FIELD_PREFIX, records_from_fields
 from ._console import console
 from ._item_sync import (
     KP2BW_ID_FIELD_NAME,
@@ -29,7 +30,7 @@ from ._item_sync import (
     sync_stamp_generation,
 )
 from .bw_types import BwCollection, BwFolder, BwItemCreate, BwItemResponse
-from .exceptions import BitwardenClientError, BitwardenHttpError
+from .exceptions import BitwardenClientError, BitwardenHttpError, ConversionError
 from .uri_mapping import (
     UriMatchValue,
     is_url_attribute_key,
@@ -1215,6 +1216,7 @@ class BitwardenServeClient:
         CLI (skippable with ``-y`` for callers who know what they want).
         """
         targets = frozenset(field_names)
+
         items = self.list_items(
             organization_id=self._org_id,
             collection_id=self._collection_id,
@@ -1222,10 +1224,26 @@ class BitwardenServeClient:
         stripped = 0
         for item in items:
             fields = item.get("fields") or []
-            if not any(field.get("name") in targets for field in fields):
+            association_names: set[str] = set()
+            if KP2BW_ID_FIELD_NAME in targets and any(
+                field.get("name") == KP2BW_ID_FIELD_NAME for field in fields
+            ):
+                # Do not erase lookalike custom fields on unrelated/legacy items.
+                # Only recognized association records belonging to a stamped
+                # migration participate in finalization.
+                for field in fields:
+                    try:
+                        records = records_from_fields([field])
+                    except ConversionError:
+                        continue
+                    association_names.update(
+                        ATTACHMENT_FIELD_PREFIX + key for key in records
+                    )
+            remove_names = targets | association_names
+            if not any(field.get("name") in remove_names for field in fields):
                 continue
             item["fields"] = [
-                field for field in fields if field.get("name") not in targets
+                field for field in fields if field.get("name") not in remove_names
             ]
             self.update_item(item["id"], item)
             stripped += 1
@@ -1803,7 +1821,7 @@ class BitwardenServeClient:
             return failed
         try:
             self.sync()
-        except (BitwardenClientError, httpx.HTTPError):
+        except BitwardenClientError, httpx.HTTPError:
             logger.error(
                 "Could not sync uploaded attachments for verification; retaining old copies"
             )
@@ -1832,7 +1850,7 @@ class BitwardenServeClient:
                     self.get_attachment(item_id, attachment_id) == desired
                     for attachment_id in candidates
                 )
-            except (BitwardenClientError, httpx.HTTPError):
+            except BitwardenClientError, httpx.HTTPError:
                 verified = False
             if not verified:
                 logger.error(

@@ -39,6 +39,9 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
   and unchanged reruns. This fixture uses the test account's PBKDF2 configuration and keeps generated keys in memory.
 - Reserved-field regressions cover protected/plain duplicates, escape-namespace collisions, historical imports,
   edit protection and finalization. `e2e_reserved_fields_test.py` checks preservation and unchanged reruns after goldens.
+- `attachment_identity_test.py` checks collision allocation and legacy association. `e2e_attachment_identity_test.py`
+  verifies distinct and identical same-named files, generated/original collisions, unchanged IDs and revisions,
+  replacement of exactly one source, and retention when saving the association fails.
 - Fixtures are contract data; path and naming changes require docker + test updates together.
 - The final live attachment batch regression verifies four distinct files on each of two items, unchanged reruns,
   replacement and a falsely acknowledged upload that must fail without deleting the old copy.

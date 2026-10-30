@@ -9,6 +9,7 @@ nothing). These checks drive the method with a client double, so no live
 
 from typing import cast
 
+from kp2bw._attachments import FileRecord, fields_from_records
 from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME, BitwardenServeClient
 from kp2bw.bw_types import BwField, BwItemResponse
 
@@ -51,11 +52,14 @@ class _StripClient(BitwardenServeClient):
 def assert_only_stamped_items_stripped() -> None:
     """Only items carrying KP2BW_ID are rewritten, and only that field is removed."""
     items = [
-        _item("stamped-both", [KP2BW_ID_FIELD_NAME, "keep"]),
+        _item("stamped-both", [KP2BW_ID_FIELD_NAME, "KP2BW_FILE_test", "keep"]),
         _item("plain", ["keep"]),
         _item("stamped-only", [KP2BW_ID_FIELD_NAME]),
         _item("no-fields", []),
     ]
+    items[0]["fields"].extend(
+        fields_from_records({"0" * 64: FileRecord("attachment", "1" * 64, "2" * 64)})
+    )
     client = _StripClient(items)
 
     result = client.strip_field_from_items(KP2BW_ID_FIELD_NAME)
@@ -74,7 +78,7 @@ def assert_only_stamped_items_stripped() -> None:
             raise AssertionError(f"{item_id} still carries {KP2BW_ID_FIELD_NAME}")
     # The unrelated field on the multi-field item must survive.
     both_remaining = dict(client.updates)["stamped-both"]
-    if both_remaining != ["keep"]:
+    if both_remaining != ["KP2BW_FILE_test", "keep"]:
         raise AssertionError(f"non-stamp field not preserved: {both_remaining}")
 
 

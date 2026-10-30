@@ -151,3 +151,7 @@ def test_e2e_vaultwarden_script() -> None:
 
 def test_reserved_fields_script() -> None:
     _run_script_main("reserved_fields_test.py")
+
+
+def test_attachment_identity_script() -> None:
+    _run_script_main("attachment_identity_test.py")

@@ -90,6 +90,7 @@ def main() -> None:
                 "KP2BW_ID",
                 "KP2BW_SYNC",
                 "KP2BW_META",
+                "KP2BW_FILE_user",
                 "ordinary",
                 "KeePass:KP2BW_ID:1",
             ):

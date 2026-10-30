@@ -59,14 +59,15 @@ src/kp2bw/
 - Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on, `Converter(update_existing=...)`):
   `convert._reconcile_existing_item()` diffs a matched login item via `_content_differs()` and, when changed, `PUT`s a
   payload built by `_build_update_payload()` (preserves id/favorite/folder/org, unions collectionIds, keeps a
-  Bitwarden-side passkey absent from KeePass). Attachments are reconciled by content, not just name: a file the item
-  lacks is uploaded, and one whose bytes changed but kept its filename is re-uploaded (`_attachment_content_differs()`
-  downloads via `get_attachment()` and compares; an unreadable existing copy is treated as unchanged to avoid data
-  loss). The stale copy is deleted only after its replacement uploads (upload-then-delete), so `upload_attachments()`
-  returns failed `(item_id, filename)` pairs and the deletion is skipped when its replacement upload failed. Uploads are
-  deduped per `(item_id, filename)`. Content and attachment failures are non-fatal and counted; `convert()` returns the
-  failure count, and the CLI exits non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-
-  membership sync still applies).
+  Bitwarden-side passkey absent from KeePass). `_attachments.py` allocates unique filenames and binds each source to
+  its destination attachment ID in `KP2BW_FILE_*` fields. Source keys distinguish originals, notes and custom fields;
+  duplicate originals use their ordinal among same-named references because KeePass binary indexes are not stable IDs.
+  Stored hashes detect destination edits. Legacy matching must be unique; ambiguity fails without changing files.
+  Replacement bytes and the updated association must both be verified before deleting that source's old ID. Failed
+  association writes retain old copies and make the run fail. Attachment metadata participates in content stamps,
+  survives normal content updates, and is removed by `--strip-ids`. Removed source files are not automatically deleted.
+  Content and attachment failures are non-fatal and counted; `convert()` returns the failure count and the CLI exits
+  non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-membership sync still applies).
 - Oversize custom fields (value over `MAX_BW_ITEM_LENGTH`, 10k) are offloaded to a `<key>.txt` attachment instead of an
   inline field (mirrors long notes → `notes.txt`), decided in `_add_bw_entry_to_entries_dict()`. Three carve-outs: a
   consumed OTP key is already in `login.totp`, so its raw field is dropped as a dedup (no warning); a hidden OTP secret,

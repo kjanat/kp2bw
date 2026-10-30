@@ -2,6 +2,8 @@
 
 from urllib.parse import quote, unquote
 
+from ._attachments import ATTACHMENT_FIELD_PREFIX
+
 SOURCE_FIELD_PREFIX = "KeePass:"
 RESERVED_FIELD_NAMES = frozenset({"KP2BW_ID", "KP2BW_SYNC", "KP2BW_META"})
 
@@ -16,7 +18,7 @@ def source_field_name(name: str, occurrence: int = 1) -> str:
         raise ValueError("Source field occurrence must be positive")
     if (
         name in RESERVED_FIELD_NAMES
-        or name.startswith(SOURCE_FIELD_PREFIX)
+        or name.startswith((ATTACHMENT_FIELD_PREFIX, SOURCE_FIELD_PREFIX))
         or occurrence > 1
     ):
         return f"{SOURCE_FIELD_PREFIX}{quote(name, safe='')}:{occurrence}"
