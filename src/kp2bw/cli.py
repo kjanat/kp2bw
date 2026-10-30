@@ -435,7 +435,7 @@ def _run_strip_ids(
             console.print(
                 f"[bold yellow]Warning:[/bold yellow] this removes the "
                 f"[bold]{KP2BW_ID_FIELD_NAME}[/bold] and "
-                f"[bold]{KP2BW_SYNC_FIELD_NAME}[/bold] fields from every "
+                f"[bold]{KP2BW_SYNC_FIELD_NAME}[/bold] fields and attachment associations from every "
                 f"kp2bw-migrated item in [bold]{escape(scope)}[/bold]. Other "
                 "vault data is untouched, but this [bold]cannot be undone[/bold] "
                 "and makes future migration re-runs unreliable: without the "

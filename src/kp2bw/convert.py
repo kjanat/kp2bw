@@ -28,6 +28,17 @@ from rich.progress import (
 )
 
 from . import VERBOSE
+from ._attachments import (
+    ATTACHMENT_FIELD_PREFIX,
+    AttachmentPlan,
+    FileRecord,
+    SourceFile,
+    fields_from_records,
+    is_record_field,
+    plan_attachments,
+    records_from_fields,
+    source_file,
+)
 from ._console import console
 from ._field_limits import (
     FIELD_VALUE_LIMIT,
@@ -49,8 +60,10 @@ from ._item_sync import (
     sync_stamp_generation,
     sync_stamp_matches,
 )
+from ._source_fields import source_field_name, source_field_origin
 from .bw_serve import (
     BitwardenServeClient,
+    item_kp2bw_id,
     item_kp2bw_sync,
 )
 from .bw_types import (
@@ -61,8 +74,13 @@ from .bw_types import (
     BwItemResponse,
     BwUri,
 )
-from .exceptions import BitwardenClientError, ConversionError, FieldLimitError
-from .otp import OtpMigration, resolve_otp, totp_values_equivalent
+from .exceptions import (
+    BitwardenClientError,
+    BitwardenServeExitedError,
+    ConversionError,
+    FieldLimitError,
+)
+from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
 from .uri_mapping import (
     UriMatchValue,
     build_login_uris,
@@ -107,7 +125,7 @@ _KEEPASS_RESERVED_STRING_KEYS: frozenset[str] = frozenset({
 })
 
 # Attachment-like: real pykeepass Attachment or (key, value) tuple for long fields
-type AttachmentItem = Attachment | tuple[str, str]
+type AttachmentItem = Attachment | tuple[str, str] | SourceFile
 
 # Entry storage: (folder, firstlevel, bw_item, attachments)
 type EntryValue = tuple[str | None, str | None, BwItemCreate, list[AttachmentItem]]
@@ -139,18 +157,27 @@ def _read_entry_custom_properties(entry: Entry) -> _EntryCustomProperties:
     """Read custom fields without placing attacker-controlled keys in XPath."""
     values: dict[str, str | None] = {}
     protected_keys: set[str] = set()
+    occurrences: dict[str, int] = {}
 
     for string_element in entry._element.findall("String"):
         key_element = string_element.find("Key")
         key = key_element.text if key_element is not None else None
-        if key is None or key in _KEEPASS_RESERVED_STRING_KEYS or key in values:
+        if key is None or key in _KEEPASS_RESERVED_STRING_KEYS:
             continue
 
+        occurrences[key] = occurrences.get(key, 0) + 1
+        original_key = key
+        key = source_field_name(key, occurrences[key])
         value_element = string_element.find("Value")
         values[key] = value_element.text if value_element is not None else None
         if (
             value_element is not None
             and value_element.attrib.get("Protected", "False") == "True"
+        ):
+            protected_keys.add(key)
+        if key != original_key and (
+            is_otp_secret_field(original_key)
+            or original_key.startswith(KPEX_PASSKEY_PREFIX)
         ):
             protected_keys.add(key)
 
@@ -359,6 +386,7 @@ class Converter:
         totp_pps: bool = False,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
+        self._attachment_plans: dict[str, AttachmentPlan] = {}
         self._keepass_file_path = keepass_file_path
         self._keepass_password = keepass_password
         self._keepass_keyfile_path = keepass_keyfile_path
@@ -632,7 +660,9 @@ class Converter:
         expired_prefix = "[EXPIRED] " if entry.expired else ""
         notes = expired_prefix + (entry.notes or "")
         if not fits_field(notes, NOTES_LIMIT):
-            generated_attachments.append(("notes", entry.notes or ""))
+            generated_attachments.append(
+                source_file("notes", "", 1, "notes.txt", (entry.notes or "").encode())
+            )
             notes = expired_prefix
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
@@ -709,7 +739,7 @@ class Converter:
             folder,
             firstlevel,
             bw_item_object,
-            attachments,
+            list(self._attachment_sources(attachments)),
         )
 
     def _parse_kp_ref_string(self, ref_string: str) -> tuple[str, str, str]:
@@ -995,6 +1025,26 @@ class Converter:
         state = self._legacy_ref_states.get(kp_uuid)
         if state is None:
             legacy_item = copy.deepcopy(item)
+            # Older releases overwrote reserved source fields and ignored later
+            # duplicates. Replay that only for recognizing historical REF output.
+            old_fields: list[BwField] = []
+            for field in legacy_item["fields"]:
+                origin = source_field_origin(field["name"])
+                if origin is not None:
+                    name, occurrence = origin
+                    if occurrence > 1 or name in {
+                        KP2BW_ID_FIELD_NAME,
+                        KP2BW_SYNC_FIELD_NAME,
+                    }:
+                        continue
+                    if (
+                        name == KP2BW_META_FIELD_NAME
+                        and kp_uuid in self._generated_metadata_ids
+                    ):
+                        continue
+                    field["name"] = name
+                old_fields.append(field)
+            legacy_item["fields"] = old_fields
             # Replay the historical YAML metadata too. This shadow is built
             # from our own generated JSON, never from arbitrary vault input.
             if kp_uuid in self._generated_metadata_ids:
@@ -1006,8 +1056,8 @@ class Converter:
                             allow_unicode=False,
                             sort_keys=True,
                         ).rstrip("\n")
-                self._stamp_content(legacy_item)
-                sync_stamp = content_signature(legacy_item)
+            self._stamp_content(legacy_item)
+            sync_stamp = content_signature(legacy_item)
             base_uris = copy.deepcopy(legacy_item["login"]["uris"])
             state = _LegacyRefState(sync_stamp, legacy_item, base_uris, {})
             self._legacy_ref_states[kp_uuid] = state
@@ -1299,6 +1349,26 @@ class Converter:
             )
 
     @staticmethod
+    def _attachment_sources(attachments: list[AttachmentItem]) -> list[SourceFile]:
+        sources: list[SourceFile] = []
+        occurrences: dict[tuple[str, str], int] = {}
+        for attachment in attachments:
+            if isinstance(attachment, SourceFile):
+                sources.append(attachment)
+                continue
+            if isinstance(attachment, Attachment):
+                kind, key = "original", attachment.filename or "attachment"
+            else:
+                kind, key = "field", attachment[0]
+            occurrence_key = kind, key
+            ordinal = occurrences.get(occurrence_key, 0) + 1
+            occurrences[occurrence_key] = ordinal
+            filename, data = Converter._materialise_attachment(attachment)
+            sources.append(source_file(kind, key, ordinal, filename, data))
+        sources.sort(key=lambda source: source.kind != "original")
+        return plan_attachments(sources, {}, [], lambda _: b"").sources
+
+    @staticmethod
     def _attachment_filename(att: AttachmentItem) -> str:
         """Return the Bitwarden filename an AttachmentItem materialises to.
 
@@ -1307,6 +1377,8 @@ class Converter:
         reconciliation (which compares names without encoding the payload), so
         the two can never drift apart.
         """
+        if isinstance(att, SourceFile):
+            return att.filename
         if not isinstance(att, Attachment):
             # Long custom property — (key, value) text tuple
             return att[0] + ".txt"
@@ -1317,6 +1389,8 @@ class Converter:
     def _materialise_attachment(att: AttachmentItem) -> tuple[str, bytes]:
         """Convert an AttachmentItem to a ``(filename, data)`` pair."""
         name = Converter._attachment_filename(att)
+        if isinstance(att, SourceFile):
+            return name, att.data
         if isinstance(att, Attachment):
             return name, att.data
         return name, att[1].encode("UTF-8")
@@ -1479,7 +1553,14 @@ class Converter:
         payload: BwItemResponse = copy.copy(existing)
         payload["name"] = desired["name"]
         payload["notes"] = desired["notes"]
-        payload["fields"] = [copy.copy(field) for field in desired["fields"]]
+        payload["fields"] = [
+            *[copy.copy(field) for field in desired["fields"]],
+            *[
+                copy.copy(field)
+                for field in existing["fields"]
+                if is_record_field(field)
+            ],
+        ]
 
         desired_login: BwItemLogin = copy.copy(desired["login"])
         ex_login = existing.get("login")
@@ -1504,58 +1585,28 @@ class Converter:
         return payload
 
     @staticmethod
-    def _existing_attachments(
-        bw: BitwardenServeClient, item_id: str
-    ) -> dict[str, str] | None:
-        """Return ``{fileName: attachment_id}`` for *item_id*, or ``None`` on error.
-
-        Fetched authoritatively via GET so reconciliation never duplicates a
-        file and can address an existing attachment by id when its content needs
-        refreshing.  ``None`` signals "could not determine" so the caller skips
-        the sync rather than risk a duplicate or a destructive delete.  When a
-        filename is somehow present more than once (a state kp2bw never creates),
-        the last id wins; the extra copy is harmless and collapses on a re-run.
-        """
-        try:
-            item = bw.get_item(item_id)
-        except BitwardenClientError:
-            logger.warning(
-                f"Could not read existing attachments for item {item_id}; "
-                f"skipping its attachment sync to avoid duplicates"
-            )
-            return None
-        return {
-            name: att_id
-            for a in (item.get("attachments") or [])
-            if (name := a.get("fileName", "")) and (att_id := a.get("id", ""))
-        }
-
-    @staticmethod
-    def _attachment_content_differs(
+    def sync_collection_membership(
         bw: BitwardenServeClient,
-        item_id: str,
-        attachment_id: str,
-        att: AttachmentItem,
-    ) -> bool:
-        """True if the vault attachment's bytes differ from the KeePass source.
-
-        Lets an edited attachment that keeps the same filename (a refreshed
-        ``notes.txt`` recovery key, a swapped ``secret.jpg``) be replaced on a
-        re-run instead of going stale, while an unchanged file stays untouched
-        so the run remains idempotent.  If the existing bytes cannot be read the
-        attachment is treated as unchanged: that is the safe choice, since
-        re-uploading-and-deleting on an unreadable file risks losing it.
-        """
-        _name, desired = Converter._materialise_attachment(att)
-        try:
-            current = bw.get_attachment(item_id, attachment_id)
-        except BitwardenClientError:
-            logger.warning(
-                f"Could not read attachment {attachment_id!r} on item {item_id}; "
-                f"leaving it unchanged"
-            )
-            return False
-        return current != desired
+        existing: BwItemResponse,
+        desired: BwItemCreate,
+        fixed_collection: str | None,
+    ) -> Literal["collection", "skipped"]:
+        if fixed_collection:
+            return "skipped"
+        current = existing.get("collectionIds") or []
+        missing = [
+            value
+            for value in desired.get("collectionIds") or []
+            if value not in current
+        ]
+        if not missing:
+            return "skipped"
+        payload = copy.deepcopy(existing)
+        payload["collectionIds"] = [*current, *missing]
+        bw.update_item(existing["id"], payload)
+        if source_id := item_kp2bw_id(existing):
+            bw.update_dedup_entry(source_id, payload)
+        return "collection"
 
     def _reconcile_existing_item(
         self,
@@ -1611,6 +1662,29 @@ class Converter:
                 f"-- Entry {name!r}: matched a non-login item, skipping",
             )
             return outcome, [], {}
+
+        if not self._update_existing:
+            try:
+                return (
+                    self.sync_collection_membership(
+                        bw, existing, bw_item, fixed_coll_id
+                    ),
+                    [],
+                    {},
+                )
+            except BitwardenClientError:
+                logger.warning("Collection synchronization failed for item %s", item_id)
+                return "failed", [], {}
+
+        if any(is_record_field(field) for field in existing.get("fields") or []) and (
+            not item_kp2bw_sync(existing)
+            or (self._is_user_modified(existing) and not self._force_update_all)
+        ):
+            logger.warning(
+                "Attachment associations on item %s were edited; preserving its files",
+                item_id,
+            )
+            return "protected", [], {}
 
         # Content/collection sync. A rejected PUT here is non-fatal: one
         # problematic entry must not abort the whole re-run and strand every
@@ -1728,19 +1802,37 @@ class Converter:
         upload_atts: list[AttachmentItem] = []
         stale_by_name: dict[str, str] = {}
         if self._update_existing and attachments:
-            existing_atts = self._existing_attachments(bw, item_id)
-            if existing_atts is not None:
-                for att in attachments:
-                    fname = self._attachment_filename(att)
-                    old_id = existing_atts.get(fname)
-                    if old_id is None:
-                        # Item doesn't have this file yet -- upload it.
-                        upload_atts.append(att)
-                    elif self._attachment_content_differs(bw, item_id, old_id, att):
-                        # Same name, changed bytes -- re-upload the new content
-                        # and mark the stale copy for deletion afterwards.
-                        upload_atts.append(att)
-                        stale_by_name[fname] = old_id
+            try:
+                full = bw.get_item(item_id)
+                records = records_from_fields(full.get("fields") or [])
+                if records and (
+                    not item_kp2bw_sync(full) or self._is_user_modified(full)
+                ):
+                    raise ConversionError(
+                        "Attachment associations have an invalid sync stamp"
+                    )
+                plan = plan_attachments(
+                    self._attachment_sources(attachments),
+                    records,
+                    [
+                        (att["id"], att["fileName"])
+                        for att in full.get("attachments") or []
+                    ],
+                    lambda attachment_id: bw.get_attachment(item_id, attachment_id),
+                )
+                self._attachment_plans[item_id] = plan
+                upload_atts = list(plan.uploads)
+                stale_by_name = {
+                    source.filename: plan.stale[source.source_id]
+                    for source in plan.uploads
+                    if source.source_id in plan.stale
+                }
+            except BitwardenClientError, ConversionError:
+                logger.warning(
+                    "Could not safely associate attachments on item %s; leaving its files unchanged",
+                    item_id,
+                )
+                return "failed", [], {}
 
         if outcome == "skipped" and not upload_atts:
             logger.log(
@@ -1749,6 +1841,79 @@ class Converter:
             )
 
         return outcome, upload_atts, stale_by_name
+
+    def _persist_attachment_plan(
+        self,
+        bw: BitwardenServeClient,
+        item_id: str,
+        plan: AttachmentPlan,
+        failed: set[tuple[str, str]],
+    ) -> None:
+        full = bw.get_item(item_id)
+        current = records_from_fields(full.get("fields") or [])
+        if current != plan.previous_records or self._is_user_modified(full):
+            raise ConversionError("Item changed while saving attachment associations")
+        records = dict(plan.records)
+        # Recheck adopted bytes against fresh metadata before persisting an ID.
+        # These files were uploaded on an earlier attempt, not in this batch.
+        for source in plan.sources:
+            record = records.get(source.source_id)
+            if record is None or record == plan.previous_records.get(source.source_id):
+                continue
+            metadata = next(
+                (
+                    att
+                    for att in full.get("attachments") or []
+                    if att["id"] == record.attachment_id
+                ),
+                None,
+            )
+            if (
+                metadata is None
+                or hashlib.sha256(metadata["fileName"].encode()).hexdigest()
+                != record.name_digest
+                or hashlib.sha256(
+                    bw.get_attachment(item_id, record.attachment_id)
+                ).hexdigest()
+                != record.digest
+            ):
+                raise ConversionError(
+                    "Recovered attachment changed before its association could be saved"
+                )
+        for source in plan.uploads:
+            if (item_id, source.filename) in failed:
+                continue
+            candidates = [
+                attachment["id"]
+                for attachment in full.get("attachments") or []
+                if attachment["fileName"] == source.filename
+                and attachment["id"] != plan.stale.get(source.source_id)
+                and bw.get_attachment(item_id, attachment["id"]) == source.data
+            ]
+            if len(candidates) != 1:
+                raise ConversionError(
+                    "Uploaded attachment cannot be associated uniquely"
+                )
+            records[source.source_id] = FileRecord(
+                candidates[0],
+                hashlib.sha256(source.filename.encode()).hexdigest(),
+                source.digest,
+            )
+        if records == current:
+            return
+        full["fields"] = [
+            field
+            for field in full.get("fields") or []
+            if not (field.get("name") or "").startswith(ATTACHMENT_FIELD_PREFIX)
+        ] + fields_from_records(records)
+        self._stamp_content(full)
+        bw.update_item(item_id, full)
+        # The CLI can acknowledge PUT before its local item cache reflects it.
+        # Read the server state before authorizing deletion of the old file.
+        bw.sync(force=True)
+        persisted = bw.get_item(item_id)
+        if records_from_fields(persisted.get("fields") or []) != records:
+            raise ConversionError("Attachment associations were not persisted")
 
     def _create_bitwarden_items_for_entries(self) -> int:
         """Create entries via ``bw serve`` HTTP API and upload attachments.
@@ -1845,7 +2010,7 @@ class Converter:
                     adopted = existing is not None
                 if existing is not None:
                     item_id = existing["id"]
-                    outcome, upload_atts, stale_by_name = self._reconcile_existing_item(
+                    outcome, upload_atts, _ = self._reconcile_existing_item(
                         bw,
                         existing,
                         folder,
@@ -1878,9 +2043,6 @@ class Converter:
                         if pair not in queued_atts:
                             queued_atts.add(pair)
                             unique_atts.append(att)
-                            old_id = stale_by_name.get(fname)
-                            if old_id is not None:
-                                pending_deletes.append((item_id, old_id, fname))
                     if unique_atts:
                         existing_uploads.append((item_id, unique_atts))
                     progress.advance(task1)
@@ -1931,6 +2093,12 @@ class Converter:
                     )
                     continue
                 new_item_uploads = True
+                self._attachment_plans[item_id] = plan_attachments(
+                    self._attachment_sources(new_atts),
+                    {},
+                    [],
+                    lambda _: b"",
+                )
                 upload_items.append((
                     item_id,
                     [self._materialise_attachment(a) for a in new_atts],
@@ -1948,6 +2116,7 @@ class Converter:
             if new_item_uploads:
                 self._sync_safely(bw)
 
+            failed: list[tuple[str, str]] = []
             if upload_items:
                 total_files = sum(len(fps) for _, fps in upload_items)
                 task3 = progress.add_task(
@@ -1958,25 +2127,43 @@ class Converter:
                 n_attachments = total_files - n_attach_failed
                 progress.update(task3, completed=len(upload_items))
 
-                # --- Phase 4: remove stale copies of refreshed attachments --
-                # Upload-then-delete: only drop the old copy once its
-                # replacement was verified after sync, so a failed or silently
-                # missing re-upload never loses data. A
-                # failed delete is non-fatal (it just leaves a harmless extra
-                # copy that collapses on the next run).
-                if pending_deletes:
-                    failed_uploads = set(failed)
-                    for item_id, old_id, fname in pending_deletes:
-                        if (item_id, fname) in failed_uploads:
-                            continue
-                        try:
-                            bw.delete_attachment(item_id, old_id)
-                        except BitwardenClientError as exc:
-                            logger.warning(
-                                f"Could not remove the stale copy of {fname!r} "
-                                f"on item {item_id} (a duplicate may remain): "
-                                f"{exc}"
-                            )
+            # Persist source -> destination IDs before removing any old copy.
+            # A failed metadata write leaves both files intact and makes the run
+            # fail; acknowledged bytes alone never authorize a stale delete.
+            failed_uploads = set(failed)
+            for item_id, plan in self._attachment_plans.items():
+                try:
+                    self._persist_attachment_plan(bw, item_id, plan, failed_uploads)
+                    pending_deletes.extend(
+                        (item_id, plan.stale[source.source_id], source.filename)
+                        for source in plan.sources
+                        if source.source_id in plan.stale
+                    )
+                except BitwardenServeExitedError:
+                    raise
+                except (BitwardenClientError, ConversionError) as exc:
+                    n_update_failed += 1
+                    failed_uploads.update(
+                        (item_id, source.filename) for source in plan.sources
+                    )
+                    logger.warning(
+                        "Could not persist attachment associations on item %s (%s); retaining old copies",
+                        item_id,
+                        str(exc)
+                        if isinstance(exc, ConversionError)
+                        else type(exc).__name__,
+                    )
+            for item_id, old_id, fname in pending_deletes:
+                if (item_id, fname) in failed_uploads:
+                    continue
+                try:
+                    bw.delete_attachment(item_id, old_id)
+                except BitwardenClientError:
+                    n_attach_failed += 1
+                    logger.warning(
+                        "Could not remove a stale attachment on item %s; old copy retained",
+                        item_id,
+                    )
 
         elapsed = time.monotonic() - t_start
         _print_summary(

@@ -30,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
+from kp2bw._attachments import ATTACHMENT_FIELD_PREFIX
 from kp2bw.bw_serve import KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME
 
 # A concrete recursive type for parsed JSON. Laundering ``json.loads``'s ``Any``
@@ -251,6 +252,7 @@ def _norm_item(
             # UUID; KP2BW_SYNC is a content hash) and are implementation metadata,
             # not migrated content -- drop them so the golden stays deterministic.
             if f.get("name") not in (KP2BW_ID_FIELD_NAME, KP2BW_SYNC_FIELD_NAME)
+            and not str(f.get("name") or "").startswith(ATTACHMENT_FIELD_PREFIX)
         ),
         key=lambda f: (f["name"] or "", f["type"], f["value"] or ""),
     )

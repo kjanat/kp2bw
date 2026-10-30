@@ -62,14 +62,16 @@ src/kp2bw/
 - Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on, `Converter(update_existing=...)`):
   `convert._reconcile_existing_item()` diffs a matched login item via `_content_differs()` and, when changed, `PUT`s a
   payload built by `_build_update_payload()` (preserves id/favorite/folder/org, unions collectionIds, keeps a
-  Bitwarden-side passkey absent from KeePass). Attachments are reconciled by content, not just name: a file the item
-  lacks is uploaded, and one whose bytes changed but kept its filename is re-uploaded (`_attachment_content_differs()`
-  downloads via `get_attachment()` and compares; an unreadable existing copy is treated as unchanged to avoid data
-  loss). The stale copy is deleted only after its replacement uploads (upload-then-delete), so `upload_attachments()`
-  returns failed `(item_id, filename)` pairs and the deletion is skipped when its replacement upload failed. Uploads are
-  deduped per `(item_id, filename)`. Content and attachment failures are non-fatal and counted; `convert()` returns the
-  failure count, and the CLI exits non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-
-  membership sync still applies).
+  Bitwarden-side passkey absent from KeePass). `_attachments.py` allocates unique filenames and binds each source to
+  its destination attachment ID in `KP2BW_FILE_*` fields. Source keys distinguish originals, notes and custom fields;
+  duplicate originals use their ordinal among same-named references because KeePass binary indexes are not stable IDs.
+  Stored hashes detect destination edits. Legacy matching must be unique; ambiguity fails without changing files.
+  Replacement bytes and the updated association must both be verified before deleting that source's old ID. Failed
+  association writes retain old copies and make the run fail. Reruns reuse a uniquely verified pending replacement
+  before uploading another copy, and recheck its bytes before persisting the association. Attachment metadata participates in content stamps,
+  survives normal content updates, and is removed by `--strip-ids`. Removed source files are not automatically deleted.
+  Content and attachment failures are non-fatal and counted; `convert()` returns the failure count and the CLI exits
+  non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-membership sync still applies).
 - Oversize custom fields (encrypted value exceeds the field-specific budget in `_field_limits.py`) are offloaded to a `<key>.txt` attachment instead of an
   inline field (mirrors long notes → `notes.txt`), decided in `_add_bw_entry_to_entries_dict()`. Three carve-outs: a
   consumed OTP key is already in `login.totp`, so its raw field is dropped as a dedup (no warning); a hidden OTP secret,
@@ -133,6 +135,11 @@ src/kp2bw/
   `TOTPSecret` field without it) is carried over as a **hidden** field instead of a visible one, upholding the module
   invariant that no OTP secret is ever written in the clear. Config keys (`*-Length`/`Digits`, `*-Period`,
   `TimeOtp-Algorithm`) hold no secret, so the inactive scheme's stay ordinary custom fields. Tests: `tests/otp_test.py`.
+- Source fields named `KP2BW_ID`, `KP2BW_SYNC`, `KP2BW_META`, names beginning `KeePass:`, and duplicate custom
+  names are escaped by `_source_fields.py`. The format is `KeePass:<percent-encoded original>:<occurrence>`, with
+  one-based occurrences in XML order. Only exact metadata names are bookkeeping; escaped fields remain in content
+  signatures and survive `--strip-ids`. Existing valid sync stamps allow one repair from the original KeePass source;
+  target-side edits remain protected. Historical REF recognition replays the former field behaviour separately.
 - Custom properties are read by `convert._read_entry_custom_properties()` directly from each entry's `<String>`
   children. Do not replace this with `Entry.custom_properties` or dynamic XPath: supported PyKeePass versions
   interpolate custom keys into XPath. The single traversal returns both values and `Protected=True` keys so normal and
@@ -174,3 +181,6 @@ src/kp2bw/
   `tests/bw_serve_upload_batch_test.py`, `tests/e2e_attachment_batch_test.py`.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.
+
+- Attachment association updates force a server sync before their verification read. A successful PUT may precede the
+  official CLI's local-cache update; old copies remain until the server-backed read confirms the new associations.

@@ -103,7 +103,7 @@ def _revision() -> tuple[str, str] | None:
                 timeout=_SUBPROCESS_TIMEOUT,
                 stdin=subprocess.DEVNULL,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError, subprocess.TimeoutExpired:
             return None
         revision = result.stdout.strip()
         if result.returncode == 0 and revision:
@@ -173,7 +173,7 @@ def _bw_output(bw_cmd: list[str], bw_cwd: str | None, *args: str) -> str | None:
             stdin=subprocess.DEVNULL,
             cwd=bw_cwd,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         return None
     if result.returncode != 0:
         return None

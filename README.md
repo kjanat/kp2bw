@@ -30,6 +30,7 @@ with advantages over the built-in Bitwarden importer:
 - <details>
     <summary><b>Custom properties &amp; attachments</b></summary>
     Imported as Bitwarden custom fields or attachments (oversized values upload as files).
+    Same-named files are retained with distinct output names and tracked by attachment ID.
     Uploads run serially per item and concurrently across items. Uploaded files are synced and downloaded to verify their bytes before success is reported or an old copy is deleted. A verification failure makes the migration exit nonzero and retains the old copy.
   </details>
 - <details>
@@ -127,7 +128,7 @@ bw status | jq . # jq optional but makes it easier to read the JSON output
 
 ## Usage
 
-```pwsh
+```text
 kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
@@ -219,10 +220,15 @@ re-runs so nothing duplicates. Once you're satisfied the migration is complete a
 Bitwarden, run
 
 ```bash
-kp2bw --strip-ids            # personal vault; add -o/-c to scope to an org/collection
+kp2bw --strip-ids # personal vault; add -o/-c to scope to an org/collection
 ```
 
-to remove that stamp from every migrated item and exit. No KeePass database is read.
+to remove migration stamps and attachment associations from every migrated item and exit. No KeePass database is read.
+
+Source fields named `KP2BW_ID`, `KP2BW_SYNC`, `KP2BW_META` or beginning with `KP2BW_FILE_` are preserved under names
+such as `KeePass:KP2BW_ID:1`, with their values and hidden/text status intact. Duplicate names and source fields already
+beginning with `KeePass:` are escaped too. These source fields survive `--strip-ids`. Rerunning from the original
+KeePass database can restore source values overwritten by older imports; Bitwarden edits remain protected.
 
 > [!WARNING]
 > This is **irreversible** and makes future migration re-runs unreliable. Without the stamp, a re-run can only match by

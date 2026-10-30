@@ -22,6 +22,7 @@ import httpx
 from rich.markup import escape
 
 from . import VERBOSE
+from ._attachments import ATTACHMENT_FIELD_PREFIX, records_from_fields
 from ._console import console
 from ._inventory import inventory_signature
 from ._item_sync import (
@@ -36,6 +37,7 @@ from .exceptions import (
     BitwardenClientError,
     BitwardenHttpError,
     BitwardenServeExitedError,
+    ConversionError,
 )
 from .uri_mapping import (
     UriMatchValue,
@@ -1250,9 +1252,13 @@ class BitwardenServeClient:
         logger.log(VERBOSE, "Syncing vault via bw serve")
         self._request("POST", "/sync", idempotent=True)
 
-    def sync(self) -> None:
-        """Force a vault sync (public API)."""
-        self._sync()
+    def sync(self, *, force: bool = False) -> None:
+        """Synchronise the vault, optionally bypassing the CLI revision cache."""
+        if force:
+            logger.log(VERBOSE, "Forcing vault sync via bw serve")
+            self._request("POST", "/sync", params={"force": "true"}, idempotent=True)
+        else:
+            self._sync()
 
     # ------------------------------------------------------------------
     # CRUD — folders
@@ -1416,6 +1422,7 @@ class BitwardenServeClient:
         CLI (skippable with ``-y`` for callers who know what they want).
         """
         targets = frozenset(field_names)
+
         items = self.list_items(
             organization_id=self._org_id,
             collection_id=self._collection_id,
@@ -1423,10 +1430,26 @@ class BitwardenServeClient:
         stripped = 0
         for item in items:
             fields = item.get("fields") or []
-            if not any(field.get("name") in targets for field in fields):
+            association_names: set[str] = set()
+            if KP2BW_ID_FIELD_NAME in targets and any(
+                field.get("name") == KP2BW_ID_FIELD_NAME for field in fields
+            ):
+                # Do not erase lookalike custom fields on unrelated/legacy items.
+                # Only recognized association records belonging to a stamped
+                # migration participate in finalization.
+                for field in fields:
+                    try:
+                        records = records_from_fields([field])
+                    except ConversionError:
+                        continue
+                    association_names.update(
+                        ATTACHMENT_FIELD_PREFIX + key for key in records
+                    )
+            remove_names = targets | association_names
+            if not any(field.get("name") in remove_names for field in fields):
                 continue
             item["fields"] = [
-                field for field in fields if field.get("name") not in targets
+                field for field in fields if field.get("name") not in remove_names
             ]
             self.update_item(item["id"], item)
             stripped += 1

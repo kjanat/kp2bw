@@ -1,5 +1,6 @@
 """Round-trip encrypted field boundaries in personal and organization vaults."""
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -49,6 +50,13 @@ def main() -> None:
                     entry.notes = notes
                     entry.set_custom_property("value", value)
                     expected[entry.uuid.hex.upper()] = (title, value, notes)
+                metadata_entry = db.add_entry(
+                    db.root_group, "Metadata collision", "user", "pw"
+                )
+                metadata_entry.tags = ["é" * 4000]
+                metadata_entry.add_attachment(
+                    db.add_binary(b"original metadata file"), "KP2BW_META.txt"
+                )
                 db.save()
                 with BitwardenServeClient(password, org_id=organization) as bw:
                     collection = (
@@ -75,10 +83,42 @@ def main() -> None:
 
                 migrate()
                 revisions: dict[str, str | None] = {}
+                metadata_ids: set[str] = set()
                 for rerun in (False, True):
                     if rerun:
                         migrate()
                     with BitwardenServeClient(password, org_id=organization) as bw:
+                        meta = bw.get_item_by_uuid(metadata_entry.uuid.hex.upper())
+                        assert meta is not None
+                        meta = bw.get_item(meta["id"])
+                        files = meta.get("attachments") or []
+                        assert (
+                            len(files) == 2 and len({a["fileName"] for a in files}) == 2
+                        )
+                        contents = {
+                            a["fileName"]: bw.get_attachment(meta["id"], a["id"])
+                            for a in files
+                        }
+                        assert (
+                            contents.pop("KP2BW_META.txt") == b"original metadata file"
+                        )
+                        assert (
+                            json.loads(next(iter(contents.values())))["tags"]
+                            == metadata_entry.tags
+                        )
+                        ids = {a["id"] for a in files}
+                        if rerun:
+                            assert ids == metadata_ids
+                            assert (
+                                meta.get("revisionDate")
+                                == revisions[metadata_entry.uuid.hex.upper()]
+                            )
+                            bw._request("DELETE", f"/object/item/{meta['id']}")
+                        else:
+                            metadata_ids = ids
+                            revisions[metadata_entry.uuid.hex.upper()] = meta.get(
+                                "revisionDate"
+                            )
                         for source_id, (title, value, notes) in expected.items():
                             item = bw.get_item_by_uuid(source_id)
                             assert item is not None
