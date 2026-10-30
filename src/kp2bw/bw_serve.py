@@ -1199,7 +1199,9 @@ class BitwardenServeClient:
                     "Read-only CLI inventory verification failed"
                 )
             try:
-                expected[kind] = inventory_signature(json.loads(result.stdout))
+                expected[kind] = inventory_signature(
+                    json.loads(result.stdout), kind=kind
+                )
             except ValueError:
                 raise BitwardenClientError(
                     "CLI inventory verification returned invalid JSON"
@@ -1214,7 +1216,7 @@ class BitwardenServeClient:
                 )
                 data = self._request("GET", f"/list/object/{kind}", params=params)
                 rows = data.get("data")
-                if inventory_signature(rows) != expected[kind]:
+                if inventory_signature(rows, kind=kind) != expected[kind]:
                     break
                 observed[kind] = cast(list[Any], rows)
             else:
