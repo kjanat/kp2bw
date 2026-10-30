@@ -1597,9 +1597,16 @@ class Converter:
                 )
                 target_id = self._item_field_value(ref_item, KP2BW_ID_FIELD_NAME)
                 rule = self._entry_templates.get(target_id or "")
-                if self._map_templates and rule is not None:
+                ssh_source = self._ssh_sources.get(target_id or "")
+                if (self._map_templates and rule is not None) or ssh_source is not None:
                     planned_target = copy.deepcopy(ref_item)
-                    apply_template(planned_target, rule)
+                    if self._map_templates and rule is not None:
+                        apply_template(planned_target, rule)
+                    if (
+                        ssh_source is not None
+                        and planned_target["type"] == BW_ITEM_TYPE_LOGIN
+                    ):
+                        apply_ssh_rule(planned_target, ssh_source[1], ssh_source[0])
                     if planned_target["type"] != BW_ITEM_TYPE_LOGIN:
                         separate_reason = "a reference to a native non-login item"
                 existing_totp = ref_item["login"]["totp"]

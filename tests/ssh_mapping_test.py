@@ -49,6 +49,13 @@ def main() -> None:
         entry.set_custom_property("Private Key", private, protect=True)
         ordinary = db.add_entry(db.root_group, "SSH Key", "", "")
         ordinary.set_custom_property("Private Key", private, protect=True)
+        alias = db.add_entry(
+            db.root_group,
+            "SSH login alias",
+            "{REF:U@I:" + entry.uuid.hex.upper() + "}",
+            "{REF:P@I:" + entry.uuid.hex.upper() + "}",
+            url="https://ssh-login.example.test",
+        )
         db.save()
         converter = Converter(
             str(path),
@@ -68,6 +75,16 @@ def main() -> None:
             assert converter.convert() == 0
         item = converter._unpack_entry(converter._entries[entry.uuid.hex.upper()])[2]
         assert item["type"] == 5 and item.get("sshKey")
+        alias_item = converter._unpack_entry(
+            converter._entries[alias.uuid.hex.upper()]
+        )[2]
+        assert alias_item["type"] == 1
+        assert alias_item["login"]["username"] == "user"
+        assert alias_item["login"]["password"] == "password"
+        assert alias_item["login"]["uris"] == [
+            {"uri": "https://ssh-login.example.test", "match": None}
+        ]
+
         assert (
             converter._unpack_entry(converter._entries[ordinary.uuid.hex.upper()])[2][
                 "type"
