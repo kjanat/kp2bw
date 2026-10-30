@@ -13,6 +13,28 @@ from kp2bw.exceptions import BitwardenClientError
 
 
 def main() -> None:
+    collection = {
+        "id": "collection",
+        "organizationId": "org",
+        "name": "Shared",
+        "externalId": None,
+    }
+    cli_collection = {**collection, "object": "collection"}
+    http_collection: dict[str, Any] = {
+        **collection,
+        "object": "org-collection",
+        "users": [],
+        "groups": [],
+    }
+    assert inventory_signature(
+        [cli_collection], kind="org-collections"
+    ) == inventory_signature([http_collection], kind="org-collections")
+    for field in ("id", "organizationId", "name", "externalId"):
+        assert inventory_signature(
+            [cli_collection], kind="org-collections"
+        ) != inventory_signature(
+            [{**http_collection, field: "changed"}], kind="org-collections"
+        )
     items: list[dict[str, Any]] = [
         {
             "id": "one",
