@@ -12,8 +12,14 @@ import httpx
 from convert_update_test import UpdateTestConverter, _make_existing
 
 from kp2bw._attachment_resume import inspect_pending_upload, transaction_filename
-from kp2bw._attachments import AttachmentPlan, FileRecord, source_file
+from kp2bw._attachments import (
+    AttachmentPlan,
+    FileRecord,
+    fields_from_records,
+    source_file,
+)
 from kp2bw._checkpoint import AttachmentCheckpoint, CheckpointRecord, CheckpointScope
+from kp2bw._item_sync import stamp_content
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwAttachment, BwItemResponse
 from kp2bw.exceptions import (
@@ -205,10 +211,26 @@ def check_cleanup_protection() -> None:
         previous_name_digest=hashlib.sha256(b"key.bin").hexdigest(),
         before_ids=("old",),
     )
-    for condition in ("unchanged", "edited", "renamed", "concurrent"):
+    for condition in (
+        "unchanged",
+        "edited",
+        "renamed",
+        "concurrent",
+        "unmapped",
+        "replacement-edited",
+    ):
         item = _make_existing(
             revisionDate="revision",
-            fields=[{"name": "KP2BW_ID", "value": "b" * 32, "type": 0}],
+            fields=[
+                {"name": "KP2BW_ID", "value": "b" * 32, "type": 0},
+                *fields_from_records({
+                    source.source_id: FileRecord(
+                        "old" if condition == "unmapped" else "new",
+                        pending.name_digest,
+                        source.digest,
+                    )
+                }),
+            ],
             attachments=[
                 {
                     "id": "old",
@@ -217,6 +239,7 @@ def check_cleanup_protection() -> None:
                 {"id": "new", "fileName": name},
             ],
         )
+        stamp_content(item)
         client = MagicMock(spec=BitwardenServeClient)
 
         def get_item(_item_id: str, item: BwItemResponse = item) -> BwItemResponse:
@@ -229,7 +252,11 @@ def check_cleanup_protection() -> None:
             item: BwItemResponse = item,
         ) -> bytes:
             if attachment_id == "new":
-                return source.data
+                return (
+                    b"edited replacement"
+                    if condition == "replacement-edited"
+                    else source.data
+                )
             if condition == "concurrent":
                 item["revisionDate"] = "changed"
             return b"edited" if condition == "edited" else b"old"

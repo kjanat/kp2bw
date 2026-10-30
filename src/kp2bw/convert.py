@@ -1772,6 +1772,8 @@ class Converter:
         upload_atts: list[AttachmentItem] = []
         stale_by_name: dict[str, str] = {}
         if self._update_existing and attachments:
+            earlier_cleanup = self._checkpoint_cleanup
+            self._checkpoint_cleanup = []
             try:
                 full = bw.get_item(item_id)
                 records = records_from_fields(full.get("fields") or [])
@@ -1815,6 +1817,12 @@ class Converter:
                     else type(exc).__name__,
                 )
                 return "failed", [], {}
+            finally:
+                recovered_cleanup = self._checkpoint_cleanup
+                self._checkpoint_cleanup = earlier_cleanup
+            # Only a fully reconciled plan reaches association persistence.
+            # A later source failure must discard all cleanup from this item.
+            self._checkpoint_cleanup.extend(recovered_cleanup)
 
         if outcome == "skipped" and not upload_atts:
             logger.log(
@@ -2205,6 +2213,36 @@ class Converter:
         )
         if attachment is None:
             return
+        association = records_from_fields(before.get("fields") or []).get(
+            record.source_id
+        )
+        expected_association = FileRecord(
+            record.attachment_id or "", record.name_digest, record.source_digest
+        )
+        replacement = next(
+            (
+                att
+                for att in before.get("attachments") or []
+                if att["id"] == record.attachment_id
+            ),
+            None,
+        )
+        if (
+            (item_kp2bw_id(before) or "").upper() != record.entry_id.upper()
+            or association != expected_association
+            or not item_kp2bw_sync(before)
+            or self._is_user_modified(before)
+            or replacement is None
+            or hashlib.sha256(replacement["fileName"].encode()).hexdigest()
+            != record.name_digest
+            or hashlib.sha256(
+                bw.get_attachment(item_id, record.attachment_id or "")
+            ).hexdigest()
+            != record.source_digest
+        ):
+            raise ConversionError(
+                "Replacement association must be persisted and verified before cleanup"
+            )
         if (
             hashlib.sha256(attachment["fileName"].encode()).hexdigest() != expected_name
             or hashlib.sha256(bw.get_attachment(item_id, attachment_id)).hexdigest()
