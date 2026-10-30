@@ -133,4 +133,6 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 
 - `container_image_test.py` runs the production image against a disposable server using a fresh named state volume.
   It verifies non-root execution, read-only database/keyfile input, login persistence across containers, attachment bytes,
-  unchanged reruns and SIGTERM teardown. The container workflow runs it natively on both supported architectures.
+  unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
+  architectures. `container_publish_test.py` exercises the actual publication script with synthetic registry/Docker
+  commands, checks tag routing and overwrite refusal, and verifies interactive/noninteractive adapter arguments.

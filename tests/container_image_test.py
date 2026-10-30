@@ -16,6 +16,7 @@ def main() -> None:
     image = os.environ["KP2BW_CONTAINER_IMAGE"]
     expected_version = os.environ["KP2BW_CONTAINER_VERSION"]
     expected_bw = os.environ["KP2BW_CONTAINER_BW_VERSION"]
+    expected_package = os.environ["KP2BW_CONTAINER_CLI_PACKAGE"]
     root = Path(__file__).resolve().parents[1]
     volume = f"kp2bw-image-test-{uuid4().hex}"
     stopped = f"{volume}-stop"
@@ -50,6 +51,13 @@ def main() -> None:
 
     run(["docker", "volume", "create", volume])
     try:
+        inspection = json.loads(run(["docker", "image", "inspect", image]))[0]
+        assert inspection["Config"]["WorkingDir"] == "/w"
+        assert inspection["Architecture"] == os.environ["KP2BW_CONTAINER_ARCH"]
+        labels = inspection["Config"]["Labels"]
+        assert labels["io.kp2bw.cli.package"] == expected_package
+        assert labels["io.kp2bw.cli.version"] == expected_bw
+        assert labels["org.opencontainers.image.version"] == expected_version
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory)
             source.chmod(0o755)
@@ -94,6 +102,11 @@ def main() -> None:
             assert "Import KeePass" in run([*base, image, "--help"])
             assert expected_version in run([*base, image, "--version"])
             assert run([*base, "--entrypoint", "bw", image, "--version"]) == expected_bw
+            if expected_package == "@kjanat/vaultwarden-cli":
+                assert (
+                    run([*base, "--entrypoint", "vw", image, "--version"])
+                    == expected_bw
+                )
             assert run([*base, "--entrypoint", "id", image, "-u"]) == "10001"
             run([
                 *base,

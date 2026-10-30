@@ -6,10 +6,12 @@ on:
     paths:
       - Dockerfile
       - Dockerfile.dockerignore
+      - scripts/vw-bw.sh
       - src/**
       - pyproject.toml
       - uv.lock
       - tests/container_image_test.py
+      - tests/container_publish_test.py
       - tests/Dockerfile.vaultwarden
       - tests/fixtures/**
       - .github/workflows/container.yml
@@ -30,6 +32,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       bw: ${{ steps.resolve.outputs.bw }}
+      vw: ${{ steps.resolve.outputs.vw }}
       python: ${{ steps.resolve.outputs.python }}
       node: ${{ steps.resolve.outputs.node }}
       server: ${{ steps.resolve.outputs.server }}
@@ -55,30 +58,40 @@ jobs:
           version = metadata['Version']
           assert not os.environ['EXPECTED_VERSION'] or version == os.environ['EXPECTED_VERSION']
           assert re.fullmatch(r'[A-Za-z0-9_.-]+', version)
-          with urllib.request.urlopen('https://registry.npmjs.org/@bitwarden%2fcli', timeout=30) as response:
-              versions = json.load(response)['versions']
-          stable = [v for v in versions if re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', v)]
-          bw = max(stable, key=lambda v: tuple(map(int, v.split('.'))))
+          resolved = {}
+          for variant, package in [('bw', '@bitwarden%2fcli'), ('vw', '@kjanat%2fvaultwarden-cli')]:
+              with urllib.request.urlopen(f'https://registry.npmjs.org/{package}', timeout=30) as response:
+                  versions = json.load(response)['versions']
+              stable = [v for v in versions if re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', v)]
+              resolved[variant] = max(stable, key=lambda v: tuple(map(int, v.split('.'))))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write(f'version={version}\nbw={bw}\n')
+              output.write(f'version={version}\n')
+              for variant, cli_version in resolved.items():
+                  output.write(f'{variant}={cli_version}\n')
+          print('Resolved CLI versions:', resolved)
           PY
           printf 'python=python:3.14-slim-trixie@%s\n' "$(crane digest python:3.14-slim-trixie)" >> "$GITHUB_OUTPUT"
           printf 'node=node:26-trixie-slim@%s\n' "$(crane digest node:26-trixie-slim)" >> "$GITHUB_OUTPUT"
           server=$(crane ls ghcr.io/dani-garcia/vaultwarden | python -c 'import re,sys; print(max((s.strip() for s in sys.stdin if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+\n?",s)),key=lambda s:tuple(map(int,s.split(".")))))')
           printf 'server=ghcr.io/dani-garcia/vaultwarden@%s\n' "$(crane digest "ghcr.io/dani-garcia/vaultwarden:$server")" >> "$GITHUB_OUTPUT"
-      - name: Smoke test the distribution used by both images
+      - name: Smoke test the distribution used by every image
         run: uv run --isolated --no-project --with dist/kp2bw-*.whl tests/smoke_test.py
+      - name: Check CLI adapter and publication tags
+        run: uv run python tests/container_publish_test.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with: { name: container-wheel, path: "dist/kp2bw-*.whl", if-no-files-found: error }
 
   validate:
+    name: image (${{ matrix.cli }}, ${{ matrix.arch }})
     needs: prepare
     strategy:
       fail-fast: false
       matrix:
+        arch: [amd64, arm64]
+        cli: [vw, bw]
         include:
-          - { arch: amd64, runner: ubuntu-24.04 }
-          - { arch: arm64, runner: ubuntu-24.04-arm }
+          - { arch: amd64, runner: ubuntu-26.04 }
+          - { arch: arm64, runner: ubuntu-26.04-arm }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -86,49 +99,59 @@ jobs:
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with: { name: container-wheel, path: dist }
-      - name: Build the production image
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          BW_VERSION: ${{ needs.prepare.outputs.bw }}
-          PYTHON_IMAGE: ${{ needs.prepare.outputs.python }}
-          NODE_IMAGE: ${{ needs.prepare.outputs.node }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          docker build --platform "linux/$ARCH" --tag "kp2bw-production:$ARCH" \
-            --build-arg "KP2BW_VERSION=$VERSION" --build-arg "BW_VERSION=$BW_VERSION" \
-            --build-arg "REVISION=$GITHUB_SHA" --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" \
-            --build-arg "NODE_IMAGE=$NODE_IMAGE" .
-      - name: Start the disposable server
+      - name: Build the disposable server
         env: { SERVER_IMAGE: "${{ needs.prepare.outputs.server }}" }
         run: |
           docker build --file tests/Dockerfile.vaultwarden --tag kp2bw-container-fixture \
             --build-arg "VAULTWARDEN_IMAGE=$SERVER_IMAGE" tests
-          docker run --detach --name kp2bw-container-fixture -p 127.0.0.1:18443:443 \
+      - name: Run the disposable server
+        id: server
+        background: true
+        run: |
+          exec docker run --rm --name kp2bw-container-fixture -p 127.0.0.1:18443:443 \
             -e I_REALLY_WANT_VOLATILE_STORAGE=true -e SIGNUPS_ALLOWED=false \
             -e DOMAIN=https://localhost:18443 -e ROCKET_PORT=443 \
             -e 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}' kp2bw-container-fixture
-          for _ in {1..60}; do
-            if curl --fail --silent --cacert tests/fixtures/vaultwarden-certs/cert.pem https://localhost:18443/alive; then exit 0; fi
-            sleep 1
-          done
-          exit 1
+      - name: Check server readiness
+        id: server-ready
+        background: true
+        run: >-
+          curl --fail --silent --show-error --retry 60 --retry-all-errors
+          --retry-delay 1 --retry-max-time 90 --max-time 5
+          --cacert tests/fixtures/vaultwarden-certs/cert.pem https://localhost:18443/alive
+      - name: Build the production image
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CLI_VERSION: ${{ matrix.cli == 'vw' && needs.prepare.outputs.vw || needs.prepare.outputs.bw }}
+          CLI_PACKAGE: ${{ matrix.cli == 'vw' && '@kjanat/vaultwarden-cli' || '@bitwarden/cli' }}
+          CLI: ${{ matrix.cli }}
+          PYTHON_IMAGE: ${{ needs.prepare.outputs.python }}
+          NODE_IMAGE: ${{ needs.prepare.outputs.node }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          docker build --platform "linux/$ARCH" --tag "kp2bw-production:$CLI-$ARCH" \
+            --build-arg "KP2BW_VERSION=$VERSION" --build-arg "CLI_VERSION=$CLI_VERSION" --build-arg "CLI_PACKAGE=$CLI_PACKAGE" \
+            --build-arg "REVISION=$GITHUB_SHA" --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" \
+            --build-arg "NODE_IMAGE=$NODE_IMAGE" .
+      - wait: server-ready
       - name: Test the actual image
         env:
-          KP2BW_CONTAINER_IMAGE: kp2bw-production:${{ matrix.arch }}
+          KP2BW_CONTAINER_IMAGE: kp2bw-production:${{ matrix.cli }}-${{ matrix.arch }}
           KP2BW_CONTAINER_VERSION: ${{ needs.prepare.outputs.version }}
-          KP2BW_CONTAINER_BW_VERSION: ${{ needs.prepare.outputs.bw }}
+          KP2BW_CONTAINER_BW_VERSION: ${{ matrix.cli == 'vw' && needs.prepare.outputs.vw || needs.prepare.outputs.bw }}
+          KP2BW_CONTAINER_CLI_PACKAGE: ${{ matrix.cli == 'vw' && '@kjanat/vaultwarden-cli' || '@bitwarden/cli' }}
+          KP2BW_CONTAINER_ARCH: ${{ matrix.arch }}
         run: uv run python tests/container_image_test.py
       - name: Save the tested image
-        env: { ARCH: "${{ matrix.arch }}" }
-        run: docker save "kp2bw-production:$ARCH" --output "/tmp/container-$ARCH.tar"
+        env: { ARCH: "${{ matrix.arch }}", CLI: "${{ matrix.cli }}" }
+        run: docker save "kp2bw-production:$CLI-$ARCH" --output "/tmp/container-$CLI-$ARCH.tar"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: container-${{ matrix.arch }}
-          path: /tmp/container-${{ matrix.arch }}.tar
+          name: container-${{ matrix.cli }}-${{ matrix.arch }}
+          path: /tmp/container-${{ matrix.cli }}-${{ matrix.arch }}.tar
           compression-level: 0
           retention-days: 3
-      - if: always()
-        run: docker rm --force kp2bw-container-fixture || true
+      - cancel: server
 
   publish:
     if: inputs.publish
@@ -150,26 +173,39 @@ jobs:
           scope="${GITHUB_REPOSITORY,,}"
           token=$(curl --fail --silent --show-error --user "$GITHUB_ACTOR:$GH_TOKEN" \
             "https://ghcr.io/token?service=ghcr.io&scope=repository:$scope:pull,push" | jq --exit-status --raw-output .token)
-          status=$(curl --silent --show-error --output /tmp/existing-manifest --write-out '%{http_code}' \
-            --header "Authorization: Bearer $token" \
-            --header 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
-            "https://ghcr.io/v2/$scope/manifests/$VERSION")
-          case "$status" in
-            404) ;;
-            200) echo 'Release image already exists; refusing to overwrite it' >&2; exit 1 ;;
-            *) echo "Registry check failed with HTTP $status" >&2; exit 1 ;;
-          esac
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          tags=()
-          for arch in amd64 arm64; do
-            docker load --input "images/container-$arch/container-$arch.tar"
-            tag="$image:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$arch"
-            docker tag "kp2bw-production:$arch" "$tag"
-            docker push "$tag"
-            tags+=("$tag")
+          for release_tag in "$VERSION" "$VERSION-vw" "$VERSION-bw"; do
+            status=$(curl --silent --show-error --output /tmp/existing-manifest --write-out '%{http_code}' \
+              --header "Authorization: Bearer $token" \
+              --header 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/$scope/manifests/$release_tag")
+            case "$status" in
+              404) ;;
+              200) echo "Release image $release_tag already exists; refusing to overwrite it" >&2; exit 1 ;;
+              *) echo "Registry check failed with HTTP $status" >&2; exit 1 ;;
+            esac
           done
-          docker buildx imagetools create --tag "$image:$VERSION" "${tags[@]}"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          for cli in vw bw; do
+            tags=()
+            for arch in amd64 arm64; do
+              docker load --input "images/container-$cli-$arch/container-$cli-$arch.tar"
+              tag="$image:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$cli-$arch"
+              docker tag "kp2bw-production:$cli-$arch" "$tag"
+              docker push "$tag"
+              tags+=("$tag")
+            done
+            docker buildx imagetools create --tag "$image:$VERSION-$cli" "${tags[@]}"
+            if [[ "$STABLE" == true ]]; then
+              [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
+              major="${BASH_REMATCH[1]}"
+              minor="$major.${BASH_REMATCH[2]}"
+              docker buildx imagetools create --tag "$image:$cli" --tag "$image:$major-$cli" \
+                --tag "$image:$minor-$cli" "$image:$VERSION-$cli"
+            fi
+            docker buildx imagetools inspect "$image:$VERSION-$cli" >> "$GITHUB_STEP_SUMMARY"
+          done
+          docker buildx imagetools create --tag "$image:$VERSION" "$image:$VERSION-vw"
           if [[ "$STABLE" == true ]]; then
-            docker buildx imagetools create --tag "$image:latest" "$image:$VERSION"
+            docker buildx imagetools create --tag "$image:latest" --tag "$image:$major" \
+              --tag "$image:$minor" "$image:$VERSION-vw"
           fi
-          docker buildx imagetools inspect "$image:$VERSION" >> "$GITHUB_STEP_SUMMARY"

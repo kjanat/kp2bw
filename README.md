@@ -74,10 +74,20 @@ with advantages over the built-in Bitwarden importer:
 
 ## Container
 
-Release images are available as `ghcr.io/kjanat/kp2bw:<version>` for Linux amd64 and arm64. Version tags are not
-overwritten by the release workflow; `:latest` follows stable releases. Each image includes Python, Node and the exact
-Bitwarden CLI used in its image tests. Inspect that version with `docker run --rm --entrypoint bw
-ghcr.io/kjanat/kp2bw:latest --version`.
+Release images support Linux amd64 and arm64. The default image uses `@kjanat/vaultwarden-cli`; choose a `-bw` tag for
+`@bitwarden/cli`. Both variants are tested as production images on both architectures.
+
+| Tags                                         | CLI             | Updates                        |
+| -------------------------------------------- | --------------- | ------------------------------ |
+| `<version>`, `<version>-vw`                  | Vaultwarden CLI | Never overwritten              |
+| `<version>-bw`                               | Bitwarden CLI   | Never overwritten              |
+| `latest`, `vw`, `<major>`, `<major>.<minor>` | Vaultwarden CLI | Stable releases                |
+| `<major>-vw`, `<major>.<minor>-vw`           | Vaultwarden CLI | Stable releases in that series |
+| `bw`, `<major>-bw`, `<major>.<minor>-bw`     | Bitwarden CLI   | Stable releases in that series |
+
+Images are published under `ghcr.io/kjanat/kp2bw`. OCI labels identify the kp2bw version, source revision, CLI package
+and CLI version. Inspect the installed CLI with `docker run --rm --entrypoint bw ghcr.io/kjanat/kp2bw:latest --version`.
+Use a separate state volume for each CLI variant.
 
 Keep login state and logs in a persistent volume; mount the database directory read-only. No published ports are needed.
 The default command is `kp2bw`; use `--entrypoint bw` to configure the server or log in with password/2FA prompts.
@@ -100,11 +110,11 @@ PowerShell:
 
 ```powershell
 docker volume create kp2bw-state
-docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data `
+docker run --rm -it --mount "type=volume,src=kp2bw-state,dst=/data" `
   --entrypoint bw ghcr.io/kjanat/kp2bw:latest config server https://vault.example.com
-docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data `
+docker run --rm -it --mount "type=volume,src=kp2bw-state,dst=/data" `
   --entrypoint bw ghcr.io/kjanat/kp2bw:latest login
-docker run --rm -it --mount type=volume,src=kp2bw-state,dst=/data `
+docker run --rm -it --mount "type=volume,src=kp2bw-state,dst=/data" `
   --mount "type=bind,src=$($PWD.Path)/vault,dst=/source,readonly" `
   ghcr.io/kjanat/kp2bw:latest /source/vault.kdbx --keepass-keyfile /source/key.key
 ```
@@ -114,7 +124,7 @@ Omit `--keepass-keyfile` if the database has none. The examples import into the 
 runs, pass existing host variables with Docker's `--env KP2BW_KEEPASS_PASSWORD`, `--env KP2BW_BITWARDEN_PASSWORD` and
 `--env KP2BW_YES` before the image name; omit `-it`.
 
-The image runs as UID/GID **10001**, with `BITWARDENCLI_APPDATA_DIR=/data/bw` and logs in `/data/logs`. Docker
+The image runs as UID/GID **10001** in `/w`, with `BITWARDENCLI_APPDATA_DIR=/data/bw` and logs in `/data/logs`. Docker
 initializes named volumes with the required ownership. For bind-mounted state, give UID 10001 write access; for the
 source directory and keyfile, give it traversal/read access (for example through a per-user ACL). Replacing the
 container retains authentication when `/data` is reused. `docker stop` forwards termination to kp2bw and its child

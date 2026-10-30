@@ -2,3 +2,5 @@
 !Dockerfile
 !dist/
 !dist/kp2bw-*.whl
+!scripts/
+!scripts/vw-bw.sh
