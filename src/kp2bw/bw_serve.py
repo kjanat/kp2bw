@@ -12,7 +12,8 @@ import signal
 import socket
 import subprocess
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from types import FrameType, TracebackType
 from typing import Any, NamedTuple, Self, cast
 
@@ -693,6 +694,50 @@ def _resolve_http_timeout() -> float:
         )
         return _HTTP_TIMEOUT_MAX_S
     return value
+
+
+class _UploadCacheGate:
+    """Allow parallel uploads, but refresh the shared CLI cache exclusively."""
+
+    def __init__(self) -> None:
+        self.loop = asyncio.get_running_loop()
+        self._condition = asyncio.Condition()
+        self._uploads = 0
+        self._refreshing = False
+        self._waiting = 0
+
+    @asynccontextmanager
+    async def uploading(self) -> AsyncGenerator[None]:
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: not self._refreshing and not self._waiting
+            )
+            self._uploads += 1
+        try:
+            yield
+        finally:
+            async with self._condition:
+                self._uploads -= 1
+                self._condition.notify_all()
+
+    @asynccontextmanager
+    async def refreshing(self) -> AsyncGenerator[None]:
+        async with self._condition:
+            self._waiting += 1
+            try:
+                await self._condition.wait_for(
+                    lambda: not self._refreshing and not self._uploads
+                )
+                self._refreshing = True
+            finally:
+                self._waiting -= 1
+                self._condition.notify_all()
+        try:
+            yield
+        finally:
+            async with self._condition:
+                self._refreshing = False
+                self._condition.notify_all()
 
 
 class BitwardenServeClient:
@@ -1691,21 +1736,25 @@ class BitwardenServeClient:
 
         A just-created item can be momentarily unresolvable by ``bw serve``'s
         attachment endpoint, which resolves ``itemid`` from its local vault
-        cache rather than from the server.  On such a not-found failure, force a
-        vault sync (so freshly created IDs become visible) and retry once before
-        treating the upload as failed.  Bitwarden rate-limit rejections are
+        cache rather than from the server. On such a not-found failure, wait for
+        other uploads to finish and restore item visibility before one retry.
+        The recovery read forces a vault sync only if the item is still missing.  Bitwarden rate-limit rejections are
         waited out and retried; see :func:`send_with_rate_limit_retry`.
         """
+        gate = getattr(self, "_upload_cache_gate", None)
+        if gate is None or gate.loop is not asyncio.get_running_loop():
+            gate = self._upload_cache_gate = _UploadCacheGate()
         for attempt in range(2):
-            resp = await self._send_async_with_rate_limit_retry(
-                lambda: client.post(
-                    "/attachment",
-                    params={"itemid": item_id},
-                    files={"file": (filename, data)},
-                ),
-                method="POST",
-                path="/attachment",
-            )
+            async with gate.uploading():
+                resp = await self._send_async_with_rate_limit_retry(
+                    lambda: client.post(
+                        "/attachment",
+                        params={"itemid": item_id},
+                        files={"file": (filename, data)},
+                    ),
+                    method="POST",
+                    path="/attachment",
+                )
             try:
                 parsed: Any = resp.json()
             except ValueError:
@@ -1733,17 +1782,29 @@ class BitwardenServeClient:
                 if parsed is None:
                     message += " (non-JSON response)"
 
-            # A freshly created item may not yet be in bw serve's local cache;
-            # sync once so its ID resolves, then retry the upload.
+            # Recover item visibility without clearing the CLI cache while
+            # other attachment uploads are still using it.
             if attempt == 0 and _is_missing_item_error(resp.status_code, message):
                 logger.log(
                     VERBOSE,
                     f"Item {item_id} not yet resolvable for attachment "
-                    f"{filename!r}; syncing vault and retrying",
+                    f"{filename!r}; checking item visibility before retrying",
                 )
-                await self._send_async_with_rate_limit_retry(
-                    lambda: client.post("/sync"), method="POST", path="/sync"
-                )
+                async with gate.refreshing():
+                    # get_item forces sync only if the item is still missing,
+                    # then waits for cache visibility before allowing uploads.
+                    recovery = asyncio.create_task(
+                        asyncio.to_thread(self.get_item, item_id)
+                    )
+                    try:
+                        await asyncio.shield(recovery)
+                    except asyncio.CancelledError:
+                        # Cancellation cannot stop a running sync thread. Keep
+                        # the gate closed until it stops touching the cache.
+                        try:
+                            await recovery
+                        finally:
+                            raise
                 continue
 
             raise BitwardenClientError(
