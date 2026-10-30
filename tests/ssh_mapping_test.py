@@ -114,6 +114,13 @@ def main() -> None:
             "user",
             "{REF:P@I:" + key_source.uuid.hex.upper() + "}",
         )
+        chained_alias = db.add_entry(
+            db.root_group,
+            "Chained login alias",
+            "{REF:U@I:" + selected_alias.uuid.hex.upper() + "}",
+            "{REF:P@I:" + selected_alias.uuid.hex.upper() + "}",
+            url="https://chained-login.example.test",
+        )
         db.save()
         converter = Converter(
             str(path),
@@ -137,6 +144,15 @@ def main() -> None:
             converter.entries[selected_alias.uuid.hex.upper()]
         )[2]
         assert selected_item["type"] == 5 and selected_item.get("sshKey")
+        chained_item = converter._unpack_entry(
+            converter._entries[chained_alias.uuid.hex.upper()]
+        )[2]
+        assert chained_item["type"] == 1
+        assert chained_item["login"]["username"] == "user"
+        assert chained_item["login"]["password"] == private
+        assert chained_item["login"]["uris"] == [
+            {"uri": "https://chained-login.example.test", "match": None}
+        ]
         assert (
             converter.unpack_entry(converter.entries[key_source.uuid.hex.upper()])[2][
                 "type"

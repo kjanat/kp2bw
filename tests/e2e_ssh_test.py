@@ -36,6 +36,7 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     mapping.write_text(
         json.dumps([
             {"group": "SSH", "fields": {"privateKey": "Private Key"}},
+            {"group": "Referenced keys", "fields": {"privateKey": "Password"}},
             {
                 "field": {"name": "Type", "value": "Excluded"},
                 "fields": {"privateKey": "Private Key"},
@@ -62,6 +63,22 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
         url="https://ssh-login.example.test",
     )
     original = private_key()
+    key_source = db.add_entry(
+        db.root_group, "Referenced key source", "chain-user", original
+    )
+    chain_target = db.add_entry(
+        db.add_group(db.root_group, "Referenced keys"),
+        "Referenced SSH target",
+        "{REF:U@I:" + key_source.uuid.hex.upper() + "}",
+        "{REF:P@I:" + key_source.uuid.hex.upper() + "}",
+    )
+    chain_alias = db.add_entry(
+        db.root_group,
+        "Chained SSH login alias",
+        "{REF:U@I:" + chain_target.uuid.hex.upper() + "}",
+        "{REF:P@I:" + chain_target.uuid.hex.upper() + "}",
+        url="https://chained-login.example.test",
+    )
     entry.set_custom_property("Private Key", original, protect=True)
     broken = db.add_entry(group, "Synthetic unsupported key", "", "")
     broken.set_custom_property("Private Key", "unsupported synthetic key", protect=True)
@@ -71,10 +88,28 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
         run_migration(source, "synthetic", password, env)
 
     alias_revision: str | None = None
+    chain_revisions: tuple[str | None, str | None] | None = None
 
     def read() -> tuple[BwItemResponse, BwItemResponse]:
-        nonlocal alias_revision
+        nonlocal alias_revision, chain_revisions
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            target = bw.get_item_by_uuid(chain_target.uuid.hex.upper())
+            chained = bw.get_item_by_uuid(chain_alias.uuid.hex.upper())
+            assert target is not None and chained is not None
+            target, chained = bw.get_item(target["id"]), bw.get_item(chained["id"])
+            assert target["type"] == 5 and target.get("sshKey")
+            chain_login = chained.get("login")
+            assert chained["type"] == 1 and chain_login is not None
+            assert chain_login["username"] == "chain-user"
+            assert chain_login["password"] == original
+            assert any(
+                uri["uri"] == "https://chained-login.example.test"
+                for uri in chain_login["uris"]
+            )
+            revisions = (target.get("revisionDate"), chained.get("revisionDate"))
+            if chain_revisions is not None:
+                assert revisions == chain_revisions
+            chain_revisions = revisions
             assert bw.get_item_by_uuid(excluded.uuid.hex.upper()) is None
             login = bw.get_item_by_uuid(alias.uuid.hex.upper())
             assert login is not None
