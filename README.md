@@ -133,6 +133,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
        [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
        [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
        [--include-recycle-bin | --no-include-recycle-bin]
+       [--entry-id UUID] [--item-id UUID]
        [--metadata | --no-metadata] [--update | --no-update] [--force-update]
        [--map-templates] [--template-map JSON] [--ssh-map JSON]
        [--include-oversize-secrets] [--folder | --no-folder] [--uri-match MODE]
@@ -175,6 +176,8 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `-V, --version`                          | Print the installed `kp2bw` version and exit                                                                                                                                                        | -                                     |
 | `--doctor`                               | Print environment diagnostics (kp2bw/bw/server versions, install method, `.env` detection) and exit; non-zero exit when the bw CLI is unusable                                                      | -                                     |
 | `--redact`                               | With `--doctor`: mask the server URL and home-anchored paths so the report is safe to paste in a public issue                                                                                       | -                                     |
+| `--entry-id UUID`                        | Sync only this KeePass entry; intersects existing import and destination filters                                                                                                                    | —                                     |
+| `--item-id UUID`                         | Sync only this existing Bitwarden item using its KeePass UUID stamp                                                                                                                                 | —                                     |
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 
@@ -236,6 +239,13 @@ signature, and a re-run that finds an item's current content no longer matching 
 (kp2bw's own writes restamp, so they never self-trip) and **preserves your edit**, listing it as `protected` in the
 summary. Pass `--force-update` (env `KP2BW_FORCE_UPDATE`) to make KeePass win regardless. Unchanged re-runs stay
 idempotent, and items imported before this existed are adopted normally on their first re-run.
+
+To retry just one item, use `kp2bw vault.kdbx --entry-id <KeePass-UUID>` or `--item-id <Bitwarden-UUID>`. Add
+`--force-update` to overwrite an edit on that item alone. When both IDs are supplied, they must identify the same
+source. Unknown, ambiguous or excluded IDs stop before writes. A new source selected by UUID can be created, but
+selection never adopts another item by title. A selected REF alias is imported separately; its referenced entries are
+read without being written. `--no-update` still preserves existing content and attachments; collection membership may
+sync. Selectors apply only to migration, not maintenance modes.
 
 Every migrated item carries a plain-text `KP2BW_ID` custom field — the KeePass UUID kp2bw uses to match entries on
 re-runs so nothing duplicates. Once you're satisfied the migration is complete and you're ready to fully adopt

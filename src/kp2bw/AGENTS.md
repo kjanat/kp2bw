@@ -202,6 +202,10 @@ src/kp2bw/
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.
 
+- `--entry-id` / `--item-id` resolve one stable source/destination association before writes. Selection checks all visible
+  stamps for ambiguity and intersects destination scope; it never uses legacy title adoption. Only the selected source
+  and its REF dependencies are parsed, and only the selected source is written. A selected alias stays separate.
+  Import filters apply to the selected source; references may read excluded dependencies without writing them.
 - Attachment association updates force a server sync before their verification read. A successful PUT may precede the
   official CLI's local-cache update; old copies remain until the server-backed read confirms the new associations.
 

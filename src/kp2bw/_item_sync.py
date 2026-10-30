@@ -182,7 +182,8 @@ def content_signature(item: BwItemResponse | BwItemCreate) -> str:
         )
         blob = repr(
             (*native_content, history_signature(item))
-            if has_managed_history(item) else native_content
+            if has_managed_history(item)
+            else native_content
         )
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
     parts = _content_parts(item)

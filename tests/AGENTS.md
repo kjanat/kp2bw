@@ -117,3 +117,7 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 - `e2e_ssh_test.py` checks native key creation, rotation, unchanged revisions, unsupported-source retention and manual
   edit protection with both CLIs. Its standalone entrypoint reuses a verified test profile. `ssh_mapping_test.py`
   verifies policy rejection precedes folder, collection and item operations.
+
+- `item_selection_test.py` verifies selector identity, scope, REF dependencies and preflight rejection.
+  `e2e_item_selection_test.py` checks selected creation, updates, forced overwrite, attachments and unchanged controls
+  with both supported CLIs.

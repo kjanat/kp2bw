@@ -4,10 +4,12 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import re
+import shlex
 import time
 from collections.abc import Mapping
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, replace
 from itertools import islice
 from pathlib import Path
@@ -82,6 +84,7 @@ from ._item_sync import (
     sync_stamp_generation,
     sync_stamp_matches,
 )
+from ._selection import ItemSelection, resolve_selection, source_uuid
 from ._source_fields import source_field_name, source_field_origin
 from ._ssh_mapping import SshRule, apply_ssh_rule
 from ._templates import TemplateRule, apply_template, recognize_template, template_uuid
@@ -110,6 +113,8 @@ from .uri_mapping import (
     build_login_uris,
     is_android_app_key,
     is_url_attribute_key,
+    match_value_names,
+    parse_match_name,
     url_attribute_index,
 )
 
@@ -250,7 +255,7 @@ def _print_summary(
     if n_protected:
         console.print(
             f"  [magenta]{n_protected:{w}d}[/magenta] protected (edited in "
-            f"Bitwarden; use --force-update to overwrite)"
+            f"Bitwarden; see the item-specific retry above)"
         )
     if n_collection_update:
         console.print(
@@ -417,10 +422,16 @@ class Converter:
         ssh_rules: tuple[SshRule, ...] = (),
         archive_history: bool = False,
         migrate_password_history: bool = True,
-
         checkpoint_path: str | None = None,
+        entry_id: str | None = None,
+        item_id: str | None = None,
     ) -> None:
         """Initialise the converter with KeePass source and Bitwarden target settings."""
+        self._selected_entry_id = (
+            source_uuid(entry_id) if entry_id is not None else None
+        )
+        self._selected_item_id = item_id
+        self._selection: ItemSelection | None = None
         self._attachment_plans: dict[str, AttachmentPlan] = {}
         self._checkpoint_path = checkpoint_path
         self._checkpoint: AttachmentCheckpoint | None = None
@@ -997,19 +1008,19 @@ class Converter:
             template = template_uuid(props.get("_etm_template_uuid") or "")
             if template not in templates_present:
                 template = None
-            selected = [
+            matching_rules = [
                 rule
                 for rule in self._ssh_rules
                 if rule.matches(
                     self._generate_folder_name(source) or "", template, fields
                 )
             ]
-            if len(selected) > 1:
+            if len(matching_rules) > 1:
                 raise ConversionError(
                     "An entry matches multiple SSH mapping rules; make the selectors unambiguous"
                 )
-            if selected:
-                self._ssh_sources[source.uuid.hex.upper()] = (selected[0], fields)
+            if matching_rules:
+                self._ssh_sources[source.uuid.hex.upper()] = (matching_rules[0], fields)
         if self._map_templates:
             templates: dict[str, TemplateRule] = {}
             for source in entries:
@@ -1030,6 +1041,50 @@ class Converter:
                     self._entry_templates[source.uuid.hex.upper()] = templates[
                         identifier
                     ]
+
+        if self._selection is not None:
+            matches = [
+                e for e in entries if e.uuid.hex.upper() == self._selection.source_id
+            ]
+            if len(matches) != 1:
+                raise ConversionError("Selected KeePass entry is missing or ambiguous")
+            selected = matches[0]
+            if (
+                (
+                    not self._include_recyclebin
+                    and self._is_in_recyclebin(selected, recyclebin_group)
+                )
+                or (self._skip_expired and selected.expired)
+                or (
+                    self._import_tags
+                    and not set(self._import_tags).intersection(selected.tags)
+                )
+            ):
+                raise ConversionError(
+                    "Selected KeePass entry is excluded by import filters"
+                )
+            needed = {self._selection.source_id}
+            pending = [selected]
+            while pending:
+                current = pending.pop()
+                for member in self._member_reference_resolving_dict:
+                    value = getattr(current, member)
+                    if not value or KP_REF_IDENTIFIER not in value:
+                        continue
+                    _, lookup, target = self._parse_kp_ref_string(value)
+                    if lookup != "I":
+                        raise ConversionError("Unsupported selected-entry REF lookup")
+                    target = source_uuid(target)
+                    if target in needed:
+                        continue
+                    dependencies = [e for e in entries if e.uuid.hex.upper() == target]
+                    if len(dependencies) != 1:
+                        raise ConversionError(
+                            "Selected entry has a missing or ambiguous REF dependency"
+                        )
+                    needed.add(target)
+                    pending.extend(dependencies)
+            entries = [e for e in entries if e.uuid.hex.upper() in needed]
         total_entries: int = len(entries)
         skipped_recyclebin = 0
         skipped_expired = 0
@@ -1043,14 +1098,16 @@ class Converter:
             ) == "1":
                 continue
             # Skip recycle bin entries unless explicitly included
-            if not self._include_recyclebin and self._is_in_recyclebin(
-                entry, recyclebin_group
+            if (
+                self._selection is None
+                and not self._include_recyclebin
+                and self._is_in_recyclebin(entry, recyclebin_group)
             ):
                 skipped_recyclebin += 1
                 continue
 
             # Skip expired entries if requested
-            if self._skip_expired and entry.expired:
+            if self._selection is None and self._skip_expired and entry.expired:
                 skipped_expired += 1
                 logger.log(VERBOSE, f"Skipping expired entry: {entry.title}")
                 continue
@@ -1065,7 +1122,7 @@ class Converter:
                 continue
 
             # Normal entry
-            if self._import_tags:
+            if self._import_tags and self._selection is None:
                 for tag in self._import_tags:
                     if tag in entry.tags:
                         self._add_bw_entry_to_entries_dict(entry)
@@ -1406,6 +1463,7 @@ class Converter:
 
             if (
                 credentials_match
+                and self._selection is None
                 and canonical_result is not None
                 and ref_item is not None
             ):
@@ -1818,6 +1876,52 @@ class Converter:
         stamp_content(payload)
         return payload
 
+    def _retry_item(self, source_id: str, item_id: str, *, force: bool = False) -> str:
+        """Return a shell-quoted retry without copying credentials into logs."""
+        args = [
+            "kp2bw",
+            self._keepass_file_path,
+            "--entry-id",
+            source_id,
+            "--item-id",
+            item_id,
+        ]
+        if self._bitwarden_organization_id:
+            args.extend(["--bitwarden-org", self._bitwarden_organization_id])
+        if self._bitwarden_coll_id:
+            args.extend(["--bitwarden-collection", self._bitwarden_coll_id])
+        args.extend(["--path-to-name-skip", str(self._path2nameskip)])
+        for flag, enabled in (
+            ("path-to-name", self._path2name),
+            ("metadata", self._migrate_metadata),
+            ("folder", self._create_folders),
+            ("skip-expired", self._skip_expired),
+            ("include-recycle-bin", self._include_recyclebin),
+            ("interpret-uri-syntax", self._interpret_uri_syntax),
+            ("totp-pps", self._totp_pps),
+        ):
+            args.append(f"--{'' if enabled else 'no-'}{flag}")
+        if self._include_oversize_secrets:
+            args.append("--include-oversize-secrets")
+        if self._import_tags:
+            args.extend(["--import-tags", *self._import_tags])
+        args.extend([
+            "--uri-match",
+            next(
+                name
+                for name in match_value_names()
+                if parse_match_name(name) == self._uri_match
+            ),
+        ])
+        if self._keepass_keyfile_path:
+            args.extend(["--keepass-keyfile", self._keepass_keyfile_path])
+        args.append("--update")
+        if force:
+            args.append("--force-update")
+        if os.name == "nt":
+            return "& " + " ".join("'" + arg.replace("'", "''") + "'" for arg in args)
+        return shlex.join(args)
+
     def _reconcile_existing_item(
         self,
         bw: BitwardenServeClient,
@@ -1886,8 +1990,11 @@ class Converter:
             or (self._is_user_modified(existing) and not self._force_update_all)
         ):
             logger.warning(
-                "Attachment associations on item %s were edited; preserving its files",
+                "Item %s has modified content or attachment associations; preserving its files. Retry: %s",
                 item_id,
+                self._retry_item(
+                    kp_uuid, item_id, force=bool(item_kp2bw_sync(existing))
+                ),
             )
             return "protected", [], {}
 
@@ -1949,8 +2056,8 @@ class Converter:
                 ):
                     logger.warning(
                         f"-- Entry {name!r}: modified in Bitwarden since the last "
-                        f"sync; preserving your edit (use --force-update to "
-                        f"overwrite with KeePass)"
+                        f"sync; preserving your edit. To overwrite this item: "
+                        f"{self._retry_item(kp_uuid, item_id, force=True)}"
                     )
                     return "protected", [], {}
                 if repair_sync_stamp:
@@ -2022,6 +2129,7 @@ class Converter:
         except (BitwardenClientError, ConversionError) as exc:
             logger.warning(
                 f"-- Entry {name!r}: update failed; no further changes attempted: {exc}"
+                f". Retry this item: {self._retry_item(kp_uuid, item_id)}"
             )
             # The content/collection PUT was rejected, so leave the item wholly
             # untouched: syncing attachments now would half-mutate it (stale
@@ -2549,7 +2657,9 @@ class Converter:
         if records_from_fields(persisted.get("fields") or []) != records:
             raise ConversionError("Attachment associations were not persisted")
 
-    def _create_bitwarden_items_for_entries(self) -> int:
+    def _create_bitwarden_items_for_entries(
+        self, client: BitwardenServeClient | None = None
+    ) -> int:
         """Create entries via ``bw serve`` HTTP API and upload attachments.
 
         Returns the count of non-fatal failures (rejected creates + updates +
@@ -2592,10 +2702,14 @@ class Converter:
         with (
             progress,
             ExitStack() as checkpoint_resources,
-            BitwardenServeClient(
-                self._bitwarden_password,
-                org_id=self._bitwarden_organization_id,
-                collection_id=fixed_coll_id,
+            (
+                nullcontext(client)
+                if client is not None
+                else BitwardenServeClient(
+                    self._bitwarden_password,
+                    org_id=self._bitwarden_organization_id,
+                    collection_id=fixed_coll_id,
+                )
             ) as bw,
         ):
             if any(
@@ -2653,9 +2767,15 @@ class Converter:
                 # stamp. Only when neither matches is a new item created — so
                 # distinct entries that share a title each get their own item
                 # instead of collapsing onto one (the old (folder, title) bug).
-                existing = bw.get_item_by_uuid(key)
+                existing = (
+                    bw.get_item(self._selection.destination_id)
+                    if self._selection is not None and self._selection.destination_id
+                    else None
+                    if self._selection is not None
+                    else bw.get_item_by_uuid(key)
+                )
                 adopted = False
-                if existing is None:
+                if existing is None and self._selection is None:
                     # Fallback for pre-stamp legacy items only. Keyed on the
                     # KeePass (folder, name); under --no-folder those items were
                     # created with folderId=None, so this folder-based claim can
@@ -2890,6 +3010,37 @@ class Converter:
         Returns the number of non-fatal failures (rejected entry creates plus
         updates plus attachment uploads); ``0`` means everything succeeded.
         """
+        self._attachment_plans.clear()
+        if self._selected_entry_id is not None or self._selected_item_id is not None:
+            fixed_collection = self._bitwarden_coll_id
+            if fixed_collection in COLLECTION_FOLDER_MODES:
+                fixed_collection = None
+            with BitwardenServeClient(
+                self._bitwarden_password,
+                org_id=self._bitwarden_organization_id,
+                collection_id=fixed_collection,
+            ) as bw:
+                visible = bw.list_items()
+                scoped = bw.list_items(
+                    organization_id=self._bitwarden_organization_id,
+                    collection_id=fixed_collection,
+                )
+                self._selection = resolve_selection(
+                    self._selected_entry_id,
+                    self._selected_item_id,
+                    visible,
+                    {item["id"] for item in scoped},
+                )
+                self._load_keepass_data()
+                self._resolve_entries_with_references()
+                selected = self._entries.get(self._selection.source_id)
+                if selected is None:
+                    raise ConversionError(
+                        "Selected entry could not be resolved; no items written"
+                    )
+                self._entries = {self._selection.source_id: selected}
+                return self._create_bitwarden_items_for_entries(bw)
+
         # load keepass data from database
         self._load_keepass_data()
 

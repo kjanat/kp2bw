@@ -131,6 +131,13 @@
 
 	const rerunOptions: Option[] = [
 		{
+			flag: '--entry-id UUID, --item-id UUID',
+			env: 'CLI only',
+			default: 'All eligible entries',
+			detail:
+				'Sync one KeePass entry UUID or one existing Bitwarden item UUID. Both selectors must agree when combined. Unknown, ambiguous or excluded IDs fail before writes. Selection intersects import and destination filters, and never adopts by title. REF dependencies are read without being written; the selected alias becomes a separate item. Combine with --force-update to overwrite only this item; --no-update still preserves its content and attachments. Migration only.',
+		},
+		{
 			flag: '--update, --no-update',
 			env: 'KP2BW_UPDATE',
 			default: 'On',
