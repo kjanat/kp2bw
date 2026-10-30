@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
+from convert_update_test import FakeBw, _as_bw, _make_desired, _make_existing
 from pykeepass import create_database
 
 from kp2bw._item_sync import (
@@ -95,6 +96,55 @@ def main() -> None:
     conv = Converter(
         "unused", None, None, "unused", None, None, False, 0, None, map_templates=True
     )
+    skip = Converter(
+        "unused",
+        None,
+        None,
+        "unused",
+        None,
+        None,
+        False,
+        0,
+        None,
+        map_templates=True,
+        update_existing=False,
+    )
+    passkey_login = _make_existing(collectionIds=["old"])
+    login = passkey_login.get("login")
+    assert login is not None
+    login["fido2Credentials"] = [
+        {
+            "credentialId": "synthetic-passkey",
+            "keyType": "public-key",
+            "keyAlgorithm": "ECDSA",
+            "keyCurve": "P-256",
+            "keyValue": "synthetic",
+            "rpId": "example.test",
+            "rpName": "Synthetic",
+            "userHandle": "synthetic",
+            "userName": "synthetic",
+            "userDisplayName": "Synthetic",
+            "counter": "0",
+            "discoverable": "true",
+            "creationDate": None,
+        }
+    ]
+    target = _make_desired(
+        type=3, card={"number": "4111111111111111"}, collectionIds=["new"]
+    )
+    client = FakeBw()
+    outcome, uploads, stale = skip._reconcile_existing_item(
+        _as_bw(client),
+        passkey_login,
+        None,
+        target,
+        [],
+        fixed_coll_id=None,
+        kp_uuid="source",
+    )
+    assert outcome == "collection" and not uploads and not stale
+    assert client.updates[0][1].get("login") == login
+    assert client.updates[0][1]["type"] == 1
     item = conv._create_bw_python_object(
         "Card",
         "notes",
@@ -161,6 +211,21 @@ def main() -> None:
         card = db.add_entry(db.root_group, "Account", "user", "secret")
         card.set_custom_property("_etm_template_uuid", template.uuid.hex)
         card.set_custom_property("Number", "4111111111111111")
+        alias = db.add_entry(
+            db.root_group,
+            "Ordinary alias",
+            "user",
+            f"{{REF:P@I:{card.uuid.hex.upper()}}}",
+        )
+        alias.url = "https://native-alias.example.test"
+        alias.otp = "otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP"
+        number_node = card._element.find("./String[Key='Number']")
+        assert number_node is not None
+        duplicate_node = copy.deepcopy(number_node)
+        number_value = duplicate_node.find("Value")
+        assert number_value is not None
+        number_value.text = "5555555555554444"
+        card._element.append(duplicate_node)
         ordinary = db.add_entry(db.root_group, "Credit Card", "ordinary", "")
         db.save()
         for enabled in (False, True):
@@ -187,6 +252,24 @@ def main() -> None:
             assert items[card.uuid.hex.upper()]["type"] == (3 if enabled else 1)
             assert items[ordinary.uuid.hex.upper()]["type"] == 1
             assert (template.uuid.hex.upper() in items) is not enabled
+            if enabled:
+                mapped_card = items[card.uuid.hex.upper()]
+                assert mapped_card["card"] is not None and not mapped_card["card"].get(
+                    "number"
+                )
+                assert {
+                    field["value"]
+                    for field in mapped_card["fields"]
+                    if "Number" in field["name"]
+                } == {"4111111111111111", "5555555555554444"}
+                alias_item = items[alias.uuid.hex.upper()]
+                assert alias_item["type"] == 1
+                assert alias_item["login"]["password"] == "secret"
+                assert alias_item["login"]["totp"]
+                assert any(
+                    uri["uri"] == alias.url for uri in alias_item["login"]["uris"]
+                )
+
     print("template mapping tests passed")
 
 

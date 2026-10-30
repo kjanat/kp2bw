@@ -6,7 +6,13 @@ from dataclasses import replace
 from typing import cast
 from unittest.mock import MagicMock
 
-from convert_update_test import UpdateTestConverter, _make_existing
+from convert_update_test import (
+    FakeBw,
+    UpdateTestConverter,
+    _as_bw,
+    _make_desired,
+    _make_existing,
+)
 
 from kp2bw._attachments import (
     FileRecord,
@@ -82,6 +88,27 @@ def check_persisted_mapping(failure: str | None) -> None:
 
 
 def main() -> None:
+    existing = _make_existing(
+        collectionIds=["old"],
+        fields=fields_from_records({
+            "a" * 64: FileRecord("attachment", "b" * 64, "c" * 64)
+        }),
+    )
+    stamp_content(existing)
+    existing["notes"] = "preserve destination edit"
+    client = FakeBw(fail_get_attachment=True)
+    outcome, uploads, stale = UpdateTestConverter(update_existing=False).reconcile(
+        _as_bw(client),
+        existing,
+        None,
+        _make_desired(collectionIds=["new"]),
+        [],
+        fixed_coll_id=None,
+    )
+    assert outcome == "collection" and not uploads and not stale
+    assert client.updates[0][1]["notes"] == "preserve destination edit"
+    assert client.updates[0][1]["fields"] == existing["fields"]
+    assert client.updates[0][1]["collectionIds"] == ["old", "new"]
     for failure in (None, "sync", "lost-write"):
         check_persisted_mapping(failure)
     reserved = "KP2BW_FILE_" + "0" * 64

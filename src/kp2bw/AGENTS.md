@@ -92,7 +92,8 @@ src/kp2bw/
   duplicate originals use their ordinal among same-named references because KeePass binary indexes are not stable IDs.
   Stored hashes detect destination edits. Legacy matching must be unique; ambiguity fails without changing files.
   Replacement bytes and the updated association must both be verified before deleting that source's old ID. Failed
-  association writes retain old copies and make the run fail. Attachment metadata participates in content stamps,
+  association writes retain old copies and make the run fail. Reruns reuse a uniquely verified pending replacement
+  before uploading another copy, and recheck its bytes before persisting the association. Attachment metadata participates in content stamps,
   survives normal content updates, and is removed by `--strip-ids`. Removed source files are not automatically deleted.
   Content and attachment failures are non-fatal and counted; `convert()` returns the failure count and the CLI exits
   non-zero when it is non-zero. `--no-update` restores skip-only behavior (collection-membership sync still applies).
@@ -229,3 +230,6 @@ src/kp2bw/
   `_ssh_policy.py` applies organization membership exemptions and item restrictions. `require_ssh_supported()` checks
   these policies and server capability before conversion creates folders, collections or items. Missing metadata fails
   closed. Native SSH fields participate in content signatures, including manual-edit protection.
+
+- Template mapping resolves escaped source-field names before matching overrides and excludes migration bookkeeping.
+  Conflicting duplicate values remain custom fields. Login REF aliases remain separate when their target maps to a native non-login item.

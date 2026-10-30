@@ -1566,6 +1566,13 @@ class Converter:
                 separate_reason = self._ref_separate_item_reason(
                     kp_entry, custom_property_data.values, otp_result
                 )
+                target_id = self._item_field_value(ref_item, KP2BW_ID_FIELD_NAME)
+                rule = self._entry_templates.get(target_id or "")
+                if self._map_templates and rule is not None:
+                    planned_target = copy.deepcopy(ref_item)
+                    apply_template(planned_target, rule)
+                    if planned_target["type"] != BW_ITEM_TYPE_LOGIN:
+                        separate_reason = "a reference to a native non-login item"
                 existing_totp = ref_item["login"]["totp"]
                 if (
                     separate_reason is None
@@ -2990,7 +2997,7 @@ class Converter:
                     adopted = existing is not None
                 if existing is not None:
                     item_id = existing["id"]
-                    outcome, upload_atts, stale_by_name = self._reconcile_existing_item(
+                    outcome, upload_atts, _ = self._reconcile_existing_item(
                         bw,
                         existing,
                         folder,
@@ -3026,9 +3033,6 @@ class Converter:
                         if pair not in queued_atts:
                             queued_atts.add(pair)
                             unique_atts.append(att)
-                            old_id = stale_by_name.get(fname)
-                            if old_id is not None:
-                                pending_deletes.append((item_id, old_id, fname))
                     if unique_atts:
                         existing_uploads.append((item_id, unique_atts))
                     progress.advance(task1)
