@@ -1605,6 +1605,8 @@ class Converter:
                 separate_reason = self._ref_separate_item_reason(
                     kp_entry, custom_property_data.values, otp_result
                 )
+                if entry_key in self._ssh_sources:
+                    separate_reason = "an explicit SSH mapping"
                 target_id = self._item_field_value(ref_item, KP2BW_ID_FIELD_NAME)
                 rule = self._entry_templates.get(target_id or "")
                 ssh_source = self._ssh_sources.get(target_id or "")
@@ -2144,7 +2146,7 @@ class Converter:
             "skipped"
         )
 
-        if existing.get("type") == 5 and bw_item["type"] != 5:
+        if self._update_existing and existing.get("type") == 5 and bw_item["type"] != 5:
             logger.warning(
                 "Entry %s no longer yields a native SSH key; preserving its existing SSH item",
                 kp_uuid,
@@ -2152,9 +2154,13 @@ class Converter:
             return "failed", [], {}
         # Native types are reconciled only when their mapping is enabled.
         # The dedup index never adopts unstamped non-login items by name.
-        if existing.get("type") != BW_ITEM_TYPE_LOGIN and (
-            not (existing.get("type") in (2, 3, 4) and self._map_templates)
-            and not (existing.get("type") == 5 and self._ssh_rules)
+        if (
+            self._update_existing
+            and existing.get("type") != BW_ITEM_TYPE_LOGIN
+            and (
+                not (existing.get("type") in (2, 3, 4) and self._map_templates)
+                and not (existing.get("type") == 5 and self._ssh_rules)
+            )
         ):
             logger.log(
                 VERBOSE,
