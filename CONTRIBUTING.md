@@ -28,9 +28,11 @@ context; test fixtures, credentials, CLI profiles and repository development dep
 
 ```bash
 uv build --no-sources --wheel
+CLI_PACKAGE=@kjanat/vaultwarden-cli # Or @bitwarden/cli
+CLI_VERSION="$(npm view "$CLI_PACKAGE" version)"
 docker build --build-arg KP2BW_VERSION="$(uv version --short)" \
-  --build-arg BW_VERSION="$(bw --version)" --build-arg REVISION="$(git rev-parse HEAD)" \
-  --tag kp2bw-local .
+  --build-arg CLI_PACKAGE="$CLI_PACKAGE" --build-arg CLI_VERSION="$CLI_VERSION" \
+  --build-arg REVISION="$(git rev-parse HEAD)" --tag kp2bw-local .
 ```
 
 `container.yml` resolves exact CLI/base-image versions, builds and tests natively on both architectures, and saves the
