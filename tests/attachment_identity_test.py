@@ -246,6 +246,42 @@ def main() -> None:
     assert legacy.records[sources[1].source_id].attachment_id == "1"
     assert len({source.filename for source in legacy.sources}) == 2
     assert legacy.stale == {sources[1].source_id: "1"}
+    # Verification can fail after a collision rename uploads, while persistence
+    # records both old IDs. Repeated retries must recover that same upload.
+    pending_name = legacy.uploads[0].filename
+    legacy_remote = [("0", "notes.txt"), ("1", "notes.txt")]
+    data["collision-pending"] = sources[1].data
+    pending_remote = [*legacy_remote, ("collision-pending", pending_name)]
+    for _ in range(2):
+        retry = plan_attachments(
+            sources[:2], legacy.records, pending_remote, data.__getitem__
+        )
+        assert not retry.uploads
+        assert retry.sources[1].filename == pending_name
+        assert retry.records[sources[1].source_id].attachment_id == "collision-pending"
+        assert retry.previous_records == legacy.records
+        assert retry.stale == {sources[1].source_id: "1"}
+    data["collision-duplicate"] = sources[1].data
+    try:
+        plan_attachments(
+            sources[:2],
+            legacy.records,
+            [
+                *pending_remote,
+                ("collision-duplicate", pending_name.replace(").txt", "-1).txt")),
+            ],
+            data.__getitem__,
+        )
+    except ConversionError:
+        pass
+    else:
+        raise AssertionError("Ambiguous collision replacement was accepted")
+    data["collision-pending"] = b"unrelated bytes"
+    retry = plan_attachments(
+        sources[:2], legacy.records, pending_remote, data.__getitem__
+    )
+    assert len(retry.uploads) == 1 and retry.uploads[0].filename != pending_name
+    assert retry.records == legacy.records
     for legacy_sources, legacy_remote in (
         (sources[4:], [("4", "same.bin"), ("5", "same.bin")]),
         (sources[:2], [("0", "notes.txt")]),
