@@ -1104,9 +1104,13 @@ class BitwardenServeClient:
         logger.log(VERBOSE, "Syncing vault via bw serve")
         self._request("POST", "/sync", idempotent=True)
 
-    def sync(self) -> None:
-        """Force a vault sync (public API)."""
-        self._sync()
+    def sync(self, *, force: bool = False) -> None:
+        """Synchronise the vault, optionally bypassing the CLI revision cache."""
+        if force:
+            logger.log(VERBOSE, "Forcing vault sync via bw serve")
+            self._request("POST", "/sync", params={"force": "true"}, idempotent=True)
+        else:
+            self._sync()
 
     # ------------------------------------------------------------------
     # CRUD — folders

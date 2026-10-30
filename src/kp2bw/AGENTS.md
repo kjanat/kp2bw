@@ -177,3 +177,6 @@ src/kp2bw/
   `tests/bw_serve_upload_batch_test.py`, `tests/e2e_attachment_batch_test.py`.
 - `_bw_api_types.py` is generated — run `bash scripts/generate-bw-types.sh` after spec changes. CI checks for drift via
   `codegen-check.yml`.
+
+- Attachment association updates force a server sync before their verification read. A successful PUT may precede the
+  official CLI's local-cache update; old copies remain until the server-backed read confirms the new associations.

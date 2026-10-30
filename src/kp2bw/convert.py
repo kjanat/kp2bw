@@ -1827,6 +1827,9 @@ class Converter:
         ] + fields_from_records(records)
         self._stamp_content(full)
         bw.update_item(item_id, full)
+        # The CLI can acknowledge PUT before its local item cache reflects it.
+        # Read the server state before authorizing deletion of the old file.
+        bw.sync(force=True)
         persisted = bw.get_item(item_id)
         if records_from_fields(persisted.get("fields") or []) != records:
             raise ConversionError("Attachment associations were not persisted")
@@ -2053,14 +2056,17 @@ class Converter:
             for item_id, plan in self._attachment_plans.items():
                 try:
                     self._persist_attachment_plan(bw, item_id, plan, failed_uploads)
-                except BitwardenClientError, ConversionError:
+                except (BitwardenClientError, ConversionError) as exc:
                     n_update_failed += 1
                     failed_uploads.update(
                         (item_id, source.filename) for source in plan.sources
                     )
                     logger.warning(
-                        "Could not persist attachment associations on item %s; retaining old copies",
+                        "Could not persist attachment associations on item %s (%s); retaining old copies",
                         item_id,
+                        str(exc)
+                        if isinstance(exc, ConversionError)
+                        else type(exc).__name__,
                     )
             for item_id, old_id, fname in pending_deletes:
                 if (item_id, fname) in failed_uploads:
