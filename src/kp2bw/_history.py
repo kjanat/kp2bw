@@ -47,6 +47,12 @@ def history_signature(
 
 
 def _record_hash(record: BwPasswordHistory) -> str:
+    """Identify an imported record inside the same encrypted vault item.
+
+    This is not a password verifier or a credential store. The fingerprint is
+    stored only in the encrypted item containing the full historical password;
+    neither value is exposed in logs, previews or checkpoints.
+    """
     value = (record["password"], _history_time(record["lastUsedDate"]))
     return hashlib.sha256(json.dumps(value, ensure_ascii=True).encode()).hexdigest()
 

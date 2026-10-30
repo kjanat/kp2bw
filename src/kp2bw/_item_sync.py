@@ -176,6 +176,15 @@ def pre_fido2_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def pre_history_content_signature(item: BwItemResponse | BwItemCreate) -> str:
+    """Return the signature before native history became part of item content."""
+    parts = _content_parts(item)
+    fido2 = fido2_signature(item.get("login"))
+    return hashlib.sha256(
+        repr((*parts, fido2) if fido2 else parts).encode("utf-8")
+    ).hexdigest()
+
+
 def is_legacy_history_source(item: BwItemResponse | BwItemCreate) -> bool:
     """An authenticated pre-history stamp treats the marker name as source data."""
     if not has_managed_history(item):
@@ -185,12 +194,7 @@ def is_legacy_history_source(item: BwItemResponse | BwItemCreate) -> bool:
         for field in item.get("fields") or []
         if field.get("name") == KP2BW_SYNC_FIELD_NAME
     ]
-    parts = _content_parts(item)
-    fido2 = fido2_signature(item.get("login"))
-    previous = hashlib.sha256(
-        repr((*parts, fido2) if fido2 else parts).encode("utf-8")
-    ).hexdigest()
-    return stamps == [previous]
+    return stamps == [pre_history_content_signature(item)]
 
 
 def legacy_content_signature(item: BwItemResponse | BwItemCreate) -> str:
