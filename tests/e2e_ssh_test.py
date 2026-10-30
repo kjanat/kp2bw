@@ -40,7 +40,14 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     source = tmp / "ssh.kdbx"
     db = create_database(source, password="synthetic")
     group = db.add_group(db.root_group, "SSH")
-    entry = db.add_entry(group, "Synthetic SSH key", "", "")
+    entry = db.add_entry(group, "Synthetic SSH key", "ssh-user", "synthetic-password")
+    alias = db.add_entry(
+        db.root_group,
+        "Synthetic SSH login alias",
+        "{REF:U@I:" + entry.uuid.hex.upper() + "}",
+        "{REF:P@I:" + entry.uuid.hex.upper() + "}",
+        url="https://ssh-login.example.test",
+    )
     original = private_key()
     entry.set_custom_property("Private Key", original, protect=True)
     broken = db.add_entry(group, "Synthetic unsupported key", "", "")
@@ -50,8 +57,23 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     def migrate() -> None:
         _run_migration(source, "synthetic", password, env)
 
+    alias_revision: str | None = None
+
     def read() -> tuple[BwItemResponse, BwItemResponse]:
+        nonlocal alias_revision
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            login = bw.get_item_by_uuid(alias.uuid.hex.upper())
+            assert login is not None
+            login = bw.get_item(login["id"])
+            assert login["type"] == 1 and login["login"]["username"] == "ssh-user"
+            assert login["login"]["password"] == "synthetic-password"
+            assert any(
+                uri["uri"] == "https://ssh-login.example.test"
+                for uri in login["login"]["uris"]
+            )
+            if alias_revision is not None:
+                assert login["revisionDate"] == alias_revision
+            alias_revision = login["revisionDate"]
             native = bw.get_item_by_uuid(entry.uuid.hex.upper())
             fallback = bw.get_item_by_uuid(broken.uuid.hex.upper())
             assert native is not None and fallback is not None
