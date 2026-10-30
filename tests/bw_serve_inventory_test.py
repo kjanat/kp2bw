@@ -38,7 +38,7 @@ def main() -> None:
     items: list[dict[str, Any]] = [
         {
             "id": "one",
-            "name": "Account",
+            "name": "Café ☕ 日本語",
             "type": 1,
             "revisionDate": "new",
             "fields": [{"name": "KP2BW_ID", "value": "source", "type": 0}],
@@ -103,8 +103,12 @@ def main() -> None:
                 assert kwargs["env"]["VW_SESSION"] == "synthetic-session"
                 assert kwargs["env"]["BW_NOINTERACTION"] == "true"
                 assert kwargs["stdin"] == subprocess.DEVNULL
+                assert kwargs["encoding"] == "utf-8"
                 return subprocess.CompletedProcess(
-                    args, 0, json.dumps(items if args[2] == "items" else []), ""
+                    args,
+                    0,
+                    json.dumps(items if args[2] == "items" else [], ensure_ascii=False),
+                    "",
                 )
 
             client._http = httpx.Client(
