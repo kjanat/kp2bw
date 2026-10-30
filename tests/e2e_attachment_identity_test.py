@@ -1,5 +1,6 @@
 """Round-trip colliding original and generated attachments through the real CLI."""
 
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -26,12 +27,17 @@ def main() -> None:
         tmp = Path(directory)
         env = os.environ.copy()
         env.update(
-            BITWARDENCLI_APPDATA_DIR=str(tmp / "bw"),
+            BITWARDENCLI_APPDATA_DIR=env.get("KP2BW_E2E_BW_PROFILE", str(tmp / "bw")),
             NODE_EXTRA_CA_CERTS=cert,
             BW_NOINTERACTION="true",
         )
-        _run(["bw", "config", "server", server], env=env)
-        _login_session(env, email, password)
+        if env.get("KP2BW_E2E_BW_PROFILE"):
+            status = json.loads(_run(["bw", "status"], env=env))
+            assert status.get("serverUrl", "").rstrip("/") == server.rstrip("/")
+            assert status.get("userEmail", "").casefold() == email.casefold()
+        else:
+            _run(["bw", "config", "server", server], env=env)
+            _login_session(env, email, password)
         source = tmp / "collisions.kdbx"
         db = create_database(source, password="synthetic")
         entry = db.add_entry(db.root_group, "Attachment collisions", "user", "pw")
@@ -137,6 +143,24 @@ def main() -> None:
             assert set(after[1].values()).issubset({
                 att["id"] for att in full.get("attachments") or []
             })
+        first_key = source_file("original", "notes.txt", 1, "notes.txt", b"").source_id
+        expected[first_key] = b"replacement with rejected metadata"
+        with (
+            patch.dict(os.environ, env),
+            patch.object(
+                BitwardenServeClient,
+                "upload_attachments",
+                side_effect=AssertionError("Retry uploaded another copy"),
+            ),
+        ):
+            assert converter.convert() == 0
+        recovered = verify()
+        assert recovered[1][first_key] != after[1][first_key]
+        migrate()
+        assert verify() == recovered
+        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            item = bw.get_item_by_uuid(entry.uuid.hex.upper())
+            assert item is not None
             bw._request("DELETE", f"/object/item/{item['id']}")
     print("attachment collision, identity and replacement round trips passed")
 
