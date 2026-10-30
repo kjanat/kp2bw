@@ -1158,6 +1158,10 @@ def main() -> None:
 
         run_passkey_test(tmp, env, bw_password)
 
+        from e2e_preview_test import run_preview_test
+
+        run_preview_test(tmp, env, bw_password)
+
     # Scope fixtures run last so their org items do not enter personal goldens.
     from e2e_scope_test import main as run_scope_test
 

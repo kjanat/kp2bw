@@ -1,4 +1,4 @@
-"""Evaluate synced item-type policies before writing a native SSH item."""
+"""Evaluate synced item-type and personal-vault policies."""
 
 import json
 from collections.abc import Mapping, Sequence
@@ -55,27 +55,35 @@ def _restricted_types(policy: PolicyObject) -> frozenset[int]:
     return frozenset(cast(list[int], data))
 
 
-def require_ssh_policy_allowed(
+def require_item_policy_allowed(
     organizations: Sequence[PolicyObject],
     policies: Sequence[PolicyObject],
     organization_id: str | None,
+    item_type: int,
 ) -> None:
     """Apply type-15 restrictions and personal-ownership policy before mutation.
 
-    An applicable restriction blocks personal SSH items and SSH items in the
+    An applicable restriction blocks personal items and organization items in the
     restricting organization. A different organization without that restriction
     remains allowed, matching both clients' item visibility rules.
     """
+    kind = "SSH" if item_type == 5 else f"type-{item_type}"
     memberships = {_identifier(org.get("id")): org for org in organizations}
     if None in memberships:
         raise BitwardenClientError(
-            "Cannot verify SSH policy: invalid organization identity"
+            "Cannot verify item policy: invalid organization identity"
         )
     target = _identifier(organization_id)
     if target is not None and target not in memberships:
         raise BitwardenClientError(
-            "Cannot verify SSH policy: target organization is not in the synced profile"
+            "Cannot verify item policy: target organization is not in the synced profile"
         )
+    if target is not None:
+        membership = memberships[target]
+        if membership.get("status") != 2 or membership.get("enabled") is not True:
+            raise BitwardenClientError(
+                "Target organization membership must be confirmed and enabled before migration"
+            )
     restricted: set[str] = set()
     for policy in policies:
         if policy.get("enabled") is not True or policy.get("type") not in (5, 15):
@@ -83,17 +91,25 @@ def require_ssh_policy_allowed(
         identifier = _identifier(policy.get("organizationId"))
         if identifier is None:
             raise BitwardenClientError(
-                "Cannot verify SSH policy: policy has no organization identity"
+                "Cannot verify item policy: policy has no organization identity"
             )
         if not _applies(memberships.get(identifier)):
             continue
         if policy["type"] == 5 and target is None:
             raise BitwardenClientError(
-                "Organization policy forbids personal-vault SSH items"
+                f"Organization policy forbids personal-vault {kind} items"
             )
-        if policy["type"] == 15 and 5 in _restricted_types(policy):
+        if policy["type"] == 15 and item_type in _restricted_types(policy):
             restricted.add(identifier)
     if restricted and (target is None or target in restricted):
         raise BitwardenClientError(
-            "Organization policy forbids SSH items in the selected vault"
+            f"Organization policy forbids {kind} items in the selected vault"
         )
+
+
+def require_ssh_policy_allowed(
+    organizations: Sequence[PolicyObject],
+    policies: Sequence[PolicyObject],
+    organization_id: str | None,
+) -> None:
+    require_item_policy_allowed(organizations, policies, organization_id, 5)

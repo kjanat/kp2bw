@@ -23,6 +23,10 @@ def test_history_script() -> None:
     _run_script_main("history_test.py")
 
 
+def test_preview_script() -> None:
+    _run_script_main("preview_test.py")
+
+
 def test_bw_serve_attachment_script() -> None:
     _run_script_main("bw_serve_attachment_test.py")
 

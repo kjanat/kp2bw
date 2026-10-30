@@ -35,6 +35,7 @@ def check_native_updates() -> None:
         BwItemResponse,
         {
             "id": "item",
+            "type": 1,
             "fields": [],
             "login": {"password": "current"},
             "passwordHistory": [
@@ -67,6 +68,16 @@ def check_native_updates() -> None:
     assert sync_stamp_matches(altered, stamp), "Equivalent dates must not appear edited"
     altered_history[0]["password"] = "manual change"
     assert not sync_stamp_matches(altered, stamp)
+    for native_type in (2, 3, 4, 5):
+        native = copy.deepcopy(item)
+        native["type"] = native_type
+        native_stamp = content_signature(native)
+        history = native.get("passwordHistory")
+        assert history is not None
+        history[0]["password"] = "manual change"
+        assert not sync_stamp_matches(native, native_stamp), (
+            "Native item history edits must remain protected"
+        )
     newer: list[BwPasswordHistory] = [
         {"password": "new source", "lastUsedDate": "2021-01-01T00:00:00Z"}
     ]

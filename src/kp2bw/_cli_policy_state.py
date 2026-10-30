@@ -23,6 +23,13 @@ class CliPolicyState:
     api_url: str
     organizations: tuple[PolicyObject, ...]
     policies: tuple[PolicyObject, ...]
+    premium: bool | None = None
+
+
+def _premium(*values: object) -> bool | None:
+    if any(value is True for value in values):
+        return True
+    return False if all(value is False for value in values) else None
 
 
 def _object(value: object) -> dict[str, object]:
@@ -119,7 +126,15 @@ def parse_policy_state(
         )
         policies = _objects(state.get(prefix + "policies_policies"), record=True)
         policies += _objects(state.get(prefix + "policies_policiesNew"), record=True)
-        return CliPolicyState("bitwarden", api, organizations, policies)
+        billing = state.get(prefix + "billing_accountProfile")
+        premium = None
+        if isinstance(billing, dict):
+            profile = cast(dict[str, object], billing)
+            premium = _premium(
+                profile.get("hasPremiumPersonally"),
+                profile.get("hasPremiumFromAnyOrganization"),
+            )
+        return CliPolicyState("bitwarden", api, organizations, policies, premium)
     if state.get("version") == 1:
         vault = _object(state.get("vault"))
         profile = _object(vault.get("profile"))
@@ -140,7 +155,15 @@ def parse_policy_state(
         organizations = _objects(profile.get("organizations"))
         policies = _objects(vault.get("policies"))
         policies += _objects(vault.get("policiesNew", []))
-        return CliPolicyState("vaultwarden", api, organizations, policies)
+        return CliPolicyState(
+            "vaultwarden",
+            api,
+            organizations,
+            policies,
+            _premium(
+                profile.get("premium"), profile.get("premiumFromOrganization", False)
+            ),
+        )
     raise BitwardenClientError("Cannot verify SSH policy: unrecognized CLI profile")
 
 

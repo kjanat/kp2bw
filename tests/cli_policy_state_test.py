@@ -46,6 +46,7 @@ def main() -> None:
         )
         assert not metadata.organizations and not metadata.policies
         assert "must-not-be-returned" not in repr(metadata)
+        assert metadata.premium is None
         for changed in (
             {"userId": "other"},
             {"serverUrl": "https://other.example.test"},
@@ -86,6 +87,41 @@ def main() -> None:
             raise AssertionError(
                 "Ambiguous profiles must not select a policy source arbitrarily"
             )
+    for personal, organization, expected in (
+        (False, False, False),
+        (True, False, True),
+        (False, True, True),
+        (None, False, None),
+    ):
+        metadata = parse_policy_state(
+            {
+                **official,
+                "user_user_billing_accountProfile": {
+                    "hasPremiumPersonally": personal,
+                    "hasPremiumFromAnyOrganization": organization,
+                },
+            },
+            status,
+            synced_after=started,
+        )
+        assert metadata.premium is expected
+        metadata = parse_policy_state(
+            {
+                **replacement,
+                "vault": {
+                    "profile": {
+                        "id": "user",
+                        "organizations": [],
+                        "premium": personal,
+                        "premiumFromOrganization": organization,
+                    },
+                    "policies": [],
+                },
+            },
+            status,
+            synced_after=started,
+        )
+        assert metadata.premium is expected
     print("CLI policy state tests passed")
 
 

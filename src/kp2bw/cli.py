@@ -25,7 +25,7 @@ from .bw_serve import (
     BitwardenServeClient,
     ensure_bw_available,
 )
-from .convert import Converter, collect_keepass_uris
+from .convert import COLLECTION_FOLDER_MODES, Converter, collect_keepass_uris
 from .doctor import collect_report, redact_report, render_report
 from .exceptions import BitwardenClientError, ConversionError
 from .uri_mapping import (
@@ -326,6 +326,18 @@ def _argparser() -> MyArgParser:
         help="Map referenced KeePass templates to cards, identities and secure notes.",
         action=BooleanOptionalAction,
         default=None,
+    )
+    parser.add_argument(
+        "--preview",
+        choices=("text", "json"),
+        nargs="?",
+        const="text",
+        help="Describe the source migration without Bitwarden credentials or writes.",
+    )
+    parser.add_argument(
+        "--preview-target",
+        action="store_true",
+        help="With --preview: inspect the destination vault without modifying it.",
     )
     parser.add_argument(
         "--template-map",
@@ -910,6 +922,14 @@ def main() -> None:
 
     # Bitwarden-only modes read no KeePass database, so the path requirement
     # (and the KeePass password prompt below) is skipped for them.
+    if args.preview_target and not args.preview:
+        _argparser().error("--preview-target requires --preview")
+    if args.preview and (strip_ids or migrate_uris or report_uris):
+        _argparser().error(
+            "--preview cannot be combined with maintenance or URI reports"
+        )
+    if args.preview and args.item_id and not args.preview_target:
+        _argparser().error("--item-id requires --preview-target when previewing")
     if (args.entry_id or args.item_id) and (strip_ids or migrate_uris or report_uris):
         _argparser().error("Item selection is only available for migration")
     bitwarden_only = strip_ids or migrate_uris or report_uris == "bitwarden"
@@ -966,10 +986,11 @@ def main() -> None:
 
     # Verify the Bitwarden CLI is available before prompting for secrets, so the
     # user isn't asked for passwords only to hit a missing-`bw` failure later.
-    try:
-        ensure_bw_available()
-    except BitwardenClientError as exc:
-        _fail(exc)
+    if not args.preview or args.preview_target:
+        try:
+            ensure_bw_available()
+        except BitwardenClientError as exc:
+            _fail(exc)
 
     # --report-uris bitwarden reads the live vault (no KeePass) and prints a
     # read-only collision report.
@@ -1006,7 +1027,7 @@ def main() -> None:
         return
 
     # bw confirmation
-    if not skip_confirm:
+    if not skip_confirm and not args.preview:
         confirm: str | None = None
         print("Do you have bw cli installed and is it set up?")
         print(
@@ -1028,7 +1049,11 @@ def main() -> None:
     kp_pw: str = _read_password(
         args.kp_pw, "Please enter your KeePass 2.x db password: "
     )
-    bw_pw: str = _read_password(args.bw_pw, "Please enter your Bitwarden password: ")
+    bw_pw: str = (
+        ""
+        if args.preview and not args.preview_target
+        else _read_password(args.bw_pw, "Please enter your Bitwarden password: ")
+    )
 
     # The CLI/env validation above guarantees a database path.
     assert args.keepass_file is not None
@@ -1064,7 +1089,30 @@ def main() -> None:
         item_id=args.item_id,
     )
     try:
-        failures = c.convert()
+        if args.preview:
+            from ._preview import format_preview
+
+            if args.preview_target:
+                with BitwardenServeClient(
+                    bw_pw,
+                    org_id=args.bw_org,
+                    collection_id=None
+                    if args.bw_coll in COLLECTION_FOLDER_MODES
+                    else args.bw_coll,
+                ) as target:
+                    preview = c.preview(target)
+            else:
+                preview = c.preview()
+            print(
+                json.dumps(preview.to_dict(), indent=2)
+                if args.preview == "json"
+                else format_preview(preview)
+            )
+            failures = int(
+                bool(preview.blockers or any(e.blockers for e in preview.entries))
+            )
+        else:
+            failures = c.convert()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         sys.exit(130)

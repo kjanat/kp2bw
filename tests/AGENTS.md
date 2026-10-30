@@ -25,6 +25,10 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 
 ## CONVENTIONS
 
+- `preview_test.py` verifies source/target reports, secret exclusion, source immutability and simulated writes.
+  `e2e_preview_test.py` checks create/update/unchanged/protected predictions against actual migrations with both CLIs;
+  a request guard rejects vault mutations during preview and inventory/revision comparisons confirm no changes.
+
 - `history_test.py` covers historical password transitions and archive recovery, including saved/reopened KDBX files.
   `e2e_history_archive_test.py` verifies the opt-in archive through both CLIs, including filename collisions, binary
   recovery, replacement and unchanged reruns.

@@ -21,7 +21,7 @@ from kp2bw._item_sync import (
 )
 from kp2bw.bw_serve import BitwardenServeClient, item_kp2bw_sync
 from kp2bw.bw_types import BwFido2Credential, BwItemCreate, BwItemResponse
-from kp2bw.convert import Converter
+from kp2bw.convert import AttachmentItem, Converter
 
 SOURCE_ID = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 MARKED_ID = f"{BW_B64_CREDENTIAL_ID_PREFIX}{SOURCE_ID}"
@@ -320,7 +320,7 @@ def assert_final_items_validate_and_preserve_sources() -> None:
 
         def convert(
             properties: dict[str, str], *, oversize: bool = False
-        ) -> tuple[BwItemCreate, list[object]]:
+        ) -> tuple[BwItemCreate, list[AttachmentItem]]:
             entry = database.add_entry(
                 database.root_group,
                 f"Passkey {len(database.entries)}",
@@ -412,9 +412,9 @@ def assert_final_items_validate_and_preserve_sources() -> None:
         )
         _, attachments = convert(large, oversize=True)
         assert (
-            "KPEX_PASSKEY_PRIVATE_KEY_PEM",
-            large["KPEX_PASSKEY_PRIVATE_KEY_PEM"],
-        ) in attachments
+            "KPEX_PASSKEY_PRIVATE_KEY_PEM.txt",
+            large["KPEX_PASSKEY_PRIVATE_KEY_PEM"].encode(),
+        ) in [Converter._materialise_attachment(a) for a in attachments]
 
 
 def main() -> None:

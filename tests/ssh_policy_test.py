@@ -1,6 +1,10 @@
 """SSH policy decisions match membership and target-vault restrictions."""
 
-from kp2bw._ssh_policy import PolicyObject, require_ssh_policy_allowed
+from kp2bw._ssh_policy import (
+    PolicyObject,
+    require_item_policy_allowed,
+    require_ssh_policy_allowed,
+)
 from kp2bw.exceptions import BitwardenClientError
 
 
@@ -56,6 +60,19 @@ def main() -> None:
     rejected([member], [], "unknown-org")
     rejected([member], [{**restriction, "type": 5}], None)
     require_ssh_policy_allowed([member], [{**restriction, "type": 5}], "org-a")
+    for item_type in (1, 2, 3, 4, 5):
+        if item_type != 5:
+            require_item_policy_allowed([member], [restriction], "org-a", item_type)
+        try:
+            require_item_policy_allowed(
+                [member], [{**restriction, "data": [item_type]}], "org-a", item_type
+            )
+        except BitwardenClientError:
+            pass
+        else:
+            raise AssertionError("Preview accepted a policy-restricted item type")
+    rejected([{**member, "enabled": False}], [], "org-a")
+    rejected([{**member, "status": 1}], [], "org-a")
     print("SSH policy tests passed")
 
 

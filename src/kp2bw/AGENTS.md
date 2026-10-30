@@ -76,6 +76,11 @@ src/kp2bw/
   Checkpoint files contain hashes and IDs, never credentials or decrypted attachment contents.
 
 - Maintain behavior parity for `kp2bw.cli:main` and `python -m kp2bw`.
+- `--preview [text|json]` prepares the same conversion payloads without Bitwarden credentials. Optional
+  `--preview-target` reuses reconciliation through `PreviewTransport`; mutations affect only memory snapshots.
+  `PreviewCheckpoint` reads an atomic snapshot without creating locks and simulates subsequent saves in memory.
+  Reports expose IDs, field paths, counts and attachment names/bytes, never payload values. Source-only checkpoint
+  names are marked provisional because the target account contributes to transaction filenames.
 - Existing-item sync (`--update` / `--no-update`, `KP2BW_UPDATE`, default on, `Converter(update_existing=...)`):
   `convert._reconcile_existing_item()` diffs a matched login item via `_content_differs()` and, when changed, `PUT`s a
   payload built by `_build_update_payload()` (preserves id/favorite/folder/org, unions collectionIds, keeps a

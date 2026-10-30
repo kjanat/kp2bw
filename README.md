@@ -181,6 +181,9 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 
+Use `--preview` for a read-only migration plan, or `--preview json --preview-target` to compare with your vault. See
+[migration preview](docs/migration-preview.md) for output details and limitations.
+
 `--password-history` (`KP2BW_PASSWORD_HISTORY`, default: on) imports up to five distinct previous passwords, excluding
 the current password. Each date is the modification time of the next version with a different password; note-only edits
 do not change it. Existing unrelated Bitwarden history is preserved. If the combined records exceed five, the update

@@ -37,6 +37,7 @@ from rich.progress import (
 )
 
 from . import VERBOSE
+from ._attachment_capability import AttachmentCapability
 from ._attachment_resume import inspect_pending_upload, transaction_filename
 from ._attachments import (
     ATTACHMENT_FIELD_PREFIX,
@@ -84,6 +85,16 @@ from ._item_sync import (
     sync_stamp_generation,
     sync_stamp_matches,
 )
+from ._preview import (
+    MigrationPreview,
+    PreviewEntry,
+    PreviewGroup,
+    describe_attachments,
+    describe_payload,
+    group_inventory,
+    source_inventory,
+)
+from ._preview_transport import PreviewCheckpoint, PreviewTransport
 from ._selection import ItemSelection, resolve_selection, source_uuid
 from ._source_fields import source_field_name, source_field_origin
 from ._ssh_mapping import SshRule, apply_ssh_rule
@@ -432,6 +443,10 @@ class Converter:
         )
         self._selected_item_id = item_id
         self._selection: ItemSelection | None = None
+        self._previewing = False
+        self._preview_sources: dict[str, dict[str, int]] = {}
+        self._preview_groups: list[PreviewGroup] = []
+        self._preview_failures: dict[str, list[str]] = {}
         self._attachment_plans: dict[str, AttachmentPlan] = {}
         self._checkpoint_path = checkpoint_path
         self._checkpoint: AttachmentCheckpoint | None = None
@@ -694,6 +709,19 @@ class Converter:
         return (text, 0)
 
     def _add_bw_entry_to_entries_dict(self, entry: Entry) -> None:
+        """Use execution conversion, retaining per-entry blockers during preview."""
+        try:
+            self._build_bw_entry(entry)
+        except ConversionError as exc:
+            if not self._previewing:
+                raise
+            self._preview_failures.setdefault(entry.uuid.hex.upper(), []).append(
+                str(exc)
+                if isinstance(exc, FieldLimitError)
+                else "Source conversion failed; check this entry's references, history and mapping configuration"
+            )
+
+    def _build_bw_entry(self, entry: Entry) -> None:
         """Convert a KeePass entry into a Bitwarden item and store it in ``_entries``."""
         folder = self._generate_folder_name(entry)
         prefix = ""
@@ -780,7 +808,9 @@ class Converter:
         expired_prefix = "[EXPIRED] " if entry.expired else ""
         notes = expired_prefix + (entry.notes or "")
         if not fits_field(notes, NOTES_LIMIT):
-            generated_attachments.append(("notes", entry.notes or ""))
+            generated_attachments.append(
+                source_file("notes", "", 1, "notes.txt", (entry.notes or "").encode())
+            )
             notes = expired_prefix
 
         title: str = prefix + entry.title if entry.title else prefix + "_untitled"
@@ -843,6 +873,10 @@ class Converter:
                     entry_uuid,
                 )
                 if archive.missing_binaries:
+                    if self._previewing:
+                        self._preview_failures.setdefault(entry_uuid, []).append(
+                            "Historical attachment bodies are missing; restore them in KeePass to produce a complete archive"
+                        )
                     logger.warning(
                         "Entry %s: %d historical attachment bodies are unavailable; their references remain in the archive",
                         entry_uuid,
@@ -871,6 +905,10 @@ class Converter:
                     )
                     attachments.append((key, value))
                 else:
+                    if self._previewing:
+                        self._preview_failures.setdefault(entry_uuid, []).append(
+                            "An oversized secret field would be omitted; shorten it or use --include-oversize-secrets to preserve it as an attachment"
+                        )
                     logger.warning(
                         f"{label}: secret field '{key}' exceeds the "
                         f"{FIELD_VALUE_LIMIT}-character encrypted field limit and was not "
@@ -986,6 +1024,20 @@ class Converter:
         recyclebin_group: Group | None = kp.recyclebin_group
 
         entries: list[Entry] = kp.entries or []
+        self._resolved_ref_items = {}
+        if self._previewing:
+            self._preview_groups = group_inventory(kp.groups)
+            self._preview_sources = {
+                entry.uuid.hex.upper(): source_inventory(entry) for entry in entries
+            }
+            seen: set[str] = set()
+            for entry in entries:
+                identifier = entry.uuid.hex.upper()
+                if identifier in seen:
+                    self._preview_failures.setdefault(identifier, []).append(
+                        "Multiple KeePass entries share this UUID; assign distinct source identities before migration"
+                    )
+                seen.add(identifier)
         self._entry_templates = {}
         self._ssh_sources = {}
         templates_present = {
@@ -3004,6 +3056,387 @@ class Converter:
         )
         return n_update_failed + n_attach_failed + n_create_failed
 
+    def preview(self, target: BitwardenServeClient | None = None) -> MigrationPreview:
+        """Describe source conversion without opening a destination client."""
+        self._selection = None
+        if self._selected_entry_id is not None or self._selected_item_id is not None:
+            if target is None:
+                if self._selected_item_id is not None:
+                    raise ConversionError("Item selection requires target inspection")
+                assert self._selected_entry_id is not None
+                self._selection = ItemSelection(
+                    source_uuid(self._selected_entry_id), None
+                )
+            else:
+                fixed_collection = self._bitwarden_coll_id
+                if fixed_collection in COLLECTION_FOLDER_MODES:
+                    fixed_collection = None
+                visible = target.list_items()
+                scoped = target.list_items(
+                    organization_id=self._bitwarden_organization_id,
+                    collection_id=fixed_collection,
+                )
+                self._selection = resolve_selection(
+                    self._selected_entry_id,
+                    self._selected_item_id,
+                    visible,
+                    {item["id"] for item in scoped},
+                )
+        self._preview_sources = {}
+        self._preview_groups = []
+        self._preview_failures = {}
+        self._previewing = True
+        failed = False
+        try:
+            self._prepare_entries()
+        except ConversionError:
+            # Individual diagnostics are added by preparation. Do not copy exception
+            # strings: some third-party failures contain source values.
+            failed = True
+        finally:
+            self._previewing = False
+        result = MigrationPreview([], groups=self._preview_groups)
+        if failed:
+            result.blockers.append(
+                "Source preparation failed; migration cannot execute this plan"
+            )
+        for identifier, inventory in self._preview_sources.items():
+            if self._selection is not None and identifier != self._selection.source_id:
+                continue
+            value = self._entries.get(identifier)
+            resolved = self._resolved_ref_items.get(identifier)
+            outcome: Literal[
+                "planned", "merged", "excluded", "unresolved", "blocked"
+            ] = (
+                "blocked"
+                if failed
+                else "planned"
+                if value is not None
+                else "merged"
+                if resolved is not None
+                else "unresolved"
+                if identifier in self._resolved_ref_items
+                else "excluded"
+            )
+            entry = PreviewEntry(identifier, outcome, source=inventory)
+            if problems := self._preview_failures.get(identifier):
+                entry.outcome = "blocked"
+                entry.blockers.extend(problems)
+            if failed:
+                entry.blockers.append("Source preparation did not finish")
+            elif outcome == "unresolved":
+                entry.blockers.append(
+                    "Resolve this entry's KeePass references before migration"
+                )
+            if value is not None:
+                item = self._unpack_entry(value)[2]
+                describe_payload(entry, item, self._attachment_sources(value[3]))
+                if self._checkpoint_path and target is None:
+                    entry.attachments = [
+                        replace(a, filename_final=False) for a in entry.attachments
+                    ]
+                if inventory["passkey_fields"] and not entry.passkeys:
+                    entry.blockers.append(
+                        "Source passkey was not converted to a native passkey; repair its attributes or choose an explicit fallback"
+                    )
+                if (
+                    inventory["tags"] or inventory["expiry"]
+                ) and not self._migrate_metadata:
+                    entry.omissions.append(
+                        "Tags and expiry metadata disabled by --no-metadata"
+                    )
+            elif resolved is not None:
+                entry.destination_source_id = next(
+                    (key for key, value in self._entries.items() if value is resolved),
+                    None,
+                )
+            for category in (
+                "custom_icons",
+                "builtin_icons",
+                "autotype_associations",
+                "autotype_sequences",
+            ):
+                if inventory[category]:
+                    entry.omissions.append(f"{category}: no destination representation")
+            if inventory["history_records"] and not self._archive_history:
+                entry.omissions.append(
+                    "Full historical records are omitted; use --archive-history to preserve them"
+                )
+            if entry.blockers and entry.outcome != "unresolved":
+                entry.outcome = "blocked"
+            result.entries.append(entry)
+        if target is not None and not result.blockers:
+            self._compare_preview(result, target)
+        return result
+
+    def _compare_preview(
+        self, result: MigrationPreview, target: BitwardenServeClient
+    ) -> None:
+        """Reuse execution reconciliation with writes confined to local snapshots."""
+        fixed_collection = self._bitwarden_coll_id
+        if fixed_collection in COLLECTION_FOLDER_MODES:
+            fixed_collection = None
+        remote = target.list_items(
+            organization_id=self._bitwarden_organization_id,
+            collection_id=fixed_collection,
+        )
+        folders = {
+            identifier: name for name, identifier in target.list_folders().items()
+        }
+        collections = (
+            target.list_collections() if self._bitwarden_organization_id else {}
+        )
+        transport = PreviewTransport(
+            target.get_item, target.get_attachment, target.validate_item_update
+        )
+        ssh_blocker = False
+        if any(
+            entry.item_type == 5 and entry.outcome == "planned"
+            for entry in result.entries
+        ):
+            try:
+                target.require_ssh_supported()
+            except BitwardenClientError:
+                ssh_blocker = True
+        claimed: set[str] = set()
+        previous_plans = self._attachment_plans
+        self._attachment_plans = {}
+        previous_checkpoint = self._checkpoint
+        previous_cleanup = self._checkpoint_cleanup
+        previous_entry_ids = self._checkpoint_entry_ids
+        self._checkpoint_cleanup = []
+        self._checkpoint_entry_ids = {}
+        self._checkpoint = None
+        try:
+            if self._checkpoint_path:
+                server, account = target.checkpoint_identity()
+                self._checkpoint = PreviewCheckpoint(
+                    Path(self._checkpoint_path),
+                    CheckpointScope(
+                        server,
+                        account,
+                        self._source_scope_id,
+                        self._bitwarden_organization_id,
+                        self._bitwarden_coll_id,
+                    ),
+                )
+            for entry in result.entries:
+                if entry.outcome != "planned" or entry.blockers:
+                    continue
+                if entry.item_type == 5 and ssh_blocker:
+                    entry.outcome = "blocked"
+                    entry.blockers.append(
+                        "The destination CLI, server or organization policy does not allow verified native SSH support"
+                    )
+                    continue
+                folder, firstlevel, source_item, attachments = self._unpack_entry(
+                    self._entries[entry.source_id]
+                )
+                desired = copy.deepcopy(source_item)
+                collection_name = (
+                    folder
+                    if self._bitwarden_coll_id == NESTED_COLLECTION_MODE
+                    else firstlevel
+                )
+                if (
+                    self._bitwarden_coll_id in COLLECTION_FOLDER_MODES
+                    and collection_name
+                ):
+                    desired["collectionIds"] = [
+                        collections.get(collection_name, "preview-new-collection")
+                    ]
+                elif fixed_collection:
+                    desired["collectionIds"] = [fixed_collection]
+                matches = [
+                    item for item in remote if item_kp2bw_id(item) == entry.source_id
+                ]
+                adopted = False
+                if self._selection is not None:
+                    matches = [
+                        item
+                        for item in remote
+                        if item["id"] == self._selection.destination_id
+                    ]
+                if not matches and self._selection is None:
+                    matches = [
+                        item
+                        for item in remote
+                        if item["id"] not in claimed
+                        and not item_kp2bw_id(item)
+                        and item.get("type") == 1
+                        and item.get("name") == desired["name"]
+                        and folders.get(item.get("folderId") or "") == folder
+                    ]
+                    adopted = bool(matches)
+                if len(matches) > 1:
+                    entry.outcome = "blocked"
+                    entry.blockers.append(
+                        "Multiple destination items match this source identity or legacy folder/name"
+                    )
+                    continue
+                if not matches:
+                    entry.outcome = "create"
+                    if self._checkpoint is not None:
+                        sources = self._attachment_sources(attachments)
+                        entry.attachments = describe_attachments([
+                            replace(
+                                source,
+                                filename=transaction_filename(
+                                    source,
+                                    self._checkpoint.scope_digest,
+                                    entry.source_id,
+                                    None,
+                                ),
+                            )
+                            for source in sources
+                        ])
+                    entry.uploads = len(entry.attachments)
+                    entry.upload_bytes = sum(a.bytes for a in entry.attachments)
+                    continue
+                existing = transport.get_item(matches[0]["id"])
+                claimed.add(existing["id"])
+                entry.target_id = existing["id"]
+                outcome, uploads, _ = self._reconcile_existing_item(
+                    transport,
+                    existing,
+                    folder,
+                    desired,
+                    attachments,
+                    fixed_coll_id=fixed_collection,
+                    kp_uuid=entry.source_id,
+                    force_update=adopted,
+                )
+                entry.uploads = len(uploads)
+                plan = self._attachment_plans.get(existing["id"])
+                if plan is not None:
+                    entry.attachments = describe_attachments(plan.sources)
+                entry.cleanup_attachments = sum(
+                    item_id == existing["id"]
+                    for item_id, _ in transport.deleted_attachments
+                )
+                entry.upload_bytes = sum(
+                    len(self._materialise_attachment(a)[1]) for a in uploads
+                )
+                if outcome == "failed":
+                    entry.outcome = "blocked"
+                    entry.blockers.append(
+                        "Destination reconciliation rejected the item; inspect capabilities, edit protection and attachment associations"
+                    )
+                elif outcome == "protected":
+                    entry.outcome = "protected"
+                elif (
+                    outcome in {"updated", "collection"}
+                    or uploads
+                    or entry.cleanup_attachments
+                    or (plan is not None and plan.records != plan.previous_records)
+                ):
+                    entry.outcome = "update"
+                else:
+                    entry.outcome = "unchanged"
+        finally:
+            self._checkpoint = previous_checkpoint
+            self._checkpoint_cleanup = previous_cleanup
+            self._checkpoint_entry_ids = previous_entry_ids
+            self._attachment_plans = previous_plans
+        changing = [
+            entry for entry in result.entries if entry.outcome in {"create", "update"}
+        ]
+        if changing:
+            try:
+                policy_blockers = target.item_policy_blockers({
+                    entry.item_type for entry in changing if entry.item_type is not None
+                })
+            except BitwardenClientError:
+                policy_blockers = {
+                    entry.item_type: "Organization policies could not be verified; refresh the active CLI profile and retry"
+                    for entry in changing
+                    if entry.item_type is not None
+                }
+            for entry in changing:
+                if entry.item_type is not None and (
+                    reason := policy_blockers.get(entry.item_type)
+                ):
+                    entry.outcome = "blocked"
+                    entry.blockers.append(reason)
+        uploading = [
+            entry for entry in result.entries if entry.uploads and not entry.blockers
+        ]
+        if uploading:
+            try:
+                capability = target.attachment_capability()
+            except BitwardenClientError:
+                capability = AttachmentCapability(
+                    None,
+                    reason="Attachment entitlement and free storage could not be verified from the active CLI profile",
+                )
+            result.attachment_capability = capability
+            required = sum(entry.upload_bytes for entry in uploading)
+            exceeds_total = (
+                capability.storage_limit_bytes is not None
+                and required > capability.storage_limit_bytes
+            )
+            if capability.allowed is False or exceeds_total:
+                for entry in uploading:
+                    entry.outcome = "blocked"
+                    entry.blockers.append(
+                        "Planned attachment bytes exceed the organization's entire storage allowance"
+                        if exceeds_total
+                        else capability.reason
+                    )
+        result.target_inspected = True
+
+    def _prepare_entries(self) -> None:
+        """Build and validate migration payloads without opening a destination."""
+        # load keepass data from database
+        self._load_keepass_data()
+
+        # resolve {REF:...} stuff
+        self._resolve_entries_with_references()
+
+        if self._map_templates:
+            for identifier, entry_value in self._entries.items():
+                if rule := self._entry_templates.get(identifier):
+                    item = self._unpack_entry(entry_value)[2]
+                    for warning in apply_template(item, rule):
+                        logger.warning("Entry %s: %s", identifier, warning)
+                        if self._previewing:
+                            self._preview_failures.setdefault(identifier, []).append(
+                                warning
+                            )
+
+        for identifier, entry_value in self._entries.items():
+            if selected := self._ssh_sources.get(identifier):
+                rule, source_fields = selected
+                folder, firstlevel, item, attachments = self._unpack_entry(entry_value)
+                fields = {
+                    **source_fields,
+                    "UserName": item["login"]["username"],
+                    "Password": item["login"]["password"],
+                }
+                files, warnings = apply_ssh_rule(item, fields, rule)
+                for warning in warnings:
+                    logger.warning("Entry %s: %s", identifier, warning)
+                    if self._previewing:
+                        self._preview_failures.setdefault(identifier, []).append(
+                            warning
+                        )
+                self._entries[identifier] = (
+                    folder,
+                    firstlevel,
+                    item,
+                    [*attachments, *files],
+                )
+
+        # REF merging may add URIs or TOTP after initial conversion. Validate
+        # every final item before opening the destination transport.
+        for identifier, entry in self._entries.items():
+            try:
+                validate_item(self._unpack_entry(entry)[2])
+            except FieldLimitError as exc:
+                if not self._previewing:
+                    raise
+                self._preview_failures.setdefault(identifier, []).append(str(exc))
+
     def convert(self) -> int:
         """Run the full KeePass-to-Bitwarden migration pipeline.
 
@@ -3031,8 +3464,7 @@ class Converter:
                     visible,
                     {item["id"] for item in scoped},
                 )
-                self._load_keepass_data()
-                self._resolve_entries_with_references()
+                self._prepare_entries()
                 selected = self._entries.get(self._selection.source_id)
                 if selected is None:
                     raise ConversionError(
@@ -3041,42 +3473,7 @@ class Converter:
                 self._entries = {self._selection.source_id: selected}
                 return self._create_bitwarden_items_for_entries(bw)
 
-        # load keepass data from database
-        self._load_keepass_data()
-
-        # resolve {REF:...} stuff
-        self._resolve_entries_with_references()
-
-        if self._map_templates:
-            for identifier, entry_value in self._entries.items():
-                if rule := self._entry_templates.get(identifier):
-                    item = self._unpack_entry(entry_value)[2]
-                    for warning in apply_template(item, rule):
-                        logger.warning("Entry %s: %s", identifier, warning)
-
-        for identifier, entry_value in self._entries.items():
-            if selected := self._ssh_sources.get(identifier):
-                rule, source_fields = selected
-                folder, firstlevel, item, attachments = self._unpack_entry(entry_value)
-                fields = {
-                    **source_fields,
-                    "UserName": item["login"]["username"],
-                    "Password": item["login"]["password"],
-                }
-                files, warnings = apply_ssh_rule(item, fields, rule)
-                for warning in warnings:
-                    logger.warning("Entry %s: %s", identifier, warning)
-                self._entries[identifier] = (
-                    folder,
-                    firstlevel,
-                    item,
-                    [*attachments, *files],
-                )
-
-        # REF merging may add URIs or TOTP after initial conversion. Validate
-        # every final item before opening the destination transport.
-        for entry in self._entries.values():
-            validate_item(self._unpack_entry(entry)[2])
+        self._prepare_entries()
 
         # store aggregated entries in bw
         return self._create_bitwarden_items_for_entries()

@@ -24,6 +24,7 @@ import httpx
 from rich.markup import escape
 
 from . import VERBOSE
+from ._attachment_capability import AttachmentCapability, attachment_capability
 from ._attachments import ATTACHMENT_FIELD_PREFIX, records_from_fields
 from ._cli_policy_state import read_policy_state
 from ._console import console
@@ -36,7 +37,7 @@ from ._item_sync import (
     stamp_content,
     sync_stamp_generation,
 )
-from ._ssh_policy import require_ssh_policy_allowed
+from ._ssh_policy import require_item_policy_allowed, require_ssh_policy_allowed
 from .bw_types import BwCollection, BwField, BwFolder, BwItemCreate, BwItemResponse
 from .exceptions import (
     BitwardenAttachmentMissingError,
@@ -1258,6 +1259,36 @@ class BitwardenServeClient:
         logger.log(VERBOSE, "Syncing vault via bw serve")
         self._request("POST", "/sync", idempotent=True)
 
+    def attachment_capability(self) -> AttachmentCapability:
+        """Read entitlement metadata bound to this account and a fresh sync."""
+        started = datetime.now(UTC)
+        self.sync(force=True)
+        status = self._request("GET", "/status").get("template")
+        if not isinstance(status, dict):
+            raise BitwardenClientError(
+                "Cannot verify attachment entitlement: missing CLI status"
+            )
+        state = read_policy_state(cast(dict[str, object], status), synced_after=started)
+        return attachment_capability(state, self._org_id)
+
+    def item_policy_blockers(self, item_types: set[int]) -> dict[int, str]:
+        """Explain synced organization restrictions without attempting a write."""
+        started = datetime.now(UTC)
+        self.sync(force=True)
+        status = self._request("GET", "/status").get("template")
+        if not isinstance(status, dict):
+            raise BitwardenClientError("Cannot verify item policy: missing CLI status")
+        state = read_policy_state(cast(dict[str, object], status), synced_after=started)
+        blockers: dict[int, str] = {}
+        for item_type in item_types:
+            try:
+                require_item_policy_allowed(
+                    state.organizations, state.policies, self._org_id, item_type
+                )
+            except BitwardenClientError as exc:
+                blockers[item_type] = str(exc)
+        return blockers
+
     def require_ssh_supported(self) -> None:
         """Verify the active server and fresh organization policy before writes."""
         started = datetime.now(UTC)
@@ -1489,7 +1520,7 @@ class BitwardenServeClient:
         copy, so a caller can still hand the original (id-bearing) object to
         :meth:`update_dedup_entry`.
         """
-        self._guard_history_update(item_id, item)
+        self.validate_item_update(item_id, item)
         body = self._item_update_body(item)
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
         if has_managed_history(item):
@@ -1500,12 +1531,16 @@ class BitwardenServeClient:
         self, item_id: str, item: BwItemResponse, *, expected_revision: str
     ) -> None:
         """Replace an item only if the server still knows the observed revision."""
-        self._guard_history_update(item_id, item)
+        self.validate_item_update(item_id, item)
         body = self._item_update_body(item, expected_revision=expected_revision)
         self._request("PUT", f"/object/item/{item_id}", json_body=body)
         if has_managed_history(item):
             self._verify_history(item_id, item)
         logger.log(VERBOSE, f"Updated item {item.get('name', '?')!r} ({item_id})")
+
+    def validate_item_update(self, item_id: str, item: BwItemResponse) -> None:
+        """Check CLI write capabilities without sending a vault mutation."""
+        self._guard_history_update(item_id, item)
 
     def _supports_history_updates(self) -> bool:
         """Recognize the tested CLI without inferring capabilities from versions."""

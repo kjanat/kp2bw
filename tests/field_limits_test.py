@@ -68,7 +68,10 @@ def main() -> None:
                 _, _, item, attachments = next(iter(conv._entries.values()))
                 fields = {field["name"]: field["value"] for field in item["fields"]}
                 assert ("value" in fields) == (size <= 3695)
-                assert (("value", "x" * size) in attachments) == (size > 3695)
+                assert (
+                    ("value.txt", ("x" * size).encode())
+                    in [conv._materialise_attachment(a) for a in attachments]
+                ) == (size > 3695)
 
             for size in (7438, 7439, 7440):
                 entry = database.add_entry(
@@ -79,7 +82,10 @@ def main() -> None:
                 conv._add_bw_entry_to_entries_dict(entry)
                 _, _, item, attachments = next(iter(conv._entries.values()))
                 assert (item["notes"] == entry.notes) == (size <= 7439)
-                assert (("notes", entry.notes) in attachments) == (size > 7439)
+                assert (
+                    ("notes.txt", (entry.notes or "").encode())
+                    in [conv._materialise_attachment(a) for a in attachments]
+                ) == (size > 7439)
 
             for member, boundary in (
                 ("title", 687),
