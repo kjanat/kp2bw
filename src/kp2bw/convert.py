@@ -850,27 +850,54 @@ class Converter:
                 raise ConversionError(
                     "Selected KeePass entry is excluded by import filters"
                 )
-            needed = {self._selection.source_id}
-            pending = [selected]
+            # Reconstruct the selected item's full REF component, including
+            # aliases contributing URLs/TOTP to it. Only the selected result is
+            # written; unrelated entries are never parsed or migrated.
+            by_uuid: dict[str, list[Entry]] = {}
+            references: dict[str, list[str]] = {}
+            inbound: dict[str, set[str]] = {}
+            invalid_refs: set[str] = set()
+            for candidate in entries:
+                key = candidate.uuid.hex.upper()
+                by_uuid.setdefault(key, []).append(candidate)
+                targets: list[str] = []
+                try:
+                    for member in self._member_reference_resolving_dict:
+                        value = getattr(candidate, member)
+                        if value and KP_REF_IDENTIFIER in value:
+                            _, lookup, target = self._parse_kp_ref_string(value)
+                            if lookup != "I":
+                                raise ConversionError(
+                                    "Unsupported selected-entry REF lookup"
+                                )
+                            targets.append(source_uuid(target))
+                except ConversionError:
+                    invalid_refs.add(key)
+                references[key] = targets
+                if (
+                    not self._include_recyclebin
+                    and self._is_in_recyclebin(candidate, recyclebin_group)
+                ) or (self._skip_expired and candidate.expired):
+                    continue
+                for target in targets:
+                    inbound.setdefault(target, set()).add(key)
+            needed: set[str] = set()
+            pending = [self._selection.source_id]
             while pending:
-                current = pending.pop()
-                for member in self._member_reference_resolving_dict:
-                    value = getattr(current, member)
-                    if not value or KP_REF_IDENTIFIER not in value:
-                        continue
-                    _, lookup, target = self._parse_kp_ref_string(value)
-                    if lookup != "I":
-                        raise ConversionError("Unsupported selected-entry REF lookup")
-                    target = source_uuid(target)
-                    if target in needed:
-                        continue
-                    dependencies = [e for e in entries if e.uuid.hex.upper() == target]
-                    if len(dependencies) != 1:
-                        raise ConversionError(
-                            "Selected entry has a missing or ambiguous REF dependency"
-                        )
-                    needed.add(target)
-                    pending.extend(dependencies)
+                key = pending.pop()
+                if key in needed:
+                    continue
+                if len(by_uuid.get(key, [])) != 1:
+                    raise ConversionError(
+                        "Selected entry has a missing or ambiguous REF dependency"
+                    )
+                if key in invalid_refs:
+                    raise ConversionError(
+                        "Selected entry has an invalid REF dependency"
+                    )
+                needed.add(key)
+                pending.extend(references.get(key, []))
+                pending.extend(inbound.get(key, set()))
             entries = [e for e in entries if e.uuid.hex.upper() in needed]
         total_entries: int = len(entries)
         skipped_recyclebin = 0
@@ -1242,7 +1269,7 @@ class Converter:
 
             if (
                 credentials_match
-                and self._selection is None
+                and (self._selection is None or entry_key != self._selection.source_id)
                 and canonical_result is not None
                 and ref_item is not None
             ):
@@ -1626,16 +1653,13 @@ class Converter:
         stamp_content(payload)
         return payload
 
-    def _retry_item(self, source_id: str, item_id: str, *, force: bool = False) -> str:
+    def _retry_item(
+        self, source_id: str, item_id: str, *, force: bool = False, legacy: bool = False
+    ) -> str:
         """Return a shell-quoted retry without copying credentials into logs."""
-        args = [
-            "kp2bw",
-            self._keepass_file_path,
-            "--entry-id",
-            source_id,
-            "--item-id",
-            item_id,
-        ]
+        args = ["kp2bw", self._keepass_file_path]
+        if not legacy:
+            args.extend(["--entry-id", source_id, "--item-id", item_id])
         if self._bitwarden_organization_id:
             args.extend(["--bitwarden-org", self._bitwarden_organization_id])
         if self._bitwarden_coll_id:
@@ -1878,9 +1902,8 @@ class Converter:
                     outcome = "collection"
         except BitwardenClientError as exc:
             logger.warning(
-                f"-- Entry {name!r}: update failed, leaving the existing "
-                f"item unchanged: {exc}. Retry this item: "
-                f"{self._retry_item(kp_uuid, item_id)}"
+                f"-- Entry {name!r}: update failed; no further changes attempted: {exc}"
+                f". Retry: {self._retry_item(kp_uuid, item_id, legacy=item_kp2bw_id(existing) is None)}"
             )
             # The content/collection PUT was rejected, so leave the item wholly
             # untouched: syncing attachments now would half-mutate it (stale

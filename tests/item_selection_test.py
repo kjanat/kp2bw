@@ -86,6 +86,7 @@ def main() -> None:
 
     conv = converter(Path("synthetic.kdbx"), source)
     existing = _make_existing(id=destination)
+    existing["fields"].append({"name": "KP2BW_ID", "value": source, "type": 0})
     desired = _make_desired(notes="source change")
     with TestCase().assertLogs("kp2bw.convert", level="WARNING") as logs:
         outcome, _, _ = conv._reconcile_existing_item(
@@ -101,6 +102,22 @@ def main() -> None:
     diagnostic = " ".join(logs.output)
     assert source in diagnostic and destination in diagnostic
     assert "--force-update" not in diagnostic and "never-log-this" not in diagnostic
+    legacy = _make_existing(id=destination)
+    with TestCase().assertLogs("kp2bw.convert", level="WARNING") as logs:
+        outcome, _, _ = conv._reconcile_existing_item(
+            _as_bw(FakeBw(fail_update=True)),
+            legacy,
+            None,
+            desired,
+            [],
+            fixed_coll_id=None,
+            kp_uuid=source,
+            force_update=True,
+        )
+    assert outcome == "failed"
+    diagnostic = " ".join(logs.output)
+    assert "--entry-id" not in diagnostic and "--item-id" not in diagnostic
+    assert "Retry" in diagnostic
     stamp_content(existing)
     existing["notes"] = "destination edit"
     with TestCase().assertLogs("kp2bw.convert", level="WARNING") as logs:
@@ -122,6 +139,7 @@ def main() -> None:
         path = Path(directory) / "selection.kdbx"
         db = create_database(path, password="synthetic")
         target = db.add_entry(db.root_group, "Same title", "user", "password")
+        target.tags = ["selected"]
         alias = db.add_entry(
             db.root_group,
             "Same title",
@@ -129,6 +147,15 @@ def main() -> None:
             f"{{REF:P@I:{target.uuid.hex.upper()}}}",
             force_creation=True,
         )
+        alias.url = "https://alias.example.test"
+        alias.otp = "otpauth://totp/Synthetic?secret=JBSWY3DPEHPK3PXP"
+        chain = db.add_entry(
+            db.root_group,
+            "Chained alias",
+            "user",
+            f"{{REF:P@I:{alias.uuid.hex.upper()}}}",
+        )
+        chain.url = "https://chain.example.test"
         unrelated = db.add_entry(db.root_group, "Unrelated", "u", "p")
         unrelated.tags = ["elsewhere"]
         db.save()
@@ -148,6 +175,39 @@ def main() -> None:
             result = next(iter(conv._entries.values()))[2]
             assert result["login"]["password"] == "password"
             assert result["name"] == "Same title"
+        full = converter(path, None)
+        full._import_tags = ["selected"]
+        full._load_keepass_data()
+        full._resolve_entries_with_references()
+        full_target = full._unpack_entry(full._entries[target.uuid.hex.upper()])[2]
+        conv = converter(path, str(target.uuid))
+        conv._import_tags = ["selected"]
+        with (
+            patch("kp2bw.convert.BitwardenServeClient", return_value=client),
+            patch.object(conv, "_create_bitwarden_items_for_entries", return_value=0),
+        ):
+            assert conv.convert() == 0
+        assert set(conv._entries) == {target.uuid.hex.upper()}
+        selected_target = conv._unpack_entry(conv._entries[target.uuid.hex.upper()])[2]
+        assert selected_target["login"] == full_target["login"]
+        assert selected_target["login"]["totp"]
+        assert {uri["uri"] for uri in selected_target["login"]["uris"]} >= {
+            "https://alias.example.test",
+            "https://chain.example.test",
+        }
+        existing_target = _make_existing(**copy.deepcopy(full_target))
+        client_double = FakeBw()
+        outcome, uploads, stale = conv._reconcile_existing_item(
+            _as_bw(client_double),
+            existing_target,
+            None,
+            selected_target,
+            [],
+            fixed_coll_id=None,
+            kp_uuid=target.uuid.hex.upper(),
+        )
+        assert outcome == "skipped" and not uploads and not stale
+        assert not client_double.updates, "Selected rerun removed merged REF data"
         for source_id, tags in ((str(uuid4()), None), (str(alias.uuid), ["elsewhere"])):
             conv = converter(path, source_id)
             conv._import_tags = tags
