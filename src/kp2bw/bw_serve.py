@@ -1895,6 +1895,14 @@ class BitwardenServeClient:
                 )
             except (BitwardenClientError, httpx.HTTPError) as exc:
                 reason = f"{stage}: {type(exc).__name__}"
+                if isinstance(exc, BitwardenHttpError):
+                    reason += f" HTTP {exc.status_code}"
+                    if _is_missing_item_error(exc.status_code, str(exc)):
+                        reason += " (item not found)"
+                    elif "Vault is locked." in str(exc):
+                        reason += " (vault locked)"
+                    elif "You are not logged in." in str(exc):
+                        reason += " (not logged in)"
                 verified = False
             if not verified:
                 logger.error(

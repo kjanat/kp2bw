@@ -1,13 +1,15 @@
 """Same-item uploads serialize; acknowledgements require post-sync byte checks."""
 
 import asyncio
+import io
+import logging
 from typing import cast
 
 import httpx
 
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
-from kp2bw.exceptions import BitwardenClientError
+from kp2bw.exceptions import BitwardenClientError, BitwardenHttpError
 
 
 class _UploadClient(BitwardenServeClient):
@@ -56,6 +58,10 @@ class _UploadClient(BitwardenServeClient):
 
     def get_item(self, item_id: str) -> BwItemResponse:
         assert self.synced, "Verification must use post-sync metadata"
+        if self.failure == "http-metadata" and item_id == "a":
+            raise BitwardenHttpError(
+                "Not found. synthetic-private-value", status_code=400
+            )
         if self.failure == "metadata" and item_id == "a":
             raise BitwardenClientError("synthetic metadata failure")
         return cast(
@@ -92,7 +98,7 @@ async def _check_batch(failure: str = "") -> None:
     expected = {("a", "reject")}
     if failure in {"missing", "corrupt", "download"}:
         expected.add(("a", "two"))
-    elif failure in {"sync", "metadata"}:
+    elif failure in {"sync", "metadata", "http-metadata"}:
         expected.update(
             ("a", name) for name in ("one", "two", "three", "after-rejection")
         )
@@ -111,6 +117,16 @@ async def _check_batch(failure: str = "") -> None:
 def main() -> None:
     for failure in ("", "missing", "corrupt", "download", "metadata", "sync"):
         asyncio.run(_check_batch(failure))
+    output = io.StringIO()
+    handler = logging.StreamHandler(output)
+    logger = logging.getLogger("kp2bw.bw_serve")
+    logger.addHandler(handler)
+    try:
+        asyncio.run(_check_batch("http-metadata"))
+    finally:
+        logger.removeHandler(handler)
+    assert "HTTP 400 (item not found)" in output.getvalue()
+    assert "synthetic-private-value" not in output.getvalue()
     client = _UploadClient()
     assert asyncio.run(client.upload_attachments_parallel([])) == []
     try:
