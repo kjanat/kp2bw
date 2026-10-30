@@ -1454,6 +1454,12 @@ class Converter:
                             allow_unicode=False,
                             sort_keys=True,
                         ).rstrip("\n")
+                legacy_item["fields"] = [
+                    field
+                    for field in legacy_item["fields"]
+                    if field["name"] != KP2BW_META_FIELD_NAME
+                    or len(field["value"]) <= 10000
+                ]
             self.stamp_content(legacy_item)
             sync_stamp = pre_history_content_signature(legacy_item)
             for field in legacy_item["fields"]:
@@ -1955,6 +1961,7 @@ class Converter:
         desired: BwItemCreate,
         *,
         migrate_password_history: bool = False,
+        legacy_history_source: bool = False,
     ) -> BwItemResponse:
         """Build a PUT body that syncs KeePass content onto an existing item.
 
@@ -2011,13 +2018,16 @@ class Converter:
                 desired_login["fido2Credentials"] = kept
         payload["login"] = desired_login
 
+        legacy_history_source = legacy_history_source or is_legacy_history_source(
+            existing
+        )
         if has_managed_history(desired) or (
             migrate_password_history
             and has_managed_history(existing)
-            and not is_legacy_history_source(existing)
+            and not legacy_history_source
         ):
             history_existing = existing
-            if is_legacy_history_source(existing):
+            if legacy_history_source:
                 history_existing = copy.deepcopy(existing)
                 history_existing["fields"] = [
                     field
@@ -2027,7 +2037,7 @@ class Converter:
             apply_native_history(
                 payload, desired.get("passwordHistory") or [], existing=history_existing
             )
-        elif has_managed_history(existing) and not is_legacy_history_source(existing):
+        elif has_managed_history(existing) and not legacy_history_source:
             payload["fields"].extend(
                 copy.copy(field)
                 for field in existing["fields"]
@@ -2209,10 +2219,13 @@ class Converter:
         try:
             # Content sync: PUT only when the KeePass-derived content changed
             # (keeps re-runs idempotent).
+            legacy_ref_status = self.legacy_ref_status(existing, kp_uuid)
+            legacy_ref_output = legacy_ref_status == "exact"
             if (
                 has_managed_history(existing)
                 and self.is_user_modified(existing)
                 and not self.force_update_all
+                and not legacy_ref_output
             ):
                 logger.warning(
                     "Item %s: password history or managed content was edited; preserving your edit",
@@ -2223,6 +2236,7 @@ class Converter:
                 existing,
                 bw_item,
                 migrate_password_history=self.migrate_password_history,
+                legacy_history_source=legacy_ref_output,
             )
             content_differs = self.content_differs(existing, update_payload)
             sync_stamp_stale = self.is_user_modified(existing)
@@ -2242,8 +2256,6 @@ class Converter:
                 and content_differs
                 and legacy_extensions_differ(existing, update_payload, stamp_generation)
             )
-            legacy_ref_status = self.legacy_ref_status(existing, kp_uuid)
-            legacy_ref_output = legacy_ref_status == "exact"
             repair_sync_stamp = not content_differs and (
                 legacy_sync_stamp or (sync_stamp_stale and legacy_ref_output)
             )
@@ -3253,6 +3265,8 @@ class Converter:
                 try:
                     self.delete_checkpoint_copy(bw, item_id, old_id, fname)
                     deleted_files = True
+                except BitwardenServeExitedError:
+                    raise
                 except BitwardenClientError, ConversionError:
                     n_attach_failed += 1
                     failed_uploads.add((item_id, fname))
@@ -3272,6 +3286,8 @@ class Converter:
                     continue
                 try:
                     self.save_verified_checkpoint(bw, item_id, plan)
+                except BitwardenServeExitedError:
+                    raise
                 except (BitwardenClientError, ConversionError) as exc:
                     n_update_failed += 1
                     logger.warning(

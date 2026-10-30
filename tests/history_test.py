@@ -238,8 +238,40 @@ def check_legacy_ref_history() -> None:
                 field["value"] = original_stamp
         old_login["uris"] = [{"uri": alias_url, "match": None}]
         assert converter.legacy_ref_status(old, identifier) == "exact"
+        client = MagicMock(spec=BitwardenServeClient)
+        client.get_item.return_value = copy.deepcopy(old)
+        outcome, _, _ = converter.reconcile_existing_item(
+            cast(BitwardenServeClient, client),
+            old,
+            None,
+            desired,
+            [],
+            fixed_coll_id=None,
+            kp_uuid=identifier,
+        )
+        assert outcome == "updated"
+        payload = client.update_item_if_revision.call_args.args[1]
+        assert payload["passwordHistory"] == desired["passwordHistory"]
+        assert any(
+            field["name"] == "KeePass:KP2BW_HISTORY:1"
+            and field["value"] == "ordinary source value"
+            for field in payload["fields"]
+        )
         old["notes"] = "destination edit"
         assert converter.legacy_ref_status(old, identifier) == "diverged"
+        client.reset_mock()
+        outcome, _, _ = converter.reconcile_existing_item(
+            cast(BitwardenServeClient, client),
+            old,
+            None,
+            desired,
+            [],
+            fixed_coll_id=None,
+            kp_uuid=identifier,
+        )
+        assert outcome == "protected"
+        client.update_item_if_revision.assert_not_called()
+        client.update_item.assert_not_called()
 
 
 def check_native_legacy_history_names() -> None:

@@ -235,6 +235,8 @@ src/kp2bw/
   Conflicting duplicate values remain custom fields. Login REF aliases remain separate when their target maps to a native non-login item.
 
 - Historical REF recognition reconstructs the former plaintext field/notes cutoff independently of current encrypted budgets.
+  Generated metadata uses the historical YAML length for that cutoff. Exact historical REF matches authenticate ordinary
+  source history-name collisions before history protection and merging; modified matches remain protected.
   Untouched old imports remain eligible for automatic upgrade; edits to their old inline fields stay protected.
 
 - `fixups.py` registers field-local upgrades for `--fixup`: URI fields and legacy YAML metadata. It validates every

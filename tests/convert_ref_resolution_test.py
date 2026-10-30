@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
+import yaml
 from lxml.etree import Element
 from pykeepass import Attachment, Entry, Group, PyKeePass, create_database
 
@@ -1382,7 +1383,77 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
     assert not protected.updated
 
 
+def assert_historical_metadata_cutoff() -> None:
+    for tag in ("x" * 9988, "x" * 10000, "é" * 3000):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "metadata-cutoff.kdbx")
+            database = create_database(path, password="pw")
+            target = database.add_entry(
+                database.root_group,
+                "Target",
+                "user",
+                "pw",
+                url="https://target.example",
+            )
+            target.tags = [tag]
+            alias = database.add_entry(
+                database.root_group,
+                "Alias",
+                "user",
+                f"{{REF:P@I:{target.uuid.hex}}}",
+                url="https://alias.example",
+            )
+            database.save()
+            converter = ChainResolutionTestConverter(
+                path, "pw", None, "pw", None, None, False, 1, None
+            )
+            items, attachments = converter.load_and_resolve()
+            desired = items["Target"]
+            assert "KP2BW_META.txt" in attachments["Target"]
+            old_yaml = yaml.safe_dump(
+                {"tags": [tag]},
+                default_flow_style=False,
+                allow_unicode=False,
+                sort_keys=True,
+            ).rstrip("\n")
+            historical = copy.deepcopy(desired)
+            historical["fields"] = [
+                field for field in historical["fields"] if field["name"] != "KP2BW_META"
+            ]
+            if len(old_yaml) <= 10000:
+                historical["fields"].append({
+                    "name": "KP2BW_META",
+                    "value": old_yaml,
+                    "type": 0,
+                })
+            historical["login"]["uris"] = [
+                {"uri": "https://target.example", "match": None}
+            ]
+            converter.restamp(historical)
+            historical["login"]["uris"].append({"uri": alias.url or "", "match": None})
+            existing = legacy_response(historical)
+            identifier = target.uuid.hex.upper()
+            assert converter.legacy_ref_status(existing, identifier) == "exact"
+            client = LegacyUpgradeClient()
+            assert (
+                converter.reconcile_legacy_output(
+                    client, existing, desired, kp_uuid=identifier
+                )
+                == "updated"
+            )
+            existing["notes"] = "destination edit"
+            protected = LegacyUpgradeClient()
+            assert (
+                converter.reconcile_legacy_output(
+                    protected, existing, desired, kp_uuid=identifier
+                )
+                == "protected"
+            )
+            assert not protected.updated
+
+
 def main() -> None:
+    assert_historical_metadata_cutoff()
     assert_legacy_ref_keeps_historical_field_routing()
     """Run the script-style assertions and report success."""
     assert_resolves_none_fields_with_references()
