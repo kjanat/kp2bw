@@ -2785,6 +2785,32 @@ class Converter:
         if current != plan.previous_records or self._is_user_modified(full):
             raise ConversionError("Item changed while saving attachment associations")
         records = dict(plan.records)
+        # Recheck adopted bytes against fresh metadata before persisting an ID.
+        # These files were uploaded on an earlier attempt, not in this batch.
+        for source in plan.sources:
+            record = records.get(source.source_id)
+            if record is None or record == plan.previous_records.get(source.source_id):
+                continue
+            metadata = next(
+                (
+                    att
+                    for att in full.get("attachments") or []
+                    if att["id"] == record.attachment_id
+                ),
+                None,
+            )
+            if (
+                metadata is None
+                or hashlib.sha256(metadata["fileName"].encode()).hexdigest()
+                != record.name_digest
+                or hashlib.sha256(
+                    bw.get_attachment(item_id, record.attachment_id)
+                ).hexdigest()
+                != record.digest
+            ):
+                raise ConversionError(
+                    "Recovered attachment changed before its association could be saved"
+                )
         verified: list[CheckpointRecord] = []
         for source in plan.uploads:
             if (item_id, source.filename) in failed:
@@ -3117,6 +3143,11 @@ class Converter:
             for item_id, plan in self._attachment_plans.items():
                 try:
                     self._persist_attachment_plan(bw, item_id, plan, failed_uploads)
+                    pending_deletes.extend(
+                        (item_id, plan.stale[source.source_id], source.filename)
+                        for source in plan.sources
+                        if source.source_id in plan.stale
+                    )
                 except BitwardenServeExitedError:
                     raise
                 except (BitwardenClientError, ConversionError) as exc:

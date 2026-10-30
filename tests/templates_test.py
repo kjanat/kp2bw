@@ -115,7 +115,8 @@ def main() -> None:
     ])
     apply_template(identity, TemplateRule("identity", {"KP2BW_ID": "username"}))
     assert (
-        identity["identity"] and identity["identity"]["username"] == "source-username"
+        identity["identity"]
+        and identity["identity"].get("username") == "source-username"
     )
     assert any(
         field["name"] == "KP2BW_ID" and field["value"] == "managed-uuid"

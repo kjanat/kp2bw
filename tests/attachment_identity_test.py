@@ -127,6 +127,27 @@ def main() -> None:
     assert len(changed.uploads) == 1
     assert changed.stale == {sources[1].source_id: "1"}
     assert changed.uploads[0].filename == plan.sources[1].filename
+    replacement_id = "pending-replacement"
+    data[replacement_id] = edited[1].data
+    pending_remote = [*remote, (replacement_id, changed.uploads[0].filename)]
+    recovered = plan_attachments(edited, records, pending_remote, data.__getitem__)
+    assert not recovered.uploads
+    assert recovered.records[edited[1].source_id].attachment_id == replacement_id
+    assert recovered.previous_records == records
+    assert recovered.stale == {edited[1].source_id: "1"}
+    # A second identical candidate must not trigger yet another upload.
+    data["ambiguous"] = edited[1].data
+    try:
+        plan_attachments(
+            edited,
+            records,
+            [*pending_remote, ("ambiguous", changed.uploads[0].filename)],
+            data.__getitem__,
+        )
+    except ConversionError:
+        pass
+    else:
+        raise AssertionError("Ambiguous pending replacement was accepted")
     # Different legacy bytes establish a unique match, even with duplicate names.
     legacy = plan_attachments(
         sources[:2], {}, [("0", "notes.txt"), ("1", "notes.txt")], data.__getitem__
