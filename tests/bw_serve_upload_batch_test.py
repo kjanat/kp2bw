@@ -1,13 +1,15 @@
 """Same-item uploads serialize; acknowledgements require post-sync byte checks."""
 
 import asyncio
+import io
+import logging
 from typing import cast
 
 import httpx
 
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
-from kp2bw.exceptions import BitwardenClientError
+from kp2bw.exceptions import BitwardenClientError, BitwardenHttpError
 
 
 class _UploadClient(BitwardenServeClient):
@@ -56,6 +58,10 @@ class _UploadClient(BitwardenServeClient):
 
     def get_item(self, item_id: str) -> BwItemResponse:
         assert self.synced, "Verification must use post-sync metadata"
+        if self.failure == "http-metadata" and item_id == "a":
+            raise BitwardenHttpError(
+                "Not found. synthetic-private-value", status_code=400
+            )
         if self.failure == "metadata" and item_id == "a":
             raise BitwardenClientError("synthetic metadata failure")
         return cast(
@@ -92,7 +98,7 @@ async def _check_batch(failure: str = "") -> None:
     expected = {("a", "reject")}
     if failure in {"missing", "corrupt", "download"}:
         expected.add(("a", "two"))
-    elif failure in {"sync", "metadata"}:
+    elif failure in {"sync", "metadata", "http-metadata"}:
         expected.update(
             ("a", name) for name in ("one", "two", "three", "after-rejection")
         )
@@ -108,9 +114,66 @@ async def _check_batch(failure: str = "") -> None:
     )
 
 
+def _check_missing_item_recovery() -> None:
+    for initial_status, message, recover in (
+        (400, "Not found.", True),
+        (404, "missing", True),
+        (400, "Not found.", False),
+        (400, "Vault is locked.", False),
+        (403, "Permission denied", False),
+    ):
+        requests: list[tuple[str, str]] = []
+
+        def respond(
+            request: httpx.Request,
+            requests: list[tuple[str, str]] = requests,
+            recover: bool = recover,
+            initial_status: int = initial_status,
+            message: str = message,
+        ) -> httpx.Response:
+            requests.append((request.method, request.url.raw_path.decode()))
+            if request.method == "POST":
+                assert request.url.params["force"] == "true"
+                return httpx.Response(200, json={"success": True, "data": {}})
+            if len(requests) == 3 and recover:
+                return httpx.Response(
+                    200, json={"success": True, "data": {"id": "item"}}
+                )
+            return httpx.Response(
+                initial_status, json={"success": False, "message": message}
+            )
+
+        client = object.__new__(BitwardenServeClient)
+        with httpx.Client(
+            transport=httpx.MockTransport(respond), base_url="http://bw.test"
+        ) as http:
+            client._http = http
+            try:
+                item = client.get_item("item")
+            except BitwardenHttpError:
+                assert not recover
+            else:
+                assert recover and item["id"] == "item"
+        expected = [("GET", "/object/item/item")]
+        if message == "Not found." or initial_status == 404:
+            expected += [("POST", "/sync?force=true"), ("GET", "/object/item/item")]
+        assert requests == expected
+
+
 def main() -> None:
+    _check_missing_item_recovery()
     for failure in ("", "missing", "corrupt", "download", "metadata", "sync"):
         asyncio.run(_check_batch(failure))
+    output = io.StringIO()
+    handler = logging.StreamHandler(output)
+    logger = logging.getLogger("kp2bw.bw_serve")
+    logger.addHandler(handler)
+    try:
+        asyncio.run(_check_batch("http-metadata"))
+    finally:
+        logger.removeHandler(handler)
+    assert "HTTP 400 (item not found)" in output.getvalue()
+    assert "synthetic-private-value" not in output.getvalue()
     client = _UploadClient()
     assert asyncio.run(client.upload_attachments_parallel([])) == []
     try:

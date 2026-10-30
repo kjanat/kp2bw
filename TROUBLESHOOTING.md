@@ -93,7 +93,7 @@ use the same CLI for the manual login step too:
 
 ```shell
 npm install -g @bitwarden/cli@<version>
-bw --version                                  # confirm the pinned one is active
+bw --version                                  # confirm the installed version
 bw config server https://vault.example.com
 bw login <user>                               # uses the legacy prelogin route
 ```

@@ -13,7 +13,7 @@ the development branch are welcome; fixes land in subsequent development or rele
 are also welcome, especially when the problem may still affect the latest release.
 
 This policy covers the distributed Python package and project-published container images when available. A pulled image
-does not update itself: pull and deploy a newly published fixed image. A pinned digest continues to identify the same
+does not update itself: pull and deploy a newly published fixed image. An image digest continues to identify the same
 build even after a newer release becomes available.
 
 ## Report a vulnerability privately
