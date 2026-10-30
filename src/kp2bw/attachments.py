@@ -151,20 +151,62 @@ def plan_attachments(
             contents[attachment_id] = read(attachment_id)
         return contents[attachment_id]
 
+    def allocated_name_pattern(source: SourceFile) -> re.Pattern[str]:
+        suffix = PurePosixPath(source.original_name).suffix
+        stem = source.original_name[: -len(suffix)] if suffix else source.original_name
+        return re.compile(
+            re.escape(f"{stem} (kp2bw-{source.source_id[:16]}")
+            + r"(?:-[1-9][0-9]*)?"
+            + re.escape(f"){suffix}")
+        )
+
     associated = dict(records)
     claimed = {record.attachment_id for record in records.values()}
     if not records:
+        # Source-specific collision names identify pending first-import uploads.
+        # Claim these before matching unsuffixed legacy names, including when
+        # several source files have identical names and bytes.
+        for source in sources:
+            pattern = allocated_name_pattern(source)
+            pending = [
+                (attachment_id, name)
+                for attachment_id, name in remote
+                if attachment_id not in claimed
+                and name not in desired_counts
+                and pattern.fullmatch(name)
+                and content(attachment_id) == source.data
+            ]
+            if len(pending) > 1:
+                raise ConversionError(
+                    "Ambiguous pending attachment association; no files were changed"
+                )
+            if pending:
+                attachment_id, name = pending[0]
+                associated[source.source_id] = FileRecord(
+                    attachment_id,
+                    hashlib.sha256(name.encode()).hexdigest(),
+                    source.digest,
+                )
+                claimed.add(attachment_id)
         # Legacy adoption: matching bytes can distinguish different same-named
         # files, but identical duplicates have no recoverable source identity.
         for source in sources:
-            candidates = by_name.get(source.original_name, [])
+            if source.source_id in associated:
+                continue
+            candidates = [
+                attachment_id
+                for attachment_id in by_name.get(source.original_name, [])
+                if attachment_id not in claimed
+            ]
             exact = [
                 attachment_id
                 for attachment_id in candidates
                 if content(attachment_id) == source.data
             ]
             same_sources = sum(
-                s.original_name == source.original_name and s.data == source.data
+                s.original_name == source.original_name
+                and s.data == source.data
+                and s.source_id not in associated
                 for s in sources
             )
             if len(exact) == 1 and same_sources == 1:
@@ -254,16 +296,7 @@ def plan_attachments(
             filename = source.original_name
             if filename in allocated or filename in by_name:
                 filename = available_name(source)
-            path = PurePosixPath(source.original_name)
-            suffix = path.suffix
-            stem = (
-                source.original_name[: -len(suffix)] if suffix else source.original_name
-            )
-            allocated_pattern = re.compile(
-                re.escape(f"{stem} (kp2bw-{source.source_id[:16]}")
-                + r"(?:-[1-9][0-9]*)?"
-                + re.escape(f"){suffix}")
-            )
+            allocated_pattern = allocated_name_pattern(source)
             candidates = [
                 (attachment_id, name)
                 for attachment_id, name in remote

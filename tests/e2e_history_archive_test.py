@@ -183,6 +183,23 @@ def main() -> None:
                 updated = read()[0]
                 run_migration(path, "test", password, env)
                 assert read()[0] == updated
+                entry.delete_history(all=True)
+                db.save()
+                run_migration(
+                    path, "test", password, {**env, "KP2BW_PASSWORD_HISTORY": "false"}
+                )
+                assert read()[0] == updated, (
+                    "Disabled history migration removed imported records"
+                )
+                run_migration(path, "test", password, env)
+                expected_history = [
+                    ("destination-only history", "2019-01-01T00:00:00.000Z")
+                ]
+                updated = read()[0]
+                run_migration(path, "test", password, env)
+                assert read()[0] == updated, (
+                    "Empty source history did not settle into a no-op"
+                )
             else:
                 assert "No item update was sent" in " ".join(result.stderr.split())
                 assert read()[0] == updated, (
@@ -199,7 +216,7 @@ def main() -> None:
                     histories[0]["password"] = "manual history edit"
                     expected_history[0] = (
                         "manual history edit",
-                        "2020-02-01T00:00:00.000Z",
+                        expected_history[0][1],
                     )
                 else:
                     item["notes"] = "manual destination edit"
