@@ -128,7 +128,7 @@ bw status | jq . # jq optional but makes it easier to read the JSON output
 
 ## Usage
 
-```pwsh
+```text
 kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 [-t TAG [TAG ...]] [-c ID] [--path-to-name | --no-path-to-name]
 [--path-to-name-skip N] [--skip-expired | --no-skip-expired]
