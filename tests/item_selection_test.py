@@ -59,6 +59,11 @@ def main() -> None:
     assert selected.source_id == source.replace("-", "").upper()
     assert selected.destination_id == destination
     assert resolve_selection(None, destination, [item], {destination}) == selected
+    for native_type in (2, 3, 4, 5):
+        native = copy.deepcopy(item)
+        native["type"] = native_type
+        assert resolve_selection(source, None, [native], {destination}) == selected
+        assert resolve_selection(None, destination, [native], {destination}) == selected
     assert resolve_selection(source, None, [], set()).destination_id is None
     for requested_source, requested_destination, items, scope in (
         (source, destination, [item], set[str]()),

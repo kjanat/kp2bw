@@ -159,7 +159,9 @@ def content_parts(
     )
 
 
-def content_signature(item: BwItemResponse | BwItemCreate) -> str:
+def content_signature(
+    item: BwItemResponse | BwItemCreate, *, include_history: bool = True
+) -> str:
     """Return a digest over exactly the item content kp2bw manages."""
     if item.get("type", 1) != 1:
         native = (
@@ -182,7 +184,7 @@ def content_signature(item: BwItemResponse | BwItemCreate) -> str:
         )
         blob = repr(
             (*native_content, history_signature(item))
-            if has_managed_history(item)
+            if include_history and has_managed_history(item)
             else native_content
         )
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -190,7 +192,9 @@ def content_signature(item: BwItemResponse | BwItemCreate) -> str:
     fido2 = fido2_signature(item.get("login"))
     content = (*parts, fido2) if fido2 else parts
     blob = repr(
-        (*content, history_signature(item)) if has_managed_history(item) else content
+        (*content, history_signature(item))
+        if include_history and has_managed_history(item)
+        else content
     )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -203,11 +207,7 @@ def pre_fido2_content_signature(item: BwItemResponse | BwItemCreate) -> str:
 
 def pre_history_content_signature(item: BwItemResponse | BwItemCreate) -> str:
     """Return the signature before native history became part of item content."""
-    parts = content_parts(item)
-    fido2 = fido2_signature(item.get("login"))
-    return hashlib.sha256(
-        repr((*parts, fido2) if fido2 else parts).encode("utf-8")
-    ).hexdigest()
+    return content_signature(item, include_history=False)
 
 
 def is_legacy_history_source(item: BwItemResponse | BwItemCreate) -> bool:
@@ -239,10 +239,10 @@ def sync_stamp_generation(
     """Return which signature algorithm produced *stamp* for *item*, if any."""
     if stamp == content_signature(item):
         return "current"
-    if item.get("type", 1) != 1:
-        return None
     if has_managed_history(item):
         return "pre_history" if is_legacy_history_source(item) else None
+    if item.get("type", 1) != 1:
+        return None
     if stamp == pre_fido2_content_signature(item):
         return "pre_fido2"
     if stamp == legacy_content_signature(item):

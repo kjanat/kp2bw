@@ -82,7 +82,5 @@ def resolve_selection(
             raise ConversionError(
                 "Selected item is outside the requested destination scope"
             )
-        if item.get("type") != 1:
-            raise ConversionError("Selected destination is not a login item")
         selected_destination = item["id"]
     return ItemSelection(selected_source, selected_destination)

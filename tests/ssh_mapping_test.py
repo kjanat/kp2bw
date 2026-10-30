@@ -2,6 +2,7 @@
 
 import copy
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, call, patch
@@ -12,12 +13,61 @@ from pykeepass import create_database
 
 from kp2bw.bw_types import BwItemResponse
 from kp2bw.convert import Converter
-from kp2bw.exceptions import BitwardenClientError
+from kp2bw.exceptions import BitwardenClientError, ConversionError
 from kp2bw.item_sync import content_signature
 from kp2bw.ssh_mapping import apply_ssh_rule, parse_ssh_rules
 
 
+def check_excluded_ssh_rules() -> None:
+    rules = parse_ssh_rules([
+        {"field": {"name": "Type", "value": "SSH"}, "fields": {"privateKey": "Key"}},
+        {
+            "field": {"name": "Title", "value": "Excluded"},
+            "fields": {"privateKey": "Key"},
+        },
+    ])
+    with tempfile.TemporaryDirectory() as directory:
+        for exclusion in ("expired", "recycled", "tag"):
+            path = Path(directory) / f"{exclusion}.kdbx"
+            db = create_database(path, password="synthetic")
+            active = db.add_entry(db.root_group, "Active", "user", "pw")
+            active.tags = ["included"]
+            excluded = db.add_entry(db.root_group, "Excluded", "user", "pw")
+            excluded.set_custom_property("Type", "SSH")
+            if exclusion == "expired":
+                excluded.expires = True
+                excluded.expiry_time = datetime(2000, 1, 1, tzinfo=UTC)
+            elif exclusion == "recycled":
+                db.trash_entry(excluded)
+            db.save()
+            converter = Converter(
+                str(path),
+                "synthetic",
+                None,
+                "unused",
+                None,
+                None,
+                False,
+                0,
+                ["included"] if exclusion == "tag" else None,
+                ssh_rules=rules,
+                skip_expired=exclusion == "expired",
+            )
+            converter.load_keepass_data()
+            assert set(converter.entries) == {active.uuid.hex.upper()}
+            converter.skip_expired = False
+            converter.include_recyclebin = True
+            converter.import_tags = None
+            try:
+                converter.load_keepass_data()
+            except ConversionError:
+                pass
+            else:
+                raise AssertionError("Included ambiguous SSH mapping was accepted")
+
+
 def main() -> None:
+    check_excluded_ssh_rules()
     private = (
         ed25519.Ed25519PrivateKey
         .generate()
