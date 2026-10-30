@@ -1942,7 +1942,10 @@ class Converter:
 
     @staticmethod
     def _build_update_payload(
-        existing: BwItemResponse, desired: BwItemCreate
+        existing: BwItemResponse,
+        desired: BwItemCreate,
+        *,
+        migrate_password_history: bool = False,
     ) -> BwItemResponse:
         """Build a PUT body that syncs KeePass content onto an existing item.
 
@@ -1999,7 +2002,11 @@ class Converter:
                 desired_login["fido2Credentials"] = kept
         payload["login"] = desired_login
 
-        if has_managed_history(desired):
+        if has_managed_history(desired) or (
+            migrate_password_history
+            and has_managed_history(existing)
+            and not is_legacy_history_source(existing)
+        ):
             history_existing = existing
             if is_legacy_history_source(existing):
                 history_existing = copy.deepcopy(existing)
@@ -2199,7 +2206,11 @@ class Converter:
                     item_id,
                 )
                 return "protected", [], {}
-            update_payload = self._build_update_payload(existing, bw_item)
+            update_payload = self._build_update_payload(
+                existing,
+                bw_item,
+                migrate_password_history=self._migrate_password_history,
+            )
             content_differs = self._content_differs(existing, update_payload)
             sync_stamp_stale = self._is_user_modified(existing)
             sync_stamp = item_kp2bw_sync(existing)
@@ -3059,7 +3070,11 @@ class Converter:
                     if outcome == "updated":
                         n_updated += 1
                         n_history += imported_history_count(
-                            self._build_update_payload(existing, bw_item)
+                            self._build_update_payload(
+                                existing,
+                                bw_item,
+                                migrate_password_history=self._migrate_password_history,
+                            )
                         )
                     elif outcome == "collection":
                         n_collection_update += 1
