@@ -1918,6 +1918,8 @@ class Converter:
                     for source in plan.uploads
                     if source.source_id in plan.stale
                 }
+            except BitwardenServeExitedError:
+                raise
             except BitwardenClientError, ConversionError:
                 logger.warning(
                     "Could not safely associate attachments on item %s; leaving its files unchanged",
