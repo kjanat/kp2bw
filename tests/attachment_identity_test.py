@@ -1,7 +1,12 @@
 """Attachment identities survive filename collisions and content replacement."""
 
+import copy
 import hashlib
 from dataclasses import replace
+from typing import cast
+from unittest.mock import MagicMock
+
+from convert_update_test import UpdateTestConverter, _make_existing
 
 from kp2bw._attachments import (
     FileRecord,
@@ -10,11 +15,75 @@ from kp2bw._attachments import (
     records_from_fields,
     source_file,
 )
+from kp2bw._item_sync import stamp_content
 from kp2bw._source_fields import source_field_name, source_field_origin
-from kp2bw.exceptions import ConversionError
+from kp2bw.bw_serve import BitwardenServeClient
+from kp2bw.bw_types import BwItemResponse
+from kp2bw.exceptions import BitwardenClientError, ConversionError
+
+
+def check_persisted_mapping(failure: str | None) -> None:
+    original = source_file("original", "file.txt", 1, "file.txt", b"old")
+    replacement = replace(original, data=b"new")
+    records = {
+        original.source_id: FileRecord(
+            "old-id", hashlib.sha256(b"file.txt").hexdigest(), original.digest
+        )
+    }
+    plan = plan_attachments(
+        [replacement], records, [("old-id", "file.txt")], lambda _: b"old"
+    )
+    cached = _make_existing(
+        fields=fields_from_records(records),
+        attachments=[
+            {"id": "old-id", "fileName": "file.txt"},
+            {"id": "new-id", "fileName": "file.txt"},
+        ],
+    )
+    stamp_content(cached)
+    remote = copy.deepcopy(cached)
+    client = MagicMock(spec=BitwardenServeClient)
+
+    def update(_item_id: str, item: BwItemResponse) -> None:
+        nonlocal remote
+        if failure != "lost-write":
+            remote = copy.deepcopy(item)
+
+    def sync(*, force: bool = False) -> None:
+        nonlocal cached
+        assert force, "Normal sync may skip the revision already observed by the CLI"
+        if failure == "sync":
+            raise BitwardenClientError("synthetic sync failure")
+        cached = copy.deepcopy(remote)
+
+    def get_item(_item_id: str) -> BwItemResponse:
+        return copy.deepcopy(cached)
+
+    client.get_item.side_effect = get_item
+    client.get_attachment.return_value = b"new"
+    client.update_item.side_effect = update
+    client.sync.side_effect = sync
+    converter = UpdateTestConverter()
+    try:
+        converter._persist_attachment_plan(
+            cast(BitwardenServeClient, client), "item", plan, set()
+        )
+    except (BitwardenClientError, ConversionError):
+        assert failure is not None
+    else:
+        assert failure is None
+        assert (
+            records_from_fields(cached["fields"])[original.source_id].attachment_id
+            == "new-id"
+        )
+    client.update_item.assert_called_once()
+    client.sync.assert_called_once_with(force=True)
+    client.delete_attachment.assert_not_called()
 
 
 def main() -> None:
+    for failure in (None, "sync", "lost-write"):
+        check_persisted_mapping(failure)
     reserved = "KP2BW_FILE_" + "0" * 64
     escaped = source_field_name(reserved)
     assert escaped != reserved and source_field_origin(escaped) == (reserved, 1)

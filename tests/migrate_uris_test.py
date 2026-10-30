@@ -90,7 +90,7 @@ class _MigrateClient(BitwardenServeClient):
             return copy.deepcopy(item)
         return copy.deepcopy(self._current_by_id[item_id])
 
-    def sync(self) -> None:
+    def sync(self, *, force: bool = False) -> None:
         pass
 
     def update_item_if_revision(

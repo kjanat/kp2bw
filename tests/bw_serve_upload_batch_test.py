@@ -46,7 +46,7 @@ class _UploadClient(BitwardenServeClient):
         finally:
             self.active.remove(item_id)
 
-    def sync(self) -> None:
+    def sync(self, *, force: bool = False) -> None:
         assert not self.active, "Verification raced with an unfinished upload"
         if self.failure == "sync":
             raise BitwardenClientError("synthetic sync failure")
