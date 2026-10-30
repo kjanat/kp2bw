@@ -9,8 +9,11 @@ storage-quota or size limits) as HTTP 400 with the reason in the JSON body's
 import asyncio
 import json
 from typing import Any, cast
+from unittest.mock import patch
 
-from kp2bw.bw_serve import BitwardenServeClient
+import httpx
+
+from kp2bw.bw_serve import BitwardenServeClient, _UploadCacheGate
 from kp2bw.exceptions import BitwardenClientError
 
 _NO_JSON = object()
@@ -50,8 +53,7 @@ class _FakeAsyncClient:
 class _ScriptedAsyncClient:
     """Returns queued responses in call order; records every POST path.
 
-    Lets a test drive the sync-and-retry path: a not-found ``/attachment``,
-    then a ``/sync``, then a successful ``/attachment`` retry.
+    Lets a test drive a rejected upload followed by one retry after recovery.
     """
 
     def __init__(self, responses: list[_FakeResponse]) -> None:
@@ -83,9 +85,15 @@ def _run_upload_scripted(responses: list[_FakeResponse]) -> _ScriptedAsyncClient
     """Invoke upload_attachment against a client with sequenced responses."""
     inst = object.__new__(BitwardenServeClient)
     client = _ScriptedAsyncClient(responses)
-    asyncio.run(
-        inst.upload_attachment(cast(Any, client), "item-1", "notes.txt", b"hello")
-    )
+    with patch.object(inst, "get_item", return_value={"id": "item-1"}) as read:
+        try:
+            asyncio.run(
+                inst.upload_attachment(
+                    cast(Any, client), "item-1", "notes.txt", b"hello"
+                )
+            )
+        finally:
+            read.assert_called_once_with("item-1")
     return client
 
 
@@ -146,11 +154,10 @@ def assert_not_found_syncs_and_retries() -> None:
     # endpoint (it resolves `itemid` from local cache). The first upload fails
     # with "Not found"; kp2bw must sync and retry, and the retry succeeds.
     not_found = _FakeResponse(200, {"success": False, "message": "Not found."})
-    sync_ok = _FakeResponse(200, {"success": True})
     success = _FakeResponse(200, {"success": True, "data": {"id": "x"}})
-    client = _run_upload_scripted([not_found, sync_ok, success])
+    client = _run_upload_scripted([not_found, success])
     paths = [path for path, _params, _files in client.posted]
-    if paths != ["/attachment", "/sync", "/attachment"]:
+    if paths != ["/attachment", "/attachment"]:
         raise AssertionError(f"expected sync-and-retry, got POST sequence: {paths}")
 
 
@@ -159,7 +166,6 @@ def assert_persistent_not_found_raises_after_one_retry() -> None:
     # and only one sync is attempted.
     responses = [
         _FakeResponse(404, _NO_JSON),
-        _FakeResponse(200, {"success": True}),
         _FakeResponse(404, _NO_JSON),
     ]
     try:
@@ -172,8 +178,96 @@ def assert_persistent_not_found_raises_after_one_retry() -> None:
     )
 
 
+async def _check_concurrent_recovery() -> None:
+    inst = object.__new__(BitwardenServeClient)
+    active: set[str] = set()
+    both_started = asyncio.Event()
+    calls: dict[str, int] = {}
+    reads: list[str] = []
+
+    async def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/attachment"
+        item_id = request.url.params["itemid"]
+        calls[item_id] = calls.get(item_id, 0) + 1
+        active.add(item_id)
+        try:
+            if calls[item_id] == 1:
+                if len(active) == 2:
+                    both_started.set()
+                await asyncio.wait_for(both_started.wait(), timeout=2)
+                return httpx.Response(
+                    400, json={"success": False, "message": "Not found."}
+                )
+            assert item_id in reads, "Upload retried before item became readable"
+            return httpx.Response(200, json={"success": True})
+        finally:
+            active.remove(item_id)
+
+    def recover(item_id: str) -> dict[str, str]:
+        assert not active, "Cache refresh overlaps an upload"
+        reads.append(item_id)
+        return {"id": item_id}
+
+    with patch.object(inst, "get_item", side_effect=recover):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(respond), base_url="http://bw.test"
+        ) as client:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    inst.upload_attachment(client, "a", "one", b"one"),
+                    inst.upload_attachment(client, "b", "two", b"two"),
+                ),
+                timeout=5,
+            )
+    assert both_started.is_set(), "Different items must retain parallelism"
+    assert calls == {"a": 2, "b": 2}
+    assert sorted(reads) == ["a", "b"]
+
+
+async def _check_cancelled_refresh_releases_waiters() -> None:
+    gate = _UploadCacheGate()
+    waiting = asyncio.Event()
+
+    async def refresh() -> None:
+        waiting.set()
+        async with gate.refreshing():
+            raise AssertionError("Refresh entered while an upload was active")
+
+    async with gate.uploading():
+        task = asyncio.create_task(refresh())
+        await waiting.wait()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        # A cancelled refresh must not leave later parallel uploads blocked.
+        async with asyncio.timeout(2), gate.uploading():
+            pass
+    async with asyncio.timeout(2), gate.refreshing():
+        pass
+
+
+def assert_failed_recovery_does_not_repeat_upload() -> None:
+    inst = object.__new__(BitwardenServeClient)
+    client = _ScriptedAsyncClient([
+        _FakeResponse(404, _NO_JSON),
+    ])
+    with patch.object(inst, "get_item", side_effect=BitwardenClientError("missing")):
+        try:
+            asyncio.run(inst.upload_attachment(cast(Any, client), "a", "one", b"one"))
+        except BitwardenClientError:
+            pass
+        else:
+            raise AssertionError("Failed recovery must abort the upload")
+    assert len(client.posted) == 1
+
+
 def main() -> None:
     """Run the script-style assertions and report success."""
+    asyncio.run(_check_concurrent_recovery())
+    asyncio.run(_check_cancelled_refresh_releases_waiters())
+    assert_failed_recovery_does_not_repeat_upload()
     assert_server_message_is_surfaced()
     assert_opaque_status_when_no_message()
     assert_success_does_not_raise()
