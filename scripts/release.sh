@@ -62,7 +62,7 @@ attach() {
 }
 
 write_notes() {
-	local changelog section readme start badge
+	local changelog section readme start badge socket
 	changelog=$(<CHANGELOG.md)
 	start="## [${version}] - "
 	[[ ${changelog} == *"${start}"* ]] || fail "Versioned changelog section is missing"
@@ -92,7 +92,9 @@ write_notes() {
 		{ if (NR > 1) print line; line = $0; joinable = !fence && !/^ *```/ && /^(- |  |[^ #|>])/ }
 		END { print line }
 	' <<<"${section}")
-	printf '<a href="https://pypi.org/project/kp2bw/%s/">%s</a>\n\n%s\n' "${version}" "${badge}" "${section}" >"${tmp}/notes.md"
+	socket="https://badge.socket.dev/pypi/package/kp2bw/${version}?artifact_id=tar-gz"
+	printf '<a href="https://pypi.org/project/kp2bw/%s/">%s</a> <a href="https://socket.dev/pypi/package/kp2bw/overview/%s"><img src="%s" alt="Socket Badge"></a>\n\n%s\n' \
+		"${version}" "${badge}" "${version}" "${socket}" "${section}" >"${tmp}/notes.md"
 	generate=true
 }
 

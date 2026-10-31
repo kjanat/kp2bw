@@ -6,6 +6,12 @@
     alt="PyPI"
   >
 </a>
+<a href="https://socket.dev/pypi/package/kp2bw">
+  <img
+    src="https://badge.socket.dev/pypi/package/kp2bw/latest"
+    alt="Socket Badge"
+  >
+</a>
 <a href="https://github.com/sponsors/kjanat">
   <img
     src="https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white"
@@ -104,41 +110,36 @@ kp2bw passwords.kdbx
 uvx --from git+https://github.com/kjanat/kp2bw kp2bw passwords.kdbx
 ```
 
-A [container image](https://github.com/kjanat/kp2bw/pkgs/container/kp2bw) is also available as
-`ghcr.io/kjanat/kp2bw:latest` ([Vaultwarden CLI](https://github.com/kjanat/vw/tree/master/apps/cli)) or `:bw` (Bitwarden
-CLI). Use Vaultwarden CLI to import password history into existing items.
+The [container image](https://github.com/kjanat/kp2bw/pkgs/container/kp2bw) `ghcr.io/kjanat/kp2bw:latest` contains the
+[Vaultwarden CLI](https://github.com/kjanat/vw/tree/master/apps/cli); `ghcr.io/kjanat/kp2bw:bw` contains the Bitwarden
+CLI. Password history imports into existing items need the Vaultwarden CLI.
 
 ## Prerequisites
 
-Install [Vaultwarden CLI](https://www.npmjs.com/package/@kjanat/vaultwarden-cli) (`vw`) or the [Bitwarden CLI] (`bw`)
-and log in once before using `kp2bw`. kp2bw detects either command directly; if both are installed, it uses `vw`. Set
-`KP2BW_CLI=bw` in your environment or `.env` to select Bitwarden CLI explicitly. For `vw`, replace `bw` in the commands
-below with `vw`. Each CLI uses its own login/profile; no adapter is needed for local use.
-
-If neither CLI is installed and `npx` is available, kp2bw automatically uses `npx --yes @kjanat/vaultwarden-cli@latest`.
-Use that same command in place of `bw` below for setup and login.
+Install the [Vaultwarden CLI](https://www.npmjs.com/package/@kjanat/vaultwarden-cli) and log in once. Self-hosted
+servers need the `config server` step first:
 
 ```bash
-# optional: point to a self-hosted instance
-bw config server https://your-domain.com/
-
-# log in (only needed once; kp2bw uses `bw unlock` afterwards)
-bw login <user>
-
-# ensure you get to a point where you are properly logged in
-bw status | jq . # jq optional but makes it easier to read the JSON output
+vw config server https://vault.example.com
+vw login user@example.com
+vw status
 ```
 
-```jsonc
-// Example return value:
+After a successful login, `vw status` prints the following; kp2bw unlocks the vault itself on every run:
+
+```json
 {
-  "serverUrl": "https://bitwarden.example.com",
-  "lastSync": "2020-06-16T06:33:51.419Z",
+  "serverUrl": "https://vault.example.com",
+  "lastSync": "2026-10-31T12:00:00.000Z",
   "userEmail": "user@example.com",
   "userId": "00000000-0000-0000-0000-000000000000",
-  "status": "locked",
+  "status": "locked"
 }
 ```
+
+kp2bw also supports the [Bitwarden CLI]: set `KP2BW_CLI=bw` in your environment or `.env` and run the same three
+commands with `bw`, which keeps its own login. Without an installed CLI, kp2bw runs `npx --yes
+@kjanat/vaultwarden-cli@latest`; use that command in place of `vw` for the login steps.
 
 ## Usage
 

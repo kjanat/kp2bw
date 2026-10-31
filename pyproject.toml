@@ -1,14 +1,16 @@
 [project]
 name            = "kp2bw"
 version         = "3.10.0"
-description     = "Imports and existing KeePass db with REF fields into Bitwarden"
+description     = "Migrate KeePass databases to Bitwarden and Vaultwarden with attachments, passkeys and history"
 readme          = "README.md"
 requires-python = ">=3.14"
 license         = "MIT"
 license-files   = ["LICENSE"]
-keywords        = ["bitwarden", "cli", "keepass", "migration", "password-manager"]
+keywords        = ["bitwarden", "cli", "kdbx", "keepass", "keepassxc", "migration", "passkey", "password-manager", "vaultwarden"]
 classifiers     = [
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
@@ -31,9 +33,11 @@ name  = "Kaj Kowalski"
 email = "info@kajkowalski.nl"
 
 [project.urls]
-Changelog  = "https://github.com/kjanat/kp2bw/blob/master/CHANGELOG.md"
-Issues     = "https://github.com/kjanat/kp2bw/issues"
-Repository = "https://github.com/kjanat/kp2bw"
+Changelog     = "https://github.com/kjanat/kp2bw/blob/master/CHANGELOG.md"
+Documentation = "https://kjanat.github.io/kp2bw/"
+Funding       = "https://github.com/sponsors/kjanat"
+Issues        = "https://github.com/kjanat/kp2bw/issues"
+Repository    = "https://github.com/kjanat/kp2bw"
 
 [project.scripts]
 kp2bw = "kp2bw.cli:main"
@@ -80,4 +84,3 @@ pykeepass-stubs.workspace = true
 
 [tool.uv.workspace]
 members = ["packages/*"]
-exclude = []
