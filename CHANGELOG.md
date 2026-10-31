@@ -8,6 +8,54 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Add container images for amd64 and arm64 with persistent authentication and a non-root runtime. The `latest` and
+  unsuffixed version tags use `@kjanat/vaultwarden-cli`; `bw` and version tags ending in `-bw` use the official Bitwarden CLI.
+- Add `--preview` and `--preview json` to inspect migration outcomes without writing to the vault. Use `--preview-target`
+  to compare against existing destination items; reports show metadata and counts rather than credential values.
+- Add `--entry-id` and `--item-id` to sync or force-update individual items while respecting existing scope filters and
+  KeePass REF dependencies. Failure and edit-protection messages include commands for retrying the affected item.
+- Add `--checkpoint PATH` to resume interrupted attachment transfers and avoid downloading unchanged, verified files.
+  New checkpoint uploads receive a stable filename suffix; recovery verifies bytes and associations before removing old copies.
+- Add native password-history migration, enabled by default, for up to five distinct previous passwords. Preserve unrelated
+  destination history and reject updates that would exceed the limit. Use `--no-password-history` to disable it.
+  Updating native history requires the `vw` CLI; the official CLI supports creation but cannot apply supplied history updates,
+  so kp2bw rejects those updates before writing.
+- Add opt-in `--archive-history` to preserve complete KeePass historical records and available historical attachment bytes
+  in an encrypted vault attachment, including protected fields, notes and source timestamps.
+- Add opt-in `--map-templates` and `--template-map` to migrate explicitly recognized KeePass templates to native cards,
+  identities and secure notes, plus `--ssh-map` for native SSH keys. Preserve source fields that cannot be mapped.
+- Add `--fixup` to upgrade known legacy URI fields and YAML metadata in Bitwarden without reading the KeePass database,
+  while preserving destination edits and respecting organization and collection selection.
+
+### Fixed
+
+- Keep imports, previews and maintenance operations inside the intersection of the selected organization, collection and
+  item filters. Preserve unrelated destination items and retain REF dependencies when selecting a single source item.
+- Prevent silent attachment loss during concurrent uploads. Track source files separately even when filenames or contents
+  coincide, verify replacements and saved associations before deleting old copies, and recover uniquely matching uploads
+  after interrupted or failed writes. Preserve ambiguous files instead of guessing their association.
+- Verify the CLI's synced inventory before deduplication and recover temporarily missing item metadata after writes,
+  preventing duplicate imports and false attachment-verification failures caused by stale CLI state.
+- Restore JSON metadata and safely upgrade untouched legacy YAML, including historical REF merges and oversized metadata.
+  Preserve destination edits, password revision dates and ordinary source fields named like migration metadata.
+- Preserve KeePass fields that collide with reserved migration names, and account for encrypted field sizes before writing.
+  Reject oversized REF payloads before migration and retain the opt-in requirement for offloading oversized secrets.
+- Validate passkeys without discarding source data. Preserve REF aliases when their target becomes a native item, and
+  retain ambiguous URI matching behavior rather than silently changing its meaning.
+- Preserve unrelated password history during updates and recovery, reconcile removed imported history, and avoid treating
+  legacy source fields as managed history when reporting a successful upgrade.
+- Stop promptly when `bw serve` exits, report the CLI version and exit status, and propagate process failures through
+  attachment cleanup and checkpoint handling.
+
+### Security
+
+- Update the locked certifi dependency to 2026.10.23, removing trust in the affected emSign root associated with compromised
+  intermediate CA keys. Rebuild existing container images to pick up the updated CA bundle.
+- Update the documentation site to SvelteKit 3.1.1 to address enhanced-form open redirects and prerendered-page XSS,
+  including the required configuration, adapter and import migration.
+
 ## [3.8.4] - 2026-10-17
 
 ### Fixed

@@ -7,10 +7,17 @@
   >
 </a>
 <a href="https://github.com/sponsors/kjanat">
-  <img src="https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></img>
+  <img
+    src="https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white"
+    alt="GitHub Sponsors"
+  >
 </a>
-
-[![Compatibility tests](https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml/badge.svg?branch=master)](https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml?query=branch%3Amaster)
+<a href="https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml?query=branch%3Amaster">
+  <img
+    src="https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml/badge.svg?branch=master"
+    alt="Compatibility tests"
+  >
+</a>
 
 Migrates KeePass databases to Bitwarden via the `bw` CLI,\
 with advantages over the built-in Bitwarden importer:
