@@ -1,51 +1,34 @@
-"""Exercise the release shell with synthetic registry and Docker commands."""
+"""Exercise publication retries and alias promotion without registry writes."""
 
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, cast
+from types import ModuleType
+from unittest.mock import patch
 
-import yaml
+
+def load_script(name: str) -> ModuleType:
+    path = Path(__file__).resolve().parents[1] / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
-    workflow = cast(
-        dict[str, Any],
-        yaml.safe_load((root / ".github/workflows/container.yml").read_text()),
-    )
-    script = next(
-        step["run"]
-        for step in workflow["jobs"]["publish"]["steps"]
-        if step.get("name") == "Publish the tested architectures without rebuilding"
-    )
+    images = load_script("release_images")
+    release = load_script("release")
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
-        stub = (
-            f"#!{sys.executable}\n"
-            + """
-import json, os, sys
-from pathlib import Path
-args = sys.argv[1:]
-if Path(sys.argv[0]).name == "curl":
-    print('{"token":"synthetic"}' if '/token?' in args[-1] else os.environ['REGISTRY_STATUS'], end='')
-else:
-    with open(os.environ['DOCKER_LOG'], 'a') as output:
-        output.write(json.dumps(args) + '\\n')
-    if args[0] == 'login':
-        _ = sys.stdin.read()
-"""
-        )
-        for name in ("docker", "curl"):
-            executable = work / name
-            executable.write_text(stub)
-            executable.chmod(0o755)
         vw = work / "vw"
         vw.write_text(
-            f"#!{sys.executable}\nimport json, os, sys\nprint(json.dumps([sys.argv[1:], os.environ.get('VW_APPDATA_DIR'), os.environ.get('VW_SESSION')]))\n"
+            f'#!{sys.executable}\nimport json, os, sys\nprint(json.dumps([sys.argv[1:], os.environ.get("VW_APPDATA_DIR"), os.environ.get("VW_SESSION")]))\n'
         )
         vw.chmod(0o755)
         for noninteractive in ("true", "false"):
@@ -63,86 +46,161 @@ else:
                 check=True,
                 timeout=10,
             )
-            expected_args = (
+            expected = (
                 ["--nointeraction", "login", "two words"]
                 if noninteractive == "true"
                 else ["login", "two words"]
             )
             assert json.loads(result.stdout) == [
-                expected_args,
+                expected,
                 str(work / "profile with spaces"),
                 "synthetic-session",
             ]
-        for version, stable, status in (
-            ("3.8.4", "true", "404"),
-            ("3.9.0rc1", "false", "404"),
-            ("3.8.4", "true", "200"),
-            ("3.8.4", "true", "503"),
-        ):
-            log = work / "commands.jsonl"
-            log.write_text("")
-            result = subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", script],
-                cwd=work,
-                env={
-                    **os.environ,
-                    "PATH": f"{work}:{os.environ['PATH']}",
-                    "GH_TOKEN": "synthetic",
-                    "GITHUB_ACTOR": "synthetic",
-                    "GITHUB_REPOSITORY": "Synthetic/Images",
-                    "GITHUB_RUN_ID": "123",
-                    "GITHUB_RUN_ATTEMPT": "1",
-                    "GITHUB_STEP_SUMMARY": str(work / "summary"),
-                    "VERSION": version,
-                    "STABLE": stable,
-                    "REGISTRY_STATUS": status,
-                    "DOCKER_LOG": str(log),
-                },
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
-            )
-            commands = cast(
-                list[list[str]],
-                [json.loads(line) for line in log.read_text().splitlines()],
-            )
-            if status != "404":
-                assert result.returncode != 0
-                assert not commands, (
-                    "Publication began without a successful no-overwrite check"
+        # Identical partial publication is resumable; different version bytes fail.
+        for previous in (None, "sha256:expected", "sha256:different"):
+
+            def command(*args: str) -> str:
+                return "sha256:expected" if args[:2] == ("crane", "digest") else ""
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {"GITHUB_RUN_ID": "123", "GITHUB_OUTPUT": str(work / "output")},
+                ),
+                patch.object(images, "run", side_effect=command) as commands,
+                patch.object(images, "remote_digest", return_value=previous),
+                patch.object(images.Path, "write_text"),
+            ):
+                try:
+                    images.publish(work, "ghcr.io/example/image", "3.9.0")
+                except RuntimeError:
+                    assert previous == "sha256:different"
+                    assert not any(
+                        c.args[:2] == ("crane", "tag") for c in commands.call_args_list
+                    )
+                else:
+                    assert previous != "sha256:different"
+                    promoted = [
+                        c.args[-1]
+                        for c in commands.call_args_list
+                        if c.args[:2] == ("crane", "tag")
+                    ]
+                    assert promoted == (
+                        ["3.9.0-vw", "3.9.0-bw", "3.9.0"] if previous is None else []
+                    )
+                    assert not any(
+                        c.args[:2] == ("docker", "build")
+                        for c in commands.call_args_list
+                    )
+        for stable in ("true", "false"):
+            with (
+                patch.dict(os.environ, {"STABLE": stable}),
+                patch.object(images, "run") as commands,
+                patch.object(images, "remote_digest", return_value=None),
+            ):
+                images.promote(
+                    "ghcr.io/example/image",
+                    "3.9.0",
+                    {"vw": "sha256:vw", "bw": "sha256:bw"},
                 )
-                continue
-            assert result.returncode == 0, result.stderr
-            image = "ghcr.io/synthetic/images"
-            tags: dict[str, list[str]] = {}
-            for command in commands:
-                if command[:3] != ["buildx", "imagetools", "create"]:
-                    continue
-                for index, arg in enumerate(command):
-                    if arg == "--tag":
-                        tags[command[index + 1].removeprefix(image + ":")] = command
-            expected = {version, version + "-vw", version + "-bw"}
-            if stable == "true":
-                expected.update({
-                    "latest",
-                    "vw",
-                    "bw",
-                    "3",
-                    "3.8",
-                    "3-vw",
-                    "3.8-vw",
-                    "3-bw",
-                    "3.8-bw",
-                })
-            assert set(tags) == expected
-            assert tags[version][-1] == f"{image}:{version}-vw"
-            if stable == "true":
-                assert tags["latest"][-1] == f"{image}:{version}-vw"
-                assert tags["bw"][-1] == f"{image}:{version}-bw"
-            assert len([command for command in commands if command[0] == "load"]) == 4
-            assert not any(command[0] == "build" for command in commands)
-    print("container release tags, CLI variants and overwrite protection passed")
+                if stable == "false":
+                    commands.assert_not_called()
+                else:
+                    targets = {c.args[-1]: c.args[-2] for c in commands.call_args_list}
+                    assert targets["latest"] == "ghcr.io/example/image@sha256:vw"
+                    assert targets["bw"] == "ghcr.io/example/image@sha256:bw"
+                    assert set(targets) == {
+                        "latest",
+                        "vw",
+                        "bw",
+                        "3",
+                        "3.9",
+                        "3-vw",
+                        "3.9-vw",
+                        "3-bw",
+                        "3.9-bw",
+                    }
+        with (
+            patch.dict(os.environ, {"STABLE": "true"}),
+            patch.object(images, "remote_digest", return_value="sha256:newer"),
+            patch.object(
+                images,
+                "run",
+                return_value=json.dumps({
+                    "config": {"Labels": {"org.opencontainers.image.version": "4.0.0"}}
+                }),
+            ) as commands,
+        ):
+            try:
+                images.promote(
+                    "ghcr.io/example/image",
+                    "3.9.0",
+                    {"vw": "sha256:vw", "bw": "sha256:bw"},
+                )
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("Older version could replace latest")
+            assert not any(
+                c.args[:2] == ("crane", "tag") for c in commands.call_args_list
+            )
+        for remote, expected in (
+            ("abc\trefs/tags/v3.9.0", True),
+            ("different\trefs/tags/v3.9.0", False),
+            ("", False),
+        ):
+            with (
+                patch.dict(os.environ, {"VERSION": "3.9.0", "GITHUB_SHA": "abc"}),
+                patch.object(release, "run", return_value=remote),
+            ):
+                try:
+                    release.verify_tag()
+                except RuntimeError:
+                    assert not expected
+                else:
+                    assert expected
+        # Existing draft assets may be reused but never silently clobbered.
+        file = work / "package.whl"
+        file.write_bytes(b"tested wheel")
+        for identical in (True, False):
+
+            def download(*args: str, identical: bool = identical) -> str:
+                Path(args[-1], file.name).write_bytes(
+                    file.read_bytes() if identical else b"other wheel"
+                )
+                return ""
+
+            with (
+                patch.dict(os.environ, {"VERSION": "3.9.0"}),
+                patch.object(
+                    release,
+                    "release",
+                    return_value={"draft": True, "assets": [{"name": file.name}]},
+                ),
+                patch.object(release, "run", side_effect=download) as commands,
+            ):
+                try:
+                    release.upload([file])
+                except RuntimeError:
+                    assert not identical
+                else:
+                    assert identical
+                assert all(
+                    c.args[:3] == ("gh", "release", "download")
+                    for c in commands.call_args_list
+                )
+        with (
+            patch.object(release, "release", return_value={"draft": False}),
+            patch.object(release, "run") as commands,
+        ):
+            try:
+                release.upload([file])
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("Public release assets could be changed")
+            commands.assert_not_called()
+    print("publication retries, immutable assets, CLI adapters and aliases passed")
 
 
 if __name__ == "__main__":

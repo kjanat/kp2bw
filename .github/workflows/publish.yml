@@ -2,12 +2,13 @@
 ---
 name: Publish
 on:
-  release: { types: [released, prereleased] }
+  push:
+    tags: ["v[0-9]*"]
   workflow_dispatch:
     inputs:
-      version: { description: "Version number (e.g. v3.1.7)", type: string }
-      dry: { description: "Do not publish", type: boolean, default: false }
+      version: { description: "Version to validate (e.g. v3.10.0)", type: string, required: true }
 permissions: {}
+concurrency: { group: release-kp2bw, cancel-in-progress: false }
 defaults: { run: { shell: bash } }
 jobs:
   check:
@@ -18,57 +19,221 @@ jobs:
       name: ${{ steps.check.outputs.name }}
       version: ${{ steps.check.outputs.version }}
       pypi_url: ${{ steps.check.outputs.pypi_url }}
+      stable: ${{ steps.mode.outputs.stable }}
+      dry: ${{ steps.mode.outputs.dry }}
     steps:
       - id: check
         uses: $/.github/actions/version-check
+      - id: mode
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && stable=true || stable=false
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          [[ "$EVENT" == workflow_dispatch ]] && dry=true || dry=false
+          echo "dry=$dry" >> "$GITHUB_OUTPUT"
 
-  integration:
+  draft:
     needs: check
-    permissions: { contents: read }
-    uses: $/.github/workflows/integration-docker.yml
-
-  publish:
-    needs: [check, integration]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: { name: pypi-kp2bw, url: "${{ needs.check.outputs.pypi_url }}" }
-    permissions: { id-token: write, contents: read }
+    timeout-minutes: 5
+    permissions: { contents: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+      STABLE: ${{ needs.check.outputs.stable }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - run: uv sync
+      - if: needs.check.outputs.dry != 'true'
+        run: uv run --no-project --python 3.14 python scripts/release.py draft
+
+  build:
+    needs: [check, draft]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: { contents: write, id-token: write, attestations: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv sync --frozen
       - name: Stamp build revision
         run: |
-          sha="$(git rev-parse HEAD)"
-          {
-            cat <<'EOF'
-          """Build-time metadata; the release workflow stamps BUILD_SHA before ``uv build``."""
-
-          EOF
-            printf 'BUILD_SHA: str | None = "%s"\n' "${sha}"
-          } > src/kp2bw/build_info.py
+          printf '"""Release build revision."""\n\nBUILD_SHA: str | None = "%s"\n' "$GITHUB_SHA" > src/kp2bw/build_info.py
       - run: uv build --no-sources
+      - name: Attest wheel and source distribution
+        if: needs.check.outputs.dry != 'true'
+        id: provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with: { subject-path: "dist/*" }
+      - if: needs.check.outputs.dry != 'true'
+        env: { BUNDLE: "${{ steps.provenance.outputs.bundle-path }}" }
+        run: |
+          cp "$BUNDLE" dist/distribution.sigstore.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: release-distributions, path: dist/, if-no-files-found: error, retention-days: 90 }
 
-      # Check that basic features work and we didn't miss to include crucial files
-      - name: Smoke test (wheel)
+  stage-distributions:
+    if: needs.check.outputs.dry != 'true'
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: release-distributions, path: dist }
+      - name: Attach distributions and provenance to the draft
+        run: uv run --no-project --python 3.14 python scripts/release.py stage
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: release-distributions, path: dist }
+      - name: Smoke test wheel
         run: uv run --isolated --no-project --with dist/kp2bw-*.whl tests/smoke_test.py
-      - name: Smoke test (source distribution)
+      - name: Smoke test source distribution
         run: uv run --isolated --no-project --with dist/kp2bw-*.tar.gz tests/smoke_test.py
 
-      - name: Save tested wheel for the container release
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with: { name: kp2bw-release-wheel, path: "dist/kp2bw-*.whl", if-no-files-found: error }
-
-      - name: Publish
-        run: uv publish
+  integration:
+    needs: draft
+    permissions: { contents: read }
+    uses: $/.github/workflows/integration-docker.yml
 
   container:
-    if: github.event_name == 'release' && needs.check.outputs.name == 'kp2bw' && !startsWith(github.event.release.tag_name, 'stubs-')
-    needs: [check, publish]
-    permissions: { contents: read, packages: write }
+    needs: [check, build]
+    permissions: { contents: read, id-token: write, attestations: write }
     uses: $/.github/workflows/container.yml
     with:
-      distribution-artifact: kp2bw-release-wheel
+      distribution-artifact: release-distributions
       version: ${{ needs.check.outputs.version }}
-      publish: true
-      stable: ${{ !github.event.release.prerelease }}
+      attest: ${{ needs.check.outputs.dry != 'true' }}
+
+  stage-images:
+    if: needs.check.outputs.dry != 'true'
+    needs: [check, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: { contents: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { pattern: "container-*-*", path: images, merge-multiple: true }
+      - name: Verify image provenance and attach archives to the draft
+        run: |
+          for file in images/*.tar; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/container.yml" --source-digest "$GITHUB_SHA"
+          done
+          uv run --no-project --python 3.14 python scripts/release.py stage --directory images --manifest image-archive-sha256.json
+
+  publish:
+    if: needs.check.outputs.dry != 'true'
+    needs: [check, smoke, integration, stage-distributions, stage-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: { name: pypi-kp2bw, url: "${{ needs.check.outputs.pypi_url }}" }
+    permissions: { id-token: write, contents: read }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: release-distributions, path: dist }
+      - name: Verify provenance before publishing
+        run: |
+          for file in dist/*.whl dist/*.tar.gz; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/publish.yml" --source-digest "$GITHUB_SHA"
+          done
+      - name: Publish the tested distributions
+        run: |
+          uv run --no-project --python 3.14 python scripts/release.py check-pypi
+          uv publish --check-url https://pypi.org/simple/ dist/*.whl dist/*.tar.gz
+      - name: Verify anonymous PyPI downloads
+        run: uv run --no-project --python 3.14 python scripts/release.py verify-pypi
+
+  publish-images:
+    needs: [check, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: { contents: write, packages: write, id-token: write, attestations: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { pattern: "container-*-*", path: images, merge-multiple: true }
+      - name: Publish tested image archives
+        id: images
+        run: |
+          for file in images/*.tar; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/container.yml" --source-digest "$GITHUB_SHA"
+          done
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          python scripts/release_images.py publish
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Attest vw image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.images.outputs.image }}
+          subject-digest: ${{ steps.images.outputs.vw }}
+          push-to-registry: true
+      - name: Attest bw image index
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ steps.images.outputs.image }}
+          subject-digest: ${{ steps.images.outputs.bw }}
+          push-to-registry: true
+      - name: Verify anonymous pulls and save image digests
+        run: |
+          python scripts/release_images.py verify
+          mkdir publication
+          cp image-digests.json publication/
+          python scripts/release.py stage --directory publication --manifest image-index-sha256.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: published-image-digests, path: image-digests.json, retention-days: 90 }
+
+  finalize:
+    needs: [check, publish-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: { contents: write, packages: write }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.check.outputs.version }}
+      STABLE: ${{ needs.check.outputs.stable }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: release-distributions, path: dist }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { name: published-image-digests, path: . }
+      - name: Verify availability, promote aliases and publish the draft
+        run: |
+          python scripts/release.py verify-pypi
+          python scripts/release_images.py verify
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          python scripts/release_images.py promote
+          python scripts/release.py finalize

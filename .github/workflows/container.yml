@@ -7,6 +7,7 @@ on:
       - Dockerfile
       - Dockerfile.dockerignore
       - scripts/vw-bw.sh
+      - scripts/release*.py
       - src/**
       - pyproject.toml
       - uv.lock
@@ -20,8 +21,7 @@ on:
     inputs:
       distribution-artifact: { type: string, required: true }
       version: { type: string, required: true }
-      publish: { type: boolean, default: false }
-      stable: { type: boolean, default: false }
+      attest: { type: boolean, default: false }
 permissions: { contents: read }
 defaults: { run: { shell: bash } }
 env: { MISE_MINIMUM_RELEASE_AGE: "0s", MISE_NPM_PACKAGE_MANAGER: npm }
@@ -94,6 +94,7 @@ jobs:
           - { arch: arm64, runner: ubuntu-26.04-arm }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    permissions: { contents: read, id-token: write, attestations: write }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
@@ -145,67 +146,18 @@ jobs:
       - name: Save the tested image
         env: { ARCH: "${{ matrix.arch }}", CLI: "${{ matrix.cli }}" }
         run: docker save "kp2bw-production:$CLI-$ARCH" --output "/tmp/container-$CLI-$ARCH.tar"
+      - name: Attest the tested image archive
+        if: inputs.attest
+        id: provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with: { subject-path: "/tmp/container-${{ matrix.cli }}-${{ matrix.arch }}.tar" }
+      - if: inputs.attest
+        env: { BUNDLE: "${{ steps.provenance.outputs.bundle-path }}", CLI: "${{ matrix.cli }}", ARCH: "${{ matrix.arch }}" }
+        run: cp "$BUNDLE" "/tmp/container-$CLI-$ARCH.sigstore.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: container-${{ matrix.cli }}-${{ matrix.arch }}
-          path: /tmp/container-${{ matrix.cli }}-${{ matrix.arch }}.tar
+          path: /tmp/container-${{ matrix.cli }}-${{ matrix.arch }}.*
           compression-level: 0
-          retention-days: 3
+          retention-days: 90
       - cancel: server
-
-  publish:
-    if: inputs.publish
-    needs: [prepare, validate]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency: { group: publish-kp2bw-container, cancel-in-progress: false }
-    permissions: { contents: read, packages: write }
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with: { pattern: container-*, path: images }
-      - name: Publish the tested architectures without rebuilding
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-          STABLE: ${{ inputs.stable }}
-        run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          scope="${GITHUB_REPOSITORY,,}"
-          token=$(curl --fail --silent --show-error --user "$GITHUB_ACTOR:$GH_TOKEN" \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:$scope:pull,push" | jq --exit-status --raw-output .token)
-          for release_tag in "$VERSION" "$VERSION-vw" "$VERSION-bw"; do
-            status=$(curl --silent --show-error --output /tmp/existing-manifest --write-out '%{http_code}' \
-              --header "Authorization: Bearer $token" \
-              --header 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
-              "https://ghcr.io/v2/$scope/manifests/$release_tag")
-            case "$status" in
-              404) ;;
-              200) echo "Release image $release_tag already exists; refusing to overwrite it" >&2; exit 1 ;;
-              *) echo "Registry check failed with HTTP $status" >&2; exit 1 ;;
-            esac
-          done
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          for cli in vw bw; do
-            tags=()
-            for arch in amd64 arm64; do
-              docker load --input "images/container-$cli-$arch/container-$cli-$arch.tar"
-              tag="$image:build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$cli-$arch"
-              docker tag "kp2bw-production:$cli-$arch" "$tag"
-              docker push "$tag"
-              tags+=("$tag")
-            done
-            docker buildx imagetools create --tag "$image:$VERSION-$cli" "${tags[@]}"
-            if [[ "$STABLE" == true ]]; then
-              [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
-              major="${BASH_REMATCH[1]}"
-              minor="$major.${BASH_REMATCH[2]}"
-              docker buildx imagetools create --tag "$image:$cli" --tag "$image:$major-$cli" \
-                --tag "$image:$minor-$cli" "$image:$VERSION-$cli"
-            fi
-            docker buildx imagetools inspect "$image:$VERSION-$cli" >> "$GITHUB_STEP_SUMMARY"
-          done
-          docker buildx imagetools create --tag "$image:$VERSION" "$image:$VERSION-vw"
-          if [[ "$STABLE" == true ]]; then
-            docker buildx imagetools create --tag "$image:latest" --tag "$image:$major" \
-              --tag "$image:$minor" "$image:$VERSION-vw"
-          fi
