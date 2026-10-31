@@ -23,14 +23,28 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def release() -> dict[str, Any]:
-    return json.loads(
-        run(
-            "gh",
-            "api",
-            f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/v{os.environ['VERSION']}",
-        )
+def find_release() -> dict[str, Any] | None:
+    tag = f"v{os.environ['VERSION']}"
+    # GitHub's releases/tags endpoint returns 404 for draft releases.
+    output = run(
+        "gh",
+        "api",
+        "--paginate",
+        f"repos/{os.environ['GITHUB_REPOSITORY']}/releases",
+        "--jq",
+        f".[] | select(.tag_name == {json.dumps(tag)})",
     )
+    matches: list[dict[str, Any]] = [json.loads(line) for line in output.splitlines()]
+    if len(matches) > 1:
+        raise RuntimeError(f"Several releases use {tag}; keep one")
+    return matches[0] if matches else None
+
+
+def release() -> dict[str, Any]:
+    current = find_release()
+    if current is None:
+        raise RuntimeError("Release is missing")
+    return current
 
 
 def upload(paths: list[Path]) -> None:
@@ -76,15 +90,7 @@ def draft() -> None:
         raise RuntimeError("Unsupported release version")
     tag = f"v{version}"
     verify_tag()
-    result = subprocess.run(
-        ["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/{tag}"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode:
-        if "HTTP 404" not in result.stderr:
-            raise RuntimeError("Cannot inspect release; refusing to create another")
+    if find_release() is None:
         changelog = Path("CHANGELOG.md").read_text()
         marker = f"## [{version}] - "
         if marker not in changelog:
