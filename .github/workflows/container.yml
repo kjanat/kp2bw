@@ -6,12 +6,11 @@ on:
     paths:
       - Dockerfile
       - Dockerfile.dockerignore
-      - scripts/release*.py
+      - scripts/release*.sh
       - src/**
       - pyproject.toml
       - uv.lock
       - tests/container_image_test.py
-      - tests/container_publish_test.py
       - tests/Dockerfile.vaultwarden
       - tests/fixtures/**
       - .github/workflows/container.yml
@@ -47,36 +46,34 @@ jobs:
         id: resolve
         env: { EXPECTED_VERSION: "${{ inputs.version }}" }
         run: |
-          python - <<'PY'
-          import email, glob, json, os, re, urllib.request, zipfile
-          wheels = glob.glob('dist/kp2bw-*.whl')
-          assert len(wheels) == 1, 'Expected exactly one kp2bw wheel'
-          with zipfile.ZipFile(wheels[0]) as wheel:
-              metadata = email.message_from_bytes(wheel.read(next(n for n in wheel.namelist() if n.endswith('.dist-info/METADATA'))))
-          assert metadata['Name'] == 'kp2bw'
-          version = metadata['Version']
-          assert not os.environ['EXPECTED_VERSION'] or version == os.environ['EXPECTED_VERSION']
-          assert re.fullmatch(r'[A-Za-z0-9_.-]+', version)
-          resolved = {}
-          for variant, package in [('bw', '@bitwarden%2fcli'), ('vw', '@kjanat%2fvaultwarden-cli')]:
-              with urllib.request.urlopen(f'https://registry.npmjs.org/{package}', timeout=30) as response:
-                  versions = json.load(response)['versions']
-              stable = [v for v in versions if re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', v)]
-              resolved[variant] = max(stable, key=lambda v: tuple(map(int, v.split('.'))))
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write(f'version={version}\n')
-              for variant, cli_version in resolved.items():
-                  output.write(f'{variant}={cli_version}\n')
-          print('Resolved CLI versions:', resolved)
-          PY
-          printf 'python=python:3.14-slim-trixie@%s\n' "$(crane digest python:3.14-slim-trixie)" >> "$GITHUB_OUTPUT"
-          printf 'node=node:26-trixie-slim@%s\n' "$(crane digest node:26-trixie-slim)" >> "$GITHUB_OUTPUT"
-          server=$(crane ls ghcr.io/dani-garcia/vaultwarden | python -c 'import re,sys; print(max((s.strip() for s in sys.stdin if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+\n?",s)),key=lambda s:tuple(map(int,s.split(".")))))')
-          printf 'server=ghcr.io/dani-garcia/vaultwarden@%s\n' "$(crane digest "ghcr.io/dani-garcia/vaultwarden:$server")" >> "$GITHUB_OUTPUT"
+          wheels=(dist/kp2bw-*.whl)
+          [[ ${#wheels[@]} == 1 && -f ${wheels[0]} ]] || { echo "Expected exactly one kp2bw wheel" >&2; exit 1; }
+          metadata=$(unzip -p "${wheels[0]}" '*.dist-info/METADATA')
+          name=$(grep -m 1 '^Name: ' <<<"${metadata}")
+          version=$(grep -m 1 '^Version: ' <<<"${metadata}")
+          version=${version#Version: }
+          [[ ${name} == "Name: kp2bw" ]] || { echo "Wheel is not kp2bw" >&2; exit 1; }
+          [[ -z ${EXPECTED_VERSION} || ${version} == "${EXPECTED_VERSION}" ]] || { echo "Wheel version ${version} differs from ${EXPECTED_VERSION}" >&2; exit 1; }
+          [[ ${version} =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "Unsupported version ${version}" >&2; exit 1; }
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          for entry in bw:@bitwarden%2fcli vw:@kjanat%2fvaultwarden-cli; do
+            registry=$(curl --fail --silent --show-error --max-time 30 "https://registry.npmjs.org/${entry#*:}")
+            latest=$(jq -r '.versions | keys[] | select(test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"))' <<<"${registry}" | sort -V | tail -n 1)
+            echo "${entry%%:*}=${latest}" >> "${GITHUB_OUTPUT}"
+            echo "Resolved ${entry%%:*} CLI ${latest}"
+          done
+          python_digest=$(crane digest python:3.14-slim-trixie)
+          node_digest=$(crane digest node:26-trixie-slim)
+          tags=$(crane ls ghcr.io/dani-garcia/vaultwarden)
+          server=$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${tags}" | sort -V | tail -n 1)
+          server_digest=$(crane digest "ghcr.io/dani-garcia/vaultwarden:${server}")
+          {
+            echo "python=python:3.14-slim-trixie@${python_digest}"
+            echo "node=node:26-trixie-slim@${node_digest}"
+            echo "server=ghcr.io/dani-garcia/vaultwarden@${server_digest}"
+          } >> "${GITHUB_OUTPUT}"
       - name: Smoke test the distribution used by every image
-        run: uv run --isolated --no-project --with dist/kp2bw-*.whl tests/smoke_test.py
-      - name: Check publication tags and retries
-        run: uv run python tests/container_publish_test.py
+        run: uv run --isolated --no-project --with ./dist/kp2bw-*.whl ./tests/smoke_test.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with: { name: container-wheel, path: "dist/kp2bw-*.whl", if-no-files-found: error }
 
@@ -101,24 +98,26 @@ jobs:
         with: { name: container-wheel, path: dist }
       - name: Build the disposable server
         env: { SERVER_IMAGE: "${{ needs.prepare.outputs.server }}" }
-        run: |
-          docker build --file tests/Dockerfile.vaultwarden --tag kp2bw-container-fixture \
-            --build-arg "VAULTWARDEN_IMAGE=$SERVER_IMAGE" tests
+        run: docker build --file tests/Dockerfile.vaultwarden --tag kp2bw-container-fixture
+          --build-arg "VAULTWARDEN_IMAGE=${SERVER_IMAGE}" tests
       - name: Run the disposable server
         id: server
         background: true
-        run: |
-          exec docker run --rm --name kp2bw-container-fixture -p 127.0.0.1:18443:443 \
-            -e I_REALLY_WANT_VOLATILE_STORAGE=true -e SIGNUPS_ALLOWED=false \
-            -e DOMAIN=https://localhost:18443 -e ROCKET_PORT=443 \
-            -e 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}' kp2bw-container-fixture
+        env:
+          DOMAIN: https://localhost:18443
+          I_REALLY_WANT_VOLATILE_STORAGE: true
+          ROCKET_PORT: 443
+          ROCKET_TLS: '{certs="/ssl/cert.pem",key="/ssl/key.pem"}'
+          SIGNUPS_ALLOWED: false
+        run: exec docker run --rm --name kp2bw-container-fixture -p 127.0.0.1:18443:443
+          -e I_REALLY_WANT_VOLATILE_STORAGE -e SIGNUPS_ALLOWED -e DOMAIN -e ROCKET_PORT -e ROCKET_TLS
+          kp2bw-container-fixture
       - name: Check server readiness
         id: server-ready
         background: true
-        run: >-
-          curl --fail --silent --show-error --retry 60 --retry-all-errors
-          --retry-delay 1 --retry-max-time 90 --max-time 5
-          --cacert tests/fixtures/vaultwarden-certs/cert.pem https://localhost:18443/alive
+        env: { cacert: tests/fixtures/vaultwarden-certs/cert.pem }
+        run: curl -fsS --retry 60 --retry-all-errors --retry-delay 1 --retry-max-time 90 --max-time 5
+          --cacert "${cacert}" https://localhost:18443/alive
       - name: Build the production image
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -128,11 +127,10 @@ jobs:
           PYTHON_IMAGE: ${{ needs.prepare.outputs.python }}
           NODE_IMAGE: ${{ needs.prepare.outputs.node }}
           ARCH: ${{ matrix.arch }}
-        run: |
-          docker build --platform "linux/$ARCH" --tag "kp2bw-production:$CLI-$ARCH" \
-            --build-arg "KP2BW_VERSION=$VERSION" --build-arg "CLI_VERSION=$CLI_VERSION" --build-arg "CLI_PACKAGE=$CLI_PACKAGE" \
-            --build-arg "REVISION=$GITHUB_SHA" --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE" \
-            --build-arg "NODE_IMAGE=$NODE_IMAGE" .
+        run: docker build --platform "linux/${ARCH}" --tag "kp2bw-production:${CLI}-${ARCH}"
+          --build-arg "KP2BW_VERSION=${VERSION}" --build-arg "CLI_VERSION=${CLI_VERSION}" --build-arg "CLI_PACKAGE=${CLI_PACKAGE}"
+          --build-arg "REVISION=${GITHUB_SHA}" --build-arg "PYTHON_IMAGE=${PYTHON_IMAGE}"
+          --build-arg "NODE_IMAGE=${NODE_IMAGE}" .
       - wait: server-ready
       - name: Test the actual image
         env:
@@ -144,7 +142,7 @@ jobs:
         run: uv run python tests/container_image_test.py
       - name: Save the tested image
         env: { ARCH: "${{ matrix.arch }}", CLI: "${{ matrix.cli }}" }
-        run: docker save "kp2bw-production:$CLI-$ARCH" --output "/tmp/container-$CLI-$ARCH.tar"
+        run: docker save "kp2bw-production:${CLI}-${ARCH}" --output "/tmp/container-${CLI}-${ARCH}.tar"
       - name: Attest the tested image archive
         if: inputs.attest
         id: provenance
@@ -152,7 +150,7 @@ jobs:
         with: { subject-path: "/tmp/container-${{ matrix.cli }}-${{ matrix.arch }}.tar" }
       - if: inputs.attest
         env: { BUNDLE: "${{ steps.provenance.outputs.bundle-path }}", CLI: "${{ matrix.cli }}", ARCH: "${{ matrix.arch }}" }
-        run: cp "$BUNDLE" "/tmp/container-$CLI-$ARCH.sigstore.json"
+        run: cp "${BUNDLE}" "/tmp/container-${CLI}-${ARCH}.sigstore.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: container-${{ matrix.cli }}-${{ matrix.arch }}

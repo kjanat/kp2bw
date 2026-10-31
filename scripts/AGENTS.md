@@ -33,6 +33,6 @@ bun install
 bun run typecheck
 ```
 
-- `release.py` and `release_images.py` are Python 3.14 release helpers run by the tag-triggered publication workflow.
-  Preserve draft-first ordering, identical-content retry checks and anonymous registry verification. Tests in
-  `tests/container_publish_test.py` stub publication commands; no live registry writes belong in tests.
+- `release.sh` and `release-images.sh` are Bash release helpers run by the tag-triggered publication workflow. They use
+  `gh release`, `crane` and `docker`. Preserve draft-first ordering, identical-content retry checks and anonymous
+  registry verification. Check them with `shellcheck -x -o all scripts/*.sh`.

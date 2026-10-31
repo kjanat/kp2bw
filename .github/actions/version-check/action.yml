@@ -44,4 +44,4 @@ runs:
     - id: fields
       shell: bash
       env: { RESULT: "${{ steps.check.outputs.result }}" }
-      run: jq --raw-output 'to_entries[] | "\(.key)=\(.value)"' <<< "$RESULT" >> "$GITHUB_OUTPUT"
+      run: jq --raw-output 'to_entries[] | "\(.key)=\(.value)"' <<< "${RESULT}" >> "${GITHUB_OUTPUT}"

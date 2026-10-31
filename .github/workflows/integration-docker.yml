@@ -95,13 +95,13 @@ jobs:
     permissions: { contents: read }
     timeout-minutes: 40
     env:
-      KP2BW_E2E_CORE_ONLY: "1"
-      KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
-      KP2BW_CLI: ${{ matrix.cli-package == '@kjanat/vaultwarden-cli' && 'vw' || 'bw' }}
-      BW_SERVER_URL: https://localhost:18443
-      KP2BW_E2E_VAULTWARDEN_CONTAINER: vaultwarden
       BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
+      BW_SERVER_URL: https://localhost:18443
+      KP2BW_CLI: ${{ matrix.cli-package == '@kjanat/vaultwarden-cli' && 'vw' || 'bw' }}
+      KP2BW_E2E_CORE_ONLY: "1"
+      KP2BW_E2E_VAULTWARDEN_CONTAINER: vaultwarden
       KP2BW_SNAPSHOT_GOLDEN: ${{ matrix.cli-package == '@bitwarden/cli' }}
+      KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
     strategy: { fail-fast: false, matrix: "${{ fromJson(needs.config.outputs.matrix) }}" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,14 +112,13 @@ jobs:
         run: docker build --pull --build-arg "VAULTWARDEN_IMAGE=$env:VAULTWARDEN_IMAGE" -f tests/Dockerfile.vaultwarden -t kp2bw-vaultwarden tests
 
       - name: Start Vaultwarden
-        run: |
-          docker run -d --name vaultwarden -p 18443:443 `
-            -e I_REALLY_WANT_VOLATILE_STORAGE=true `
-            -e SIGNUPS_ALLOWED=false `
-            -e DOMAIN=$env:BW_SERVER_URL `
-            -e ROCKET_PORT=443 `
-            -e 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}' `
-            kp2bw-vaultwarden
+        run: docker run -d --name vaultwarden -p 18443:443
+          -e I_REALLY_WANT_VOLATILE_STORAGE=true
+          -e SIGNUPS_ALLOWED=false
+          -e DOMAIN=$env:BW_SERVER_URL
+          -e ROCKET_PORT=443
+          -e 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}'
+          kp2bw-vaultwarden
 
       - name: Wait for Vaultwarden
         run: |
@@ -150,12 +149,12 @@ jobs:
         shell: bash
         env: { VW_VERSION: "${{ matrix.bw-version }}" }
         run: |
-          npm install --global --ignore-scripts --prefix "$RUNNER_TEMP/vw-cli" "@kjanat/vaultwarden-cli@$VW_VERSION"
-          mkdir -p "$RUNNER_TEMP/vw-adapter"
-          install -m 755 tests/vw_bw_adapter.sh "$RUNNER_TEMP/vw-adapter/bw"
-          echo "$RUNNER_TEMP/vw-cli/bin" >> "$GITHUB_PATH"
-          echo "$RUNNER_TEMP/vw-adapter" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/vw-cli/bin/vw" --version
+          npm install --global --ignore-scripts --prefix "${RUNNER_TEMP}/vw-cli" "@kjanat/vaultwarden-cli@${VW_VERSION}"
+          mkdir -p "${RUNNER_TEMP}/vw-adapter"
+          install -m 755 tests/vw_bw_adapter.sh "${RUNNER_TEMP}/vw-adapter/bw"
+          echo "${RUNNER_TEMP}/vw-cli/bin" >> "${GITHUB_PATH}"
+          echo "${RUNNER_TEMP}/vw-adapter" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/vw-cli/bin/vw" --version
 
       - name: Run end-to-end group (${{ matrix.group }})
         env: { E2E_SCRIPTS: "${{ toJson(matrix.scripts) }}" }

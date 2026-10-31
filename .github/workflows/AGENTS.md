@@ -55,5 +55,5 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
   Background server/readiness steps use `wait` and `cancel`; PR validation has no package-write permission.
 
 - `publish.yml` creates a draft first, attests wheel/sdist and image archives, and uploads them to the draft. Only the final job
-  publishes the GitHub release. `scripts/release.py` and `scripts/release_images.py` implement immutable assets, registry checks
+  publishes the GitHub release. `scripts/release.sh` and `scripts/release-images.sh` implement immutable assets, registry checks
   and resume behavior. Manual dispatch never publishes. Release events never trigger another publication.

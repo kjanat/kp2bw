@@ -4,8 +4,8 @@ name: Windows CLI launchers
 on:
   workflow_call:
   workflow_dispatch:
-  pull_request: { paths-ignore: ["**/*.md", ".dprint.jsonc", "**/*docker*"] }
-  push: { branches: [master], paths-ignore: ["**/*.md", ".dprint.jsonc", "**/*docker*"] }
+  pull_request: { paths-ignore: &pi ["**/*.md", "**/*dprint*", "**/*docker*"] }
+  push: { branches: [master], paths-ignore: *pi }
 permissions: {}
 jobs:
   cmd-shim:
@@ -18,16 +18,19 @@ jobs:
       CLI_PACKAGE: ${{ matrix.cli == 'vw' && '@kjanat/vaultwarden-cli' || '@bitwarden/cli' }}
     defaults: { run: { shell: pwsh } }
     steps:
-      - { uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1, with: { persist-credentials: false } }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: { persist-credentials: false }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version-file: .tool-versions, package-manager-cache: false }
-      - { uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6, if: matrix.pm == 'bun' }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        if: matrix.pm == 'bun'
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uv sync
 
       # npm/bun installs provide .cmd and .ps1 launchers for both CLIs.
       - name: Install CLI via ${{ matrix.pm }}
-        run: "& '${{ matrix.pm }}' install -g $env:CLI_PACKAGE"
+        env: { PM: "${{ matrix.pm }}" }
+        run: "& $env:PM install -g $env:CLI_PACKAGE"
 
       # Diagnostic only: PowerShell's Get-Command prefers bw.ps1, but kp2bw uses
       # Python's shutil.which (PATHEXT-aware), which resolves bw.cmd. The smoke
@@ -40,18 +43,18 @@ jobs:
           $log = @"
           ``PATHEXT``:
 
-          ``````py
+          ~~~python
           $env:PATHEXT
-          ``````
+          ~~~
 
-          ``````console
+          ~~~sh
           $($commands)
-          ``````
+          ~~~
 
-          ``````python
+          ~~~python
           shutil.which("$env:KP2BW_CLI")
           # $($pyJoinedComments)
-          ``````
+          ~~~
           "@; if ($env:GITHUB_STEP_SUMMARY) { $log | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
           $log
 

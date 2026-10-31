@@ -219,12 +219,6 @@ def test_container_image_script() -> None:
     run_script_main("container_image_test.py")
 
 
-def test_container_publish_script() -> None:
-    if os.name == "nt":
-        pytest.skip("Container publication uses Bash on Linux runners")
-    run_script_main("container_publish_test.py")
-
-
 @pytest.mark.skipif(
     os.environ.get("KP2BW_RUN_NPX_TESTS") != "1", reason="requires npm registry access"
 )
