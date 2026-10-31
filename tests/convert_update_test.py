@@ -9,10 +9,13 @@ Protected members are exercised through a ``Converter`` subclass (mirroring
 """
 
 import copy
+import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any, cast
+from unittest.mock import patch
 
+from kp2bw.attachments import FileRecord, fields_from_records
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemCreate, BwItemResponse, BwUri
 from kp2bw.convert import AttachmentItem, Converter, FieldSpec
@@ -478,6 +481,62 @@ def assert_attachment_sync_safe_on_get_failure() -> None:
         raise AssertionError("on GET failure, must not upload (avoid duplicates)")
 
 
+class StaleReadBw(FakeBw):
+    """Serve the pre-update item on the first read after a PUT, like the official CLI."""
+
+    def __init__(self, stale: BwItemResponse, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.stale: BwItemResponse | None = stale
+        self.reads = 0
+
+    def get_item(self, item_id: str) -> BwItemResponse:
+        self.reads += 1
+        if self.stale is not None:
+            current, self.stale = self.stale, None
+        else:
+            current = copy.deepcopy(self.updates[-1][1])
+        return cast(
+            BwItemResponse, {**current, "id": item_id, "attachments": self.attachments}
+        )
+
+
+def assert_forced_update_waits_for_its_own_write() -> None:
+    conv = UpdateTestConverter()
+    conv.force_update_all = True
+    atts: list[AttachmentItem] = [("notes", "y" * 20000)]
+    source = conv.attachment_sources(atts)[0]
+    record = FileRecord(
+        "att-1", hashlib.sha256(source.filename.encode()).hexdigest(), source.digest
+    )
+    synced = make_existing(
+        fields=[
+            {"name": "api", "value": "v1", "type": 0},
+            *fields_from_records({source.source_id: record}),
+        ]
+    )
+    stamp_content(synced)
+    edited = copy.deepcopy(synced)
+    edited["notes"] = "Destination edit"
+    bw = StaleReadBw(
+        edited,
+        existing_attachments=[{"id": "att-1", "fileName": source.filename}],
+        attachment_bytes={"att-1": source.data},
+    )
+    with patch("kp2bw.convert.time.sleep"):
+        outcome, uploads, _ = conv.reconcile(
+            as_bw(bw),
+            edited,
+            "folder-1",
+            make_desired(),
+            atts,
+            fixed_coll_id=None,
+        )
+    if outcome != "updated" or uploads or bw.reads != 2:
+        raise AssertionError(
+            f"forced update trusted a stale read: {outcome!r}, {uploads!r}, {bw.reads} reads"
+        )
+
+
 def assert_rejected_update_is_non_fatal() -> None:
     conv = UpdateTestConverter()
     # Item has no attachments yet, so without the early return the rejected
@@ -697,6 +756,7 @@ def main() -> None:
     assert_changed_attachment_is_refreshed()
     assert_changed_attachment_safe_on_download_failure()
     assert_attachment_sync_safe_on_get_failure()
+    assert_forced_update_waits_for_its_own_write()
     assert_rejected_update_is_non_fatal()
     assert_no_update_flag_restores_skip()
     assert_non_login_collision_is_not_mutated()

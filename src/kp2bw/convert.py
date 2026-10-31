@@ -2162,6 +2162,7 @@ class Converter:
         outcome: Literal["updated", "collection", "skipped", "protected", "failed"] = (
             "skipped"
         )
+        written_stamp: str | None = None
 
         if self.update_existing and existing.get("type") == 5 and bw_item["type"] != 5:
             logger.warning(
@@ -2323,6 +2324,7 @@ class Converter:
                 else:
                     bw.update_item(item_id, payload)
                 bw.update_dedup_entry(kp_uuid, payload)
+                written_stamp = item_kp2bw_sync(payload)
                 if legacy_ref_output:
                     logger.log(VERBOSE, f"-- Entry {name!r}: legacy REF state upgraded")
                 elif repair_sync_stamp:
@@ -2376,6 +2378,19 @@ class Converter:
             self.checkpoint_cleanup = []
             try:
                 full = bw.get_item(item_id)
+                # The official CLI can serve the pre-update item briefly after a PUT.
+                attempt = 0
+                while (
+                    written_stamp
+                    and (
+                        item_kp2bw_sync(full) != written_stamp
+                        or self.is_user_modified(full)
+                    )
+                    and attempt < 5
+                ):
+                    time.sleep(min(0.1 * 2**attempt, 1.0))
+                    attempt += 1
+                    full = bw.get_item(item_id)
                 records = records_from_fields(full.get("fields") or [])
                 if records and (
                     not item_kp2bw_sync(full) or self.is_user_modified(full)

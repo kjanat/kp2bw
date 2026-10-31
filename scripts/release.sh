@@ -85,6 +85,13 @@ write_notes() {
 	badge=${badge%%"</a>"*}
 	badge=${badge//"https://img.shields.io/pypi/v/kp2bw?"/"https://img.shields.io/badge/pypi-${version}-3775A9?"}
 	section=${section//'### '/'## '}
+	# GitHub renders every newline in a release body as a line break.
+	section=$(awk '
+		/^ *```/ { fence = !fence }
+		!fence && /^  [^ ]/ && joinable { line = line " " substr($0, 3); next }
+		{ if (NR > 1) print line; line = $0; joinable = !fence && !/^ *```/ && /^(- |  |[^ #|>])/ }
+		END { print line }
+	' <<<"${section}")
 	printf '<a href="https://pypi.org/project/kp2bw/%s/">%s</a>\n\n%s\n' "${version}" "${badge}" "${section}" >"${tmp}/notes.md"
 	generate=true
 }

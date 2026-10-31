@@ -1935,7 +1935,7 @@ class BitwardenServeClient:
             except BitwardenHttpError as exc:
                 if exc.status_code not in {400, 409}:
                     raise
-                self.sync()
+                self.sync(force=True)
                 resolved_item = self.get_item(item["id"])
                 if self.item_update_body(resolved_item) == self.item_update_body(item):
                     migrated += 1
@@ -2448,7 +2448,7 @@ class BitwardenServeClient:
         if not pending:
             return failed
         try:
-            self.sync()
+            self.sync(force=True)
         except (BitwardenClientError, httpx.HTTPError) as exc:
             logger.error(
                 "Could not sync uploaded attachments for verification (%s); retaining old copies",

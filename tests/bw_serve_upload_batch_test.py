@@ -51,6 +51,9 @@ class UploadClient(BitwardenServeClient):
         assert not self.active, "Verification raced with an unfinished upload"
         if self.failure == "sync":
             raise BitwardenClientError("synthetic sync failure")
+        # A normal CLI sync can skip fetching when the revision timestamp is unchanged.
+        if not force:
+            return
         self.synced = True
         if self.failure == "missing":
             self.files["a"].pop("two")

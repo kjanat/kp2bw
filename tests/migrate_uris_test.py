@@ -73,6 +73,7 @@ class MigrateClient(BitwardenServeClient):
         self.updated_ids: list[str] = []
         self.updated_items: dict[str, BwItemResponse] = {}
         self.expected_revisions: list[str] = []
+        self.unsynced: dict[str, BwItemResponse] = {}
 
     def list_items(
         self,
@@ -88,16 +89,19 @@ class MigrateClient(BitwardenServeClient):
         if versions:
             item = versions.pop(0) if len(versions) > 1 else versions[0]
             return copy.deepcopy(item)
-        return copy.deepcopy(self.current_by_id[item_id])
+        return copy.deepcopy(self.unsynced.get(item_id) or self.current_by_id[item_id])
 
     def sync(self, *, force: bool = False) -> None:
-        pass
+        # A normal CLI sync can skip fetching when the revision timestamp is unchanged.
+        if force:
+            self.unsynced.clear()
 
     def update_item_if_revision(
         self, item_id: str, item: BwItemResponse, *, expected_revision: str
     ) -> None:
         self.expected_revisions.append(expected_revision)
         if item_id in self.commit_then_conflict:
+            self.unsynced[item_id] = copy.deepcopy(self.current_by_id[item_id])
             committed = copy.deepcopy(item)
             committed["revisionDate"] = "2026-09-05T00:00:02.000Z"
             self.current_by_id[item_id] = committed
