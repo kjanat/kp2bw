@@ -1,9 +1,8 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
-	import CommandBox from '$lib/components/CommandBox.svelte';
-	import PathTable from '$lib/components/PathTable.svelte';
-	import PlannerOptions from '$lib/components/PlannerOptions.svelte';
-	import TreeLegend from '$lib/components/TreeLegend.svelte';
+	import CommandBox from '#lib/components/CommandBox.svelte';
+	import PathTable from '#lib/components/PathTable.svelte';
+	import PlannerOptions from '#lib/components/PlannerOptions.svelte';
+	import TreeLegend from '#lib/components/TreeLegend.svelte';
 	import {
 		commandDisplayForState,
 		defaultPlannerState,
@@ -13,8 +12,9 @@
 		previewForState,
 		sanitizePlannerState,
 		statsForState,
-	} from '$lib/planner';
-	import type { PlannerState } from '$lib/planner';
+	} from '#lib/planner.ts';
+	import type { PlannerState } from '#lib/planner.ts';
+	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 
 	let planner: PlannerState = $state({ ...defaultPlannerState });

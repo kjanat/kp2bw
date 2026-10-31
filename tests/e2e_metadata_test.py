@@ -15,9 +15,11 @@ from e2e_vaultwarden_test import bw_json, get_session, run, run_migration
 from pykeepass import create_database
 from snapshot import JsonValue, as_object
 
+from kp2bw.attachments import records_from_fields
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
-from kp2bw.item_sync import stamp_content
+from kp2bw.convert import Converter
+from kp2bw.item_sync import pre_history_content_signature, stamp_content
 
 type JsonObject = dict[str, JsonValue]
 
@@ -148,7 +150,82 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
                     ],
                     env=env,
                 )
+    check_legacy_ref_upgrade(tmp, env, password)
     print("live JSON metadata and YAML upgrade regression passed")
+
+
+def check_legacy_ref_upgrade(tmp: Path, env: dict[str, str], password: str) -> None:
+    source = tmp / "legacy-ref-metadata.kdbx"
+    db = create_database(source, password="synthetic")
+    entry = db.add_entry(
+        db.root_group, "Legacy REF metadata", "user", "pw", url="https://target.example"
+    )
+    entry.tags = ["x" * 11000]
+    entry.set_custom_property("KP2BW_HISTORY", "ordinary source field")
+    db.add_entry(
+        db.root_group,
+        "Alias",
+        "user",
+        f"{{REF:P@I:{entry.uuid.hex}}}",
+        url="https://alias.example",
+    )
+    db.save()
+    converter = Converter(
+        str(source),
+        "synthetic",
+        None,
+        password,
+        None,
+        None,
+        False,
+        999,
+        None,
+        migrate_password_history=False,
+    )
+    converter.prepare_entries()
+    desired = converter.unpack_entry(converter.entries[entry.uuid.hex.upper()])[2]
+    historical = copy.deepcopy(desired)
+    historical["fields"] = [
+        field for field in historical["fields"] if field["name"] != "KP2BW_META"
+    ]
+    for field in historical["fields"]:
+        if field["name"] == "KeePass:KP2BW_HISTORY:1":
+            field["name"] = "KP2BW_HISTORY"
+    historical["login"]["uris"] = [{"uri": "https://target.example", "match": None}]
+    old_stamp = pre_history_content_signature(historical)
+    for field in historical["fields"]:
+        if field["name"] == "KP2BW_SYNC":
+            field["value"] = old_stamp
+    historical["login"]["uris"].append({"uri": "https://alias.example", "match": None})
+    with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+        item_id = bw.create_item(historical)
+    try:
+        with patch.dict(os.environ, env):
+            assert converter.convert() == 0
+        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            updated = bw.get_item(item_id)
+            assert any(
+                field["name"] == "KeePass:KP2BW_HISTORY:1"
+                for field in updated["fields"]
+            )
+            assert not any(
+                field["name"] == "KP2BW_HISTORY" for field in updated["fields"]
+            )
+            records = records_from_fields(updated["fields"])
+            assert len(records) == 1
+            metadata_bytes = bw.get_attachment(
+                item_id, next(iter(records.values())).attachment_id
+            )
+            assert json.loads(metadata_bytes) == {"tags": entry.tags}
+        with patch.dict(os.environ, env):
+            assert converter.convert() == 0
+        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            repeated = bw.get_item(item_id)
+            assert repeated["revisionDate"] == updated["revisionDate"]
+            assert repeated["attachments"] == updated["attachments"]
+    finally:
+        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
+            bw.request("DELETE", f"/object/item/{item_id}")
 
 
 def main() -> None:

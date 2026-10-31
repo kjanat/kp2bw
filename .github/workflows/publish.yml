@@ -55,5 +55,20 @@ jobs:
       - name: Smoke test (source distribution)
         run: uv run --isolated --no-project --with dist/kp2bw-*.tar.gz tests/smoke_test.py
 
+      - name: Save tested wheel for the container release
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: kp2bw-release-wheel, path: "dist/kp2bw-*.whl", if-no-files-found: error }
+
       - name: Publish
         run: uv publish
+
+  container:
+    if: github.event_name == 'release' && needs.check.outputs.name == 'kp2bw' && !startsWith(github.event.release.tag_name, 'stubs-')
+    needs: [check, publish]
+    permissions: { contents: read, packages: write }
+    uses: $/.github/workflows/container.yml
+    with:
+      distribution-artifact: kp2bw-release-wheel
+      version: ${{ needs.check.outputs.version }}
+      publish: true
+      stable: ${{ !github.event.release.prerelease }}

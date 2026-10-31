@@ -144,8 +144,8 @@ def check_destination_attachment_entitlement() -> None:
         )
         target.item_policy_blockers.return_value = {}
         for limit in (10, 5):
-            target.attachment_capability.side_effect = lambda organization_id: (
-                AttachmentCapability(
+            target.attachment_capability.side_effect = (
+                lambda organization_id, limit=limit: AttachmentCapability(
                     organization_id is not None,
                     storage_limit_bytes=limit if organization_id == "org-a" else 5,
                     reason="Personal uploads require premium"

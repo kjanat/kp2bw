@@ -29,7 +29,7 @@ from kp2bw.checkpoint import (
     CheckpointScope,
     metadata_digest,
 )
-from kp2bw.exceptions import ConversionError
+from kp2bw.exceptions import BitwardenServeExitedError, ConversionError
 from kp2bw.item_sync import stamp_content
 
 
@@ -100,7 +100,41 @@ def reusable(saved: CheckpointRecord, observed: CheckpointRecord) -> bool:
     )
 
 
+def check_fatal_checkpoint_handlers() -> None:
+    source = source_file("original", "file.txt", 1, "file.txt", b"data")
+    for stage in ("delete_checkpoint_copy", "save_verified_checkpoint"):
+        converter = UpdateTestConverter()
+        client = MagicMock(spec=BitwardenServeClient)
+        for item_id in ("first", "second"):
+            plan = plan_attachments([source], {}, [], lambda _: b"")
+            if stage == "delete_checkpoint_copy":
+                plan.stale[source.source_id] = "old-" + item_id
+            converter.attachment_plans[item_id] = plan
+        fatal = BitwardenServeExitedError(
+            "CLI synthetic-version exited; inspect compatibility"
+        )
+        with (
+            patch.object(converter, "persist_attachment_plan"),
+            patch.object(
+                converter,
+                stage,
+                side_effect=fatal,
+            ) as operation,
+        ):
+            try:
+                converter.create_bitwarden_items_for_entries(
+                    cast(BitwardenServeClient, client)
+                )
+            except BitwardenServeExitedError as exc:
+                assert exc is fatal
+            else:
+                raise AssertionError(f"Fatal {stage} failure became a per-item warning")
+            operation.assert_called_once()
+            assert operation.call_args.args[1] == "first"
+
+
 def main() -> None:
+    check_fatal_checkpoint_handlers()
     saved = record()
     assert reusable(saved, saved)
     for phase in ("pending", "slot", "uploaded", "verified"):

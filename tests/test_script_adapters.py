@@ -211,3 +211,15 @@ def test_item_selection_script() -> None:
 
 def test_fixups_script() -> None:
     run_script_main("fixups_test.py")
+
+
+def test_container_image_script() -> None:
+    if os.environ.get("KP2BW_RUN_CONTAINER_TESTS") != "1":
+        pytest.skip("set KP2BW_RUN_CONTAINER_TESTS=1 to test the production image")
+    run_script_main("container_image_test.py")
+
+
+def test_container_publish_script() -> None:
+    if os.name == "nt":
+        pytest.skip("Container publication uses Bash on Linux runners")
+    run_script_main("container_publish_test.py")

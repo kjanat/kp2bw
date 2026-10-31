@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PreviewNode } from '$lib/planner';
+	import type { PreviewNode } from '#lib/planner.ts';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	type Tree = {

@@ -23,8 +23,9 @@ GitHub Actions workflows for release checks, publish orchestration, docker e2e, 
 - Preserve workflow output keys from check jobs (`name`, `version`, `pypi_url`) and downstream references.
 - Keep main publish gated by `integration-docker.yml` (`needs: [check, integration]`).
 - Integration runs the script regression adapters before the live matrix.
-- Integration resolves the newest stable server and both CLI packages before testing. Both jobs must pass;
-  the official CLI job also compares golden snapshots. Tools come from `.tool-versions` through mise.
+- Integration resolves the newest stable server and both CLI packages before testing. All CLI/test-group jobs must pass;
+  the official CLI core job also compares golden snapshots. Core, attachment, format and scope groups each get
+  a separate server and run in parallel; no group shares vault state. Tools come from `.tool-versions` through mise.
 - Preserve smoke tests from built artifacts before `uv publish`.
 - Stubs build/smoke validation runs without a deployment environment or OIDC write permission. The protected publish
   job is skipped for dry dispatches and consumes the exact validated artifact ID; root workflow `dry` is informational.
@@ -47,3 +48,8 @@ bun run typecheck
 docker compose -f tests/docker-compose.yml build
 docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-code-from test
 ```
+
+- `container.yml` tests both CLI variants of the production OCI image natively on amd64/arm64. Release calls consume the wheel artifact from
+  the successful main publish job; stubs do not call it. Publish only the tested image archives, with version-tag
+  overwrite refusal. Stable releases update major/minor and CLI aliases; unsuffixed tags select the `vw` variant.
+  Background server/readiness steps use `wait` and `cancel`; PR validation has no package-write permission.

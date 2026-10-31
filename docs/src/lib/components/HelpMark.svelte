@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 
-	type DocsHref = '/docs' | `/docs#${string}`;
+	type DocsHref = 'docs' | `docs#${string}`;
 
-	let { text, href = '/docs' }: { text: string; href?: DocsHref } = $props();
+	let { text, href = 'docs' }: { text: string; href?: DocsHref } = $props();
 </script>
 
 <span class="wrap">

@@ -1164,6 +1164,12 @@ def main() -> None:
 
         run_preview_test(tmp, env, bw_password)
 
+    # CI runs the independent fixtures in parallel jobs with separate servers.
+    # Direct runs still execute the complete suite by default.
+    if os.environ.get("KP2BW_E2E_CORE_ONLY") == "1":
+        print("vaultwarden core end-to-end integration test passed")
+        return
+
     # Scope fixtures run last so their org items do not enter personal goldens.
     from e2e_scope_test import main as run_scope_test
 
