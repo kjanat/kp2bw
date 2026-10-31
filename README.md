@@ -6,8 +6,20 @@
     alt="PyPI"
   >
 </a>
+<a href="https://github.com/sponsors/kjanat">
+  <img
+    src="https://img.shields.io/badge/Sponsor-ea4aaa?logo=githubsponsors&logoColor=white"
+    alt="GitHub Sponsors"
+  >
+</a>
+<a href="https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml?query=branch%3Amaster">
+  <img
+    src="https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml/badge.svg?branch=master"
+    alt="Compatibility tests"
+  >
+</a>
 
-Migrates KeePass databases to Bitwarden via the `bw` CLI,\
+Migrates KeePass databases to Bitwarden,\
 with advantages over the built-in Bitwarden importer:
 
 - <details>
@@ -48,7 +60,7 @@ with advantages over the built-in Bitwarden importer:
   </details>
 - <details>
     <summary><b>Metadata preservation</b></summary>
-    KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (JSON), omitted when an entry has neither. Created/modified timestamps are not migrated — Bitwarden manages its own creation/revision dates.
+    KeePass tags and expiry date are folded into a single <code>KP2BW_META</code> custom field (JSON), omitted when an entry has neither. Created/modified timestamps are not migrated. Bitwarden manages its own creation/revision dates.
   </details>
 - <details>
     <summary><b>Tag filtering</b></summary>
@@ -184,7 +196,7 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--strip-ids`                          | Finalize: remove kp2bw tracking fields from migrated items, then exit (no migration; no KeePass db)                                                                                                 | `KP2BW_STRIP_IDS`                     |
 | `-y, --yes`                            | Skip the Bitwarden CLI setup confirmation prompt                                                                                                                                                    | `KP2BW_YES`                           |
 | `-v, --verbose`                        | Verbose output                                                                                                                                                                                      | `KP2BW_VERBOSE`                       |
-| `-d, --debug`                          | Debug output — includes third-party library logs                                                                                                                                                    | `KP2BW_DEBUG`                         |
+| `-d, --debug`                          | Debug output, including third-party library logs                                                                                                                                                    | `KP2BW_DEBUG`                         |
 | `-V, --version`                        | Print the installed `kp2bw` version and exit                                                                                                                                                        | -                                     |
 | `--doctor`                             | Print environment diagnostics (kp2bw/CLI/server versions, install method, `.env` detection) and exit; non-zero exit when the selected CLI is unusable                                               | -                                     |
 | `--redact`                             | With `--doctor`: mask the server URL and home-anchored paths so the report is safe to paste in a public issue                                                                                       | -                                     |
@@ -198,41 +210,40 @@ create/use one collection per top-level KeePass folder, or `--bitwarden-collecti
 from full KeePass paths such as `Work/Servers`.
 
 Because folders only duplicate the collection tree in your personal vault, `--bitwarden-org` defaults to **not**
-creating personal folders — items are filed only into collections. Pass `--folder` (or `KP2BW_CREATE_FOLDERS=1`) to
+creating personal folders. Items are filed only into collections. Pass `--folder` (or `KP2BW_CREATE_FOLDERS=1`) to
 restore the personal folder tree alongside the collections.
 
 ### URL handling
 
 A KeePass(XC) entry's additional URLs (`KP2A_URL`/`KP2A_URL_n`, plus the plainer `URL`/`URL_n` convention) and Android
 packages (`AndroidApp`/`AndroidApp_n`, incl. the no-underscore `AndroidApp1` variant) are migrated as real Bitwarden
-**login URIs** — not inert custom fields — so one login autofills across every site and app it covered in KeePass.
-Free-text URL labels (`API Url`, `Alt. URL`, `Website`, …) are left as custom fields, since folding those would wrongly
-autofill API endpoints and other metadata. Each URI gets a per-URI match mode reproducing KeePassXC's behaviour: a plain
-URL → **account default** (`match` unset, what Bitwarden itself writes; pass `--uri-match domain` to force base-domain
-and replicate KeePassXC's host-based matching), a double-quoted URL → **exact**, and a `*` wildcard → **starts-with**
-(trailing path) or **regex**. Non-web schemes (`keepassxc://`, `cmd://`, `kdbx://`, `file://`) and unresolved `{REF:…}`
-URLs are dropped. `--no-interpret-uri-syntax` disables the quote/wildcard interpretation and imports every URL as a
-plain string.
+**login URIs**, so one login autofills across every site and app it covered in KeePass. Free-text URL labels (`API Url`,
+`Alt. URL`, `Website`, …) are left as custom fields, since folding those would wrongly autofill API endpoints and other
+metadata. Each URI gets a per-URI match mode reproducing KeePassXC's behaviour: a plain URL → **account default**
+(`match` unset, what Bitwarden itself writes; pass `--uri-match domain` to force base-domain and replicate KeePassXC's
+host-based matching), a double-quoted URL → **exact**, and a `*` wildcard → **starts-with** (trailing path) or
+**regex**. Non-web schemes (`keepassxc://`, `cmd://`, `kdbx://`, `file://`) and unresolved `{REF:…}` URLs are dropped.
+`--no-interpret-uri-syntax` disables the quote/wildcard interpretation and imports every URL as a plain string.
 
 Already imported before this existed? Two ways to upgrade: re-run a normal migration (the change is detected and the
-items are updated in place), or — if you don't want to re-import — run `kp2bw --migrate-uris`, a Bitwarden-only one-shot
-pass that re-folds the legacy fields into URIs on every existing item. Both honour
-`--uri-match`/`--interpret-uri-syntax` and `-o`/`-c`. The one-shot pass preserves stamped items edited in Bitwarden and
-establishes or refreshes `KP2BW_SYNC` on each migrated item.
+items are updated in place), or run `kp2bw --migrate-uris` without re-importing, a Bitwarden-only one-shot pass that
+re-folds the legacy fields into URIs on every existing item. Both honour `--uri-match`/`--interpret-uri-syntax` and
+`-o`/`-c`. The one-shot pass preserves stamped items edited in Bitwarden and establishes or refreshes `KP2BW_SYNC` on
+each migrated item.
 
 Too many subdomains autofilling together? Under base-domain matching, every login under `*.example.com` surfaces on any
-`example.com` subdomain. `kp2bw --report-uris keepass` (or `bitwarden`) prints a read-only collision report —
-registrable domains with multiple hosts — so you can see which entries pile up and switch those to **Host** match (or
+`example.com` subdomain. `kp2bw --report-uris keepass` (or `bitwarden`) prints a read-only collision report of
+registrable domains with multiple hosts, so you can see which entries pile up and switch those to **Host** match (or
 flip your Bitwarden account's default URI match detection to Host). It changes nothing; it just lists.
 
-Because kp2bw is KeePass-authoritative, a re-run would normally overwrite any difference on an existing item — quietly
-undoing a title, note or URI you fixed in Bitwarden. It doesn't: every item kp2bw writes carries a `KP2BW_SYNC` content
+Because kp2bw is KeePass-authoritative, a re-run would normally overwrite any difference on an existing item and quietly
+undo a title, note or URI you fixed in Bitwarden. It doesn't: every item kp2bw writes carries a `KP2BW_SYNC` content
 signature, and a re-run that finds an item's current content no longer matching that stamp knows *you* edited it
 (kp2bw's own writes restamp, so they never self-trip) and **preserves your edit**, listing it as `protected` in the
 summary. Pass `--force-update` (env `KP2BW_FORCE_UPDATE`) to make KeePass win regardless. Unchanged re-runs stay
 idempotent, and items imported before this existed are adopted normally on their first re-run.
 
-Every migrated item carries a plain-text `KP2BW_ID` custom field — the KeePass UUID kp2bw uses to match entries on
+Every migrated item carries a plain-text `KP2BW_ID` custom field with the KeePass UUID kp2bw uses to match entries on
 re-runs so nothing duplicates. Once you're satisfied the migration is complete and you're ready to fully adopt
 Bitwarden, run
 
@@ -245,9 +256,8 @@ exit. No KeePass database is read.
 
 > [!WARNING]
 > This is **irreversible** and makes future migration re-runs unreliable. Without the stamp, a re-run can only match by
-> folder + name — the exact collision the stamp exists to prevent — so entries that share a folder and title may be
-> duplicated or mismatched on a later migration. `--strip-ids` confirms before changing anything (skip with `-y`). Only
-> run it once you're truly done migrating.
+> folder + name, so entries that share a folder and title may be duplicated or mismatched on a later migration.
+> `--strip-ids` confirms before changing anything (skip with `-y`). Only run it once you're truly done migrating.
 
 ### `.env` file
 
@@ -271,12 +281,18 @@ variables must come from your shell.
 
 Every run writes a full DEBUG log to a per-user file even when the console stays quiet, so a failed run leaves a
 complete record to share. On Windows that is `%LOCALAPPDATA%\kp2bw\logs`; override the file with `KP2BW_LOG_FILE` or the
-directory with `KP2BW_LOG_DIR`. `bw serve` errors include the server's actual message, and a slow or dropped request no
-longer aborts the run — failed entries are counted in the summary and a re-run safely picks up where it left off.
-Against a slow self-hosted server (e.g. Vaultwarden) where individual writes time out, raise the per-request HTTP
-timeout with `KP2BW_HTTP_TIMEOUT` (seconds; default 180, capped at 3600) to let those creates finish in the first place.
+directory with `KP2BW_LOG_DIR`. CLI errors include the server's actual message, and a slow or dropped request no longer
+aborts the run. The summary counts failed entries, and a re-run picks up where it left off. Against a slow self-hosted
+server (e.g. Vaultwarden) where individual writes time out, raise the per-request HTTP timeout with `KP2BW_HTTP_TIMEOUT`
+(seconds; default 180, capped at 3600) to let those creates finish in the first place.
+
+Check the [compatibility test results] for your CLI and server versions.
 
 See [TROUBLESHOOTING].
+
+## Security
+
+See the [security policy](SECURITY.md).
 
 [^offload]: Bitwarden limits encrypted text field size; the available space depends on UTF-8 encoding and encryption
     overhead.
@@ -287,6 +303,7 @@ See [TROUBLESHOOTING].
 
 ["🧪 Test this PR"]: https://github.com/kjanat/kp2bw/pull/34#issuecomment-4763225590 "Example"
 [Bitwarden CLI]: https://bitwarden.com/help/cli/
+[compatibility test results]: https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml
 [TROUBLESHOOTING]: https://github.com/kjanat/kp2bw/blob/HEAD/TROUBLESHOOTING.md
 [`.env.example`]: https://github.com/kjanat/kp2bw/blob/HEAD/.env.example
 [jampe/kp2bw]: https://github.com/jampe/kp2bw
