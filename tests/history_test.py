@@ -250,6 +250,7 @@ def check_legacy_ref_history() -> None:
         )
         assert outcome == "updated"
         payload = client.update_item_if_revision.call_args.args[1]
+        assert "passwordHistory" in desired
         assert payload["passwordHistory"] == desired["passwordHistory"]
         assert any(
             field["name"] == "KeePass:KP2BW_HISTORY:1"
@@ -261,7 +262,9 @@ def check_legacy_ref_history() -> None:
         client.get_item_by_uuid.return_value = copy.deepcopy(old)
         with patch("kp2bw.convert.print_summary") as summary:
             assert converter.create_bitwarden_items_for_entries(client) == 0
-        assert summary.call_args.args[-1] == len(desired["passwordHistory"])
+        history = desired["passwordHistory"]
+        assert history is not None
+        assert summary.call_args.args[-1] == len(history)
         old["notes"] = "destination edit"
         assert converter.legacy_ref_status(old, identifier) == "diverged"
         client.reset_mock()
@@ -288,12 +291,13 @@ def check_native_legacy_history_names() -> None:
             "type": 0,
         })
         # Reproduce the old native-item signature independently of the helper.
+        native_values: list[tuple[str, str]] = []
         old_content = (
             item_type,
             legacy["name"],
             legacy["notes"] or "",
             fields_signature(legacy["fields"]),
-            [],
+            native_values,
         )
         old_stamp = hashlib.sha256(repr(old_content).encode()).hexdigest()
         legacy["fields"].append({"name": "KP2BW_SYNC", "value": old_stamp, "type": 0})

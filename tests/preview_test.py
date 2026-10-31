@@ -139,20 +139,26 @@ def check_destination_attachment_entitlement() -> None:
         target = MagicMock(spec=BitwardenServeClient)
         target.list_items.return_value = remote
         target.list_folders.return_value = {}
-        target.get_item.side_effect = lambda item_id: copy.deepcopy(
-            next(item for item in remote if item["id"] == item_id)
-        )
+
+        def get_item(item_id: str) -> BwItemResponse:
+            return copy.deepcopy(next(item for item in remote if item["id"] == item_id))
+
+        target.get_item.side_effect = get_item
         target.item_policy_blockers.return_value = {}
         for limit in (10, 5):
-            target.attachment_capability.side_effect = (
-                lambda organization_id, limit=limit: AttachmentCapability(
+
+            def capability(
+                organization_id: str | None, limit: int = limit
+            ) -> AttachmentCapability:
+                return AttachmentCapability(
                     organization_id is not None,
                     storage_limit_bytes=limit if organization_id == "org-a" else 5,
                     reason="Personal uploads require premium"
                     if organization_id is None
                     else "Organization storage",
                 )
-            )
+
+            target.attachment_capability.side_effect = capability
             report = converter.preview(cast(BitwardenServeClient, target))
             assert [entry.outcome for entry in report.entries] == [
                 "update" if limit == 10 else "blocked",
@@ -253,7 +259,7 @@ def main() -> None:
             patch("kp2bw.cli.load_dotenv", return_value=None),
             patch("kp2bw.cli.configure_logging", return_value=None),
             patch(
-                "kp2bw.cli.ensure_bw_available",
+                "kp2bw.cli.ensure_cli_available",
                 side_effect=AssertionError("Invalid modes opened Bitwarden"),
             ),
         ):
@@ -421,7 +427,7 @@ def main() -> None:
             patch("kp2bw.cli.configure_logging", return_value=None),
             patch("kp2bw.cli.read_password", return_value="synthetic") as passwords,
             patch(
-                "kp2bw.cli.ensure_bw_available",
+                "kp2bw.cli.ensure_cli_available",
                 side_effect=AssertionError("Preview required bw"),
             ),
             patch(
@@ -462,7 +468,7 @@ def main() -> None:
                 "kp2bw.cli.read_password",
                 side_effect=["synthetic", "destination-password"],
             ),
-            patch("kp2bw.cli.ensure_bw_available") as availability,
+            patch("kp2bw.cli.ensure_cli_available") as availability,
             patch("kp2bw.cli.BitwardenServeClient", return_value=target) as client,
             redirect_stdout(output),
         ):

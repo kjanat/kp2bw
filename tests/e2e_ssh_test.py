@@ -177,6 +177,7 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
 def main() -> None:
     env = os.environ.copy()
     env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
+    env["VW_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
     env["BW_NOINTERACTION"] = "true"
     status = json.loads(run(["bw", "status"], env=env))
     assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")

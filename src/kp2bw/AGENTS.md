@@ -245,3 +245,14 @@ src/kp2bw/
   item without exposing field values; changed stamps are skipped. The existing URI-only command remains separate.
 
 - URI fixups reject collisions between existing and derived URIs with different match modes before removing any fields.
+
+- CLI resolution accepts `KP2BW_CLI=auto|bw|vw`; auto prefers vw, then bw, then npx with @kjanat/vaultwarden-cli@latest.
+  npx resolves latest once before migration and uses that concrete version for subsequent children.
+  Native vw receives `--nointeraction`; unlock clears inherited sessions, serve and inventory use the current
+  session under both CLI variable names. Native CLI profile directories remain separate.
+
+- CLI lookup excludes CWD and relative PATH entries; Windows lookup uses absolute candidates, including shell launchers.
+  `.env` only imports kp2bw options, CLI profile directories and the vault's extra CA file.
+  The npx fallback uses an isolated project/cache, empty user/global npm configuration, the official HTTPS registry,
+  disabled lifecycle scripts and a sanitized child environment. Bootstrap excludes extra TLS trust; later calls use
+  the verified version offline and retain the vault's CA setting.

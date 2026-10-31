@@ -42,14 +42,15 @@ RUN apt-get update \
     && chown -R 10001:10001 /data /w
 COPY --from=cli /usr/local/bin/node /usr/local/bin/node
 COPY --from=cli /opt/cli /opt/cli
-COPY --chmod=755 scripts/vw-bw.sh /usr/local/share/kp2bw/vw-bw.sh
 COPY --from=package /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:/opt/cli/bin:$PATH"
-RUN if [ "$CLI_PACKAGE" = "@kjanat/vaultwarden-cli" ]; then ln -s /usr/local/share/kp2bw/vw-bw.sh /usr/local/bin/bw; fi \
-    && test "$(bw --version)" = "$CLI_VERSION" \
+RUN cli_command=bw \
+    && if [ "$CLI_PACKAGE" = "@kjanat/vaultwarden-cli" ]; then cli_command=vw; fi \
+    && test "$("$cli_command" --version)" = "$CLI_VERSION" \
     && test "$(/opt/venv/bin/python -c 'from importlib.metadata import version; print(version("kp2bw"))')" = "$KP2BW_VERSION"
 ENV HOME=/home/kp2bw \
     BITWARDENCLI_APPDATA_DIR=/data/bw \
+    VW_APPDATA_DIR=/data/bw \
     KP2BW_LOG_DIR=/data/logs
 USER 10001:10001
 WORKDIR /w

@@ -44,16 +44,14 @@ Get-ChildItem "$env:APPDATA\uv\python" -Force |
 Then re-run the command that failed. If the error returns after a Windows update or a new `uv python install`, run the
 snippet again.
 
-## `bw` not found on `PATH`
+## No CLI found on `PATH`
 
-kp2bw shells out to the [Bitwarden CLI]. If `bw` isn't installed or isn't on your `PATH`, kp2bw stops before prompting
-for any passwords with:
+kp2bw looks for `vw`, then `bw`, then uses `npx --yes @kjanat/vaultwarden-cli@latest` if neither is installed. If none
+is available, it stops before prompting for passwords. Install [Vaultwarden CLI] or the [Bitwarden CLI], or install
+Node.js with `npx`, then retry.
 
-```console
-ERROR: Bitwarden CLI ('bw') not found on your PATH. ...
-```
-
-Install the CLI and make sure `bw --version` runs in the same shell, then retry.
+`KP2BW_CLI=bw` or `KP2BW_CLI=vw` explicitly selects that installed command and disables automatic fallback. Run `kp2bw
+--doctor` to see the selected command and its resolved version.
 
 ## Login fails with a 404 (self-hosted server too old for your `bw` CLI)
 
@@ -88,8 +86,8 @@ npm view @bitwarden/cli versions
 
 (the CLI ships as [`@bitwarden/cli`][bw:versions] on npm) and work backwards until login succeeds.
 
-kp2bw runs whatever `bw` is on your `PATH`, so the version you settle on has to *be* that `bw`. Install it globally and
-use the same CLI for the manual login step too:
+To use an older official Bitwarden CLI, set `KP2BW_CLI=bw` in `.env` so automatic selection does not choose `vw`.
+Install the version you settled on globally and use that same CLI for login and migration:
 
 ```shell
 npm install -g @bitwarden/cli@<version>
@@ -98,11 +96,11 @@ bw config server https://vault.example.com
 bw login <user>                               # uses the legacy prelogin route
 ```
 
-To trial a version without disturbing a global install, run it through `npx` — but `npx` does **not** put `bw` on your
-`PATH`, so kp2bw can't use it for the migration; it's only good for probing which version logs in:
+kp2bw’s automatic `npx` fallback runs Vaultwarden CLI. To probe a particular version of the official Bitwarden CLI
+without changing your global install, use the command below. This probe does not select that version for kp2bw:
 
 ```shell
-npx --package @bitwarden/cli@<version> bw login <user>
+npx --yes --package @bitwarden/cli@<version> bw login <user>
 ```
 
 Either way you stay frozen behind newer clients until the server is upgraded, so upgrade when you can.
@@ -125,14 +123,15 @@ Vaultwarden adds the route in [vaultwarden#7693], after 1.37.3.
 If your password contains special shell characters (`?`, `>`, `&`, etc.), wrap it in double quotes when prompted. See
 jampe/kp2bw#10 and libkeepass/pykeepass#254 for details.
 
-## `bw serve` startup timeout
+## CLI `serve` startup timeout
 
-kp2bw starts `bw serve` on a random localhost port. If it times out after 60s:
+kp2bw starts the selected CLI’s `serve` command on a random localhost port. If startup times out:
 
-- Check that `bw` is installed and on your `PATH`
-- Run `bw login` once if you haven't already
+- Run `kp2bw --doctor` to check which CLI was selected
+- Log in with that same CLI and profile before running kp2bw
 - Ensure no firewall rules block localhost connections
-- Try `bw serve --port 8087 --hostname 127.0.0.1` manually to see if it starts
+- Try `vw serve --port 8087 --hostname 127.0.0.1` manually; replace `vw` with `bw` or `npx --yes
+  @kjanat/vaultwarden-cli@latest` to match the selected command
 
 ## Items skipped unexpectedly during org import
 
@@ -170,6 +169,7 @@ Let the run continue. At 60 writes per minute, 1000 entries take at least 17 min
 still rejected after 8 retries and reports it; the next run picks it up.
 
 [Bitwarden CLI]: https://bitwarden.com/help/cli/
+[Vaultwarden CLI]: https://www.npmjs.com/package/@kjanat/vaultwarden-cli
 [bitwarden/clients#23937]: https://github.com/bitwarden/clients/issues/23937
 [vaultwarden#7693]: https://github.com/dani-garcia/vaultwarden/pull/7693
 [bw:rate-limits]: https://github.com/bitwarden/server/blob/9129efbd1531d5d8472345638efad7ef25a7337a/src/Api/appsettings.json#L88-L118

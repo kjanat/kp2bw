@@ -222,6 +222,7 @@ def check_legacy_ref_upgrade(tmp: Path, env: dict[str, str], password: str) -> N
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
             repeated = bw.get_item(item_id)
             assert repeated["revisionDate"] == updated["revisionDate"]
+            assert "attachments" in repeated and "attachments" in updated
             assert repeated["attachments"] == updated["attachments"]
     finally:
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
@@ -232,6 +233,7 @@ def main() -> None:
     """Run independently using a saved, authenticated test-account profile."""
     env = os.environ.copy()
     env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
+    env["VW_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
     env["BW_NOINTERACTION"] = "true"
     status = json.loads(run(["bw", "status"], env=env))
     assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")

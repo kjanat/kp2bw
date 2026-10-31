@@ -559,7 +559,7 @@ def run_migration(
     )
 
 
-def bw_version(env: dict[str, str]) -> str:
+def cli_version(env: dict[str, str]) -> str:
     """Return the ``bw`` CLI version, or ``unknown``."""
     result = subprocess.run(
         ["bw", "--version"],
@@ -904,6 +904,7 @@ def main() -> None:
 
         env = os.environ.copy()
         env["BITWARDENCLI_APPDATA_DIR"] = str(appdata)
+        env["VW_APPDATA_DIR"] = str(appdata)
         env["NODE_EXTRA_CA_CERTS"] = str(cert_path)
 
         logger.info("Checking bw serve availability")
@@ -911,7 +912,7 @@ def main() -> None:
         logger.info(
             "Using %s %s",
             env.get("KP2BW_TEST_CLI_PACKAGE", "@bitwarden/cli"),
-            bw_version(env),
+            cli_version(env),
         )
         logger.info(f"Using server {server_version(server_url, cert_path)}")
         _ = run(["bw", "config", "server", server_url], env=env)
