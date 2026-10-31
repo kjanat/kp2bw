@@ -167,6 +167,76 @@ def main() -> None:
             else:
                 raise AssertionError("Public release assets could be changed")
             commands.assert_not_called()
+        draft_release: dict[str, object] = {
+            "tag_name": "v3.9.0",
+            "draft": True,
+            "prerelease": False,
+            "target_commitish": "abc",
+            "assets": [],
+        }
+        lookups: dict[str, dict[str, object] | type[RuntimeError] | None] = {
+            "": None,
+            json.dumps(draft_release): draft_release,
+            json.dumps(draft_release) + "\n" + json.dumps(draft_release): RuntimeError,
+        }
+        for output, expected in lookups.items():
+            with (
+                patch.dict(
+                    os.environ,
+                    {"VERSION": "3.9.0", "GITHUB_REPOSITORY": "example/repository"},
+                ),
+                patch.object(release, "run", return_value=output) as commands,
+            ):
+                try:
+                    found = release.find_release()
+                except RuntimeError:
+                    assert expected is RuntimeError
+                else:
+                    assert found == expected
+                assert commands.call_args.args[:5] == (
+                    "gh",
+                    "api",
+                    "--paginate",
+                    "repos/example/repository/releases",
+                    "--jq",
+                )
+                assert '"v3.9.0"' in commands.call_args.args[5]
+        source = work / "source"
+        (source / ".github" / "release-notes").mkdir(parents=True)
+        (source / "CHANGELOG.md").write_text("## [3.9.0] - 2026-10-31\n\n- Change\n")
+        (source / ".github" / "release-notes" / "v3.9.0.md").write_text("Notes\n")
+        original = Path.cwd()
+        for existing in (draft_release, None):
+            try:
+                os.chdir(source)
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "VERSION": "3.9.0",
+                            "GITHUB_SHA": "abc",
+                            "GITHUB_REPOSITORY": "example/repository",
+                            "GITHUB_RUN_ID": "123",
+                            "STABLE": "true",
+                        },
+                    ),
+                    patch.object(release, "verify_tag"),
+                    patch.object(
+                        release, "find_release", side_effect=[existing, draft_release]
+                    ),
+                    patch.object(release, "run") as commands,
+                    patch.object(release, "upload") as uploads,
+                ):
+                    release.draft()
+            finally:
+                os.chdir(original)
+            created = [
+                c.args
+                for c in commands.call_args_list
+                if c.args[:3] == ("gh", "release", "create")
+            ]
+            assert len(created) == (0 if existing else 1)
+            uploads.assert_called_once()
     print("publication retries, immutable assets and aliases passed")
 
 
