@@ -26,7 +26,7 @@ from rich.text import Text
 
 from . import __title__, __version__
 from .build_info import BUILD_SHA
-from .bw_serve import bw_cli_version, resolve_bw_command
+from .bw_serve import cli_environment, get_cli_version, resolve_cli_command
 from .exceptions import BitwardenClientError
 
 SUBPROCESS_TIMEOUT: int = 30
@@ -161,17 +161,18 @@ def identify_server_product(server_url: str) -> str:
     return f"{name or 'Bitwarden'} {version or '(unknown version)'}"
 
 
-def bw_output(bw_cmd: list[str], bw_cwd: str | None, *args: str) -> str | None:
+def cli_output(cli_command: list[str], cli_cwd: str | None, *args: str) -> str | None:
     """Stdout of one diagnostic ``bw`` subcommand, or ``None`` on failure."""
     try:
         result = subprocess.run(
-            [*bw_cmd, *args],
+            [*cli_command, *args],
             check=False,
             capture_output=True,
             text=True,
             timeout=SUBPROCESS_TIMEOUT,
             stdin=subprocess.DEVNULL,
-            cwd=bw_cwd,
+            cwd=cli_cwd,
+            env=cli_environment(command=cli_command),
         )
     except OSError, subprocess.TimeoutExpired:
         return None
@@ -184,21 +185,23 @@ def collect_report() -> DoctorReport:
     """Gather the full :class:`DoctorReport` for the current environment."""
     dotenv_path = find_dotenv(usecwd=True) or None
 
-    bw_cmd: list[str] | None
-    bw_cwd: str | None
+    cli_command: list[str] | None
+    cli_cwd: str | None
     try:
-        bw_cmd, bw_cwd = resolve_bw_command()
+        cli_command, cli_cwd = resolve_cli_command()
     except BitwardenClientError:
-        bw_cmd, bw_cwd = None, None
+        cli_command, cli_cwd = None, None
 
     bw_version: str | None = None
     bw_serve_supported: bool | None = None
     bw_server_url: str | None = None
     server_product: str | None = None
-    if bw_cmd is not None:
-        bw_version = bw_cli_version(bw_cmd, bw_cwd)
-        bw_serve_supported = bw_output(bw_cmd, bw_cwd, "serve", "--help") is not None
-        server = bw_output(bw_cmd, bw_cwd, "config", "server")
+    if cli_command is not None:
+        bw_version = get_cli_version(cli_command, cli_cwd)
+        bw_serve_supported = (
+            cli_output(cli_command, cli_cwd, "serve", "--help") is not None
+        )
+        server = cli_output(cli_command, cli_cwd, "config", "server")
         if server and server.startswith(("http://", "https://")):
             bw_server_url = server
             server_product = identify_server_product(server)
@@ -212,7 +215,7 @@ def collect_report() -> DoctorReport:
         python_version=platform.python_version(),
         platform=sys.platform,
         dotenv_path=dotenv_path,
-        bw_command=" ".join(bw_cmd) if bw_cmd else None,
+        bw_command=" ".join(cli_command) if cli_command else None,
         bw_version=bw_version,
         bw_serve_supported=bw_serve_supported,
         bw_server_url=bw_server_url,
@@ -285,10 +288,10 @@ def render_report(report: DoctorReport) -> list[Text]:
         ("installed via", Text(report.install_method)),
         ("python", Text(f"{report.python_version} ({report.platform})")),
         (".env", Text(report.dotenv_path or "none detected")),
-        ("bw", Text(report.bw_command or "NOT FOUND on PATH")),
-        ("bw version", Text(report.bw_version or "unknown")),
-        ("bw serve", Text(serve)),
-        ("bw server", Text(report.bw_server_url or "not configured")),
+        ("CLI", Text(report.bw_command or "NOT FOUND on PATH")),
+        ("CLI version", Text(report.bw_version or "unknown")),
+        ("serve", Text(serve)),
+        ("server URL", Text(report.bw_server_url or "not configured")),
         ("server", Text(report.server_product or "unknown")),
     )
     width = max(len(label) for label, _ in rows)

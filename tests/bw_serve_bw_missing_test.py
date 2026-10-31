@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 from kp2bw import bw_serve
 from kp2bw.bw_serve import (
-    BW_NOT_FOUND_MSG,
+    CLI_NOT_FOUND_MSG,
     BitwardenServeClient,
-    ensure_bw_available,
+    ensure_cli_available,
 )
 from kp2bw.exceptions import BitwardenClientError
 
@@ -34,9 +34,9 @@ def bw_not_on_path() -> Generator[None]:
 def assert_ensure_raises_friendly_error() -> None:
     with bw_not_on_path():
         try:
-            ensure_bw_available()
+            ensure_cli_available()
         except BitwardenClientError as exc:
-            if str(exc) != BW_NOT_FOUND_MSG:
+            if str(exc) != CLI_NOT_FOUND_MSG:
                 raise AssertionError(f"unexpected message: {exc!r}")
         else:
             raise AssertionError("expected BitwardenClientError when bw is missing")
@@ -47,7 +47,7 @@ def assert_client_init_raises_friendly_error() -> None:
         try:
             BitwardenServeClient("dummy-password")
         except BitwardenClientError as exc:
-            if str(exc) != BW_NOT_FOUND_MSG:
+            if str(exc) != CLI_NOT_FOUND_MSG:
                 raise AssertionError(f"unexpected message: {exc!r}")
         except FileNotFoundError as exc:
             raise AssertionError(f"raw FileNotFoundError leaked to caller: {exc!r}")
@@ -77,7 +77,7 @@ def assert_subprocess_filenotfound_is_wrapped() -> None:
             try:
                 BitwardenServeClient("dummy-password")
             except BitwardenClientError as exc:
-                if str(exc) != BW_NOT_FOUND_MSG:
+                if str(exc) != CLI_NOT_FOUND_MSG:
                     raise AssertionError(f"unexpected message: {exc!r}")
             except FileNotFoundError as exc:
                 raise AssertionError(f"raw FileNotFoundError leaked to caller: {exc!r}")
@@ -91,17 +91,18 @@ def assert_subprocess_filenotfound_is_wrapped() -> None:
 
 
 def assert_message_is_actionable() -> None:
-    lowered = BW_NOT_FOUND_MSG.lower()
+    lowered = CLI_NOT_FOUND_MSG.lower()
     if "bw" not in lowered or "path" not in lowered:
-        raise AssertionError(f"message is not actionable: {BW_NOT_FOUND_MSG!r}")
+        raise AssertionError(f"message is not actionable: {CLI_NOT_FOUND_MSG!r}")
 
 
 def main() -> None:
-    assert_ensure_raises_friendly_error()
-    assert_client_init_raises_friendly_error()
-    assert_subprocess_filenotfound_is_wrapped()
-    assert_message_is_actionable()
-    print("bw serve missing-cli test passed")
+    with patch.dict(os.environ, {"KP2BW_CLI": "auto"}):
+        assert_ensure_raises_friendly_error()
+        assert_client_init_raises_friendly_error()
+        assert_subprocess_filenotfound_is_wrapped()
+        assert_message_is_actionable()
+        print("bw serve missing-cli test passed")
 
 
 if __name__ == "__main__":

@@ -261,7 +261,9 @@ def check_legacy_ref_history() -> None:
         client.get_item_by_uuid.return_value = copy.deepcopy(old)
         with patch("kp2bw.convert.print_summary") as summary:
             assert converter.create_bitwarden_items_for_entries(client) == 0
-        assert summary.call_args.args[-1] == len(desired["passwordHistory"])
+        history = desired["passwordHistory"]
+        assert history is not None
+        assert summary.call_args.args[-1] == len(history)
         old["notes"] = "destination edit"
         assert converter.legacy_ref_status(old, identifier) == "diverged"
         client.reset_mock()

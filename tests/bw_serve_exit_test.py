@@ -25,7 +25,7 @@ def serve_process() -> subprocess.Popen[bytes]:
 def make_client(process: subprocess.Popen[bytes]) -> BitwardenServeClient:
     client = object.__new__(BitwardenServeClient)
     client.serve_process = process
-    client.bw_version = "2026.7.0"
+    client.cli_version = "2026.7.0"
     client.http_base_url = "http://serve.test"
     client.http_timeout = 1
     client.folder_cache = {}

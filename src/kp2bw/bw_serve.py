@@ -17,6 +17,7 @@ import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from tempfile import TemporaryDirectory
 from types import FrameType, TracebackType
 from typing import Any, NamedTuple, Self, cast
 
@@ -183,9 +184,12 @@ class MigrateResult(NamedTuple):
 
 
 # Actionable message shown when the Bitwarden CLI cannot be located.
-BW_NOT_FOUND_MSG: str = (
-    "Bitwarden CLI ('bw') not found on your PATH. Install it and make sure "
-    "'bw' is runnable from your shell, then try again. "
+NPX_VW_PACKAGE = "@kjanat/vaultwarden-cli@latest"
+npx_workspace: TemporaryDirectory[str] | None = None
+
+CLI_NOT_FOUND_MSG: str = (
+    "No matching CLI found on PATH (vw, bw, or npx; selection: KP2BW_CLI). Install it and make sure "
+    "the selected command is runnable from your shell, then try again. "
     "See https://bitwarden.com/help/cli/ for installation instructions."
 )
 
@@ -237,28 +241,28 @@ def is_missing_item_error(status_code: int, message: object) -> bool:
     return status_code == 404 or "not found" in str(message).lower()
 
 
-def ensure_bw_available() -> None:
-    """Verify the ``bw`` CLI is on the PATH.
+def ensure_cli_available() -> None:
+    """Verify the selected vault CLI can be resolved on PATH.
 
     Raises :class:`BitwardenClientError` with an actionable message instead of
     letting ``subprocess`` raise a bare ``FileNotFoundError`` (and a long,
-    intimidating traceback) when ``bw`` cannot be located.
+    intimidating traceback) when neither supported CLI can be located.
     """
-    if shutil.which("bw") is None:
-        raise BitwardenClientError(BW_NOT_FOUND_MSG)
+    resolve_cli_command()
 
 
-def bw_cli_version(bw_cmd: list[str], bw_cwd: str | None) -> str | None:
-    """Return the resolved ``bw`` CLI's version string, or ``None``."""
+def get_cli_version(cli_command: list[str], cli_cwd: str | None) -> str | None:
+    """Return the selected CLI version, allowing time for npx bootstrap."""
     try:
         result = subprocess.run(
-            [*bw_cmd, "--version"],
+            [*cli_command, "--version"],
             check=False,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=180 if NPX_VW_PACKAGE in cli_command else 30,
             stdin=subprocess.DEVNULL,
-            cwd=bw_cwd,
+            cwd=cli_cwd,
+            env=cli_environment(command=cli_command),
         )
     except OSError, subprocess.TimeoutExpired:
         return None
@@ -268,23 +272,103 @@ def bw_cli_version(bw_cmd: list[str], bw_cwd: str | None) -> str | None:
     return match.group(0) if match else None
 
 
-def find_on_path(filename: str) -> str | None:
-    """Return the first PATH directory entry containing *filename*, or ``None``.
-
-    Used for shims (``.ps1``) whose extension is not in ``PATHEXT`` and so are
-    invisible to :func:`shutil.which`.
-    """
-    for directory in os.environ.get("PATH", "").split(os.pathsep):
-        if not directory:
+def cli_path_entries() -> list[str]:
+    """Use absolute PATH entries, excluding the caller's current directory."""
+    paths = ntpath if os.name == "nt" else os.path
+    current = paths.normcase(paths.realpath(os.getcwd()))
+    result: list[str] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        directory = entry.strip('"')
+        if not paths.isabs(directory):
             continue
+        if paths.normcase(paths.realpath(directory)) == current:
+            continue
+        result.append(directory)
+    return result
+
+
+def find_on_path(filename: str) -> str | None:
+    """Find a PowerShell script only in explicit, trusted PATH directories."""
+    for directory in cli_path_entries():
         candidate = ntpath.join(directory, filename)
         if os.path.isfile(candidate):
             return candidate
     return None
 
 
-def resolve_bw_command_windows() -> tuple[list[str], str | None]:
-    """Resolve the ``bw`` launch command on Windows across all shim flavours.
+def find_cli_executable(filename: str) -> str | None:
+    """Never let Windows which() add the migration directory to its search."""
+    if os.name != "nt":
+        return shutil.which(filename, path=os.pathsep.join(cli_path_entries()))
+    for directory in cli_path_entries():
+        # An absolute candidate prevents which()'s implicit CWD lookup even
+        # when Windows NeedCurrentDirectoryForExePath says it is required.
+        candidate = ntpath.join(directory, filename)
+        found = shutil.which(candidate, path="")
+        if found:
+            return found
+    return None
+
+
+def windows_command_processor() -> str:
+    """Use an absolute command processor, never cmd.exe from the workdir."""
+    comspec = os.environ.get("COMSPEC", "")
+    if ntpath.isabs(comspec):
+        return comspec
+    return ntpath.join(
+        os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe"
+    )
+
+
+def uses_npx(command: list[str]) -> bool:
+    return any(arg.startswith("@kjanat/vaultwarden-cli@") for arg in command)
+
+
+def isolate_npx(command: list[str]) -> list[str]:
+    """Give npm a private project/cache and no ambient npm configuration."""
+    global npx_workspace
+    if npx_workspace is None:
+        npx_workspace = TemporaryDirectory(prefix="kp2bw-npx-")
+        root = npx_workspace.name
+        # Stop npm walking to a parent project; no local bins or scripts exist.
+        with open(os.path.join(root, "package.json"), "w", encoding="utf-8") as stream:
+            stream.write('{"name":"kp2bw-npx","private":true,"workspaces":[]}')
+        for name in ("user.npmrc", "global.npmrc"):
+            with open(os.path.join(root, name), "w", encoding="utf-8"):
+                pass
+        # npm prepends ancestor node_modules/.bin directories. Keep the Node
+        # interpreter tied to npm's own executable, including with mise shims.
+        binaries = os.path.join(root, "node_modules", ".bin")
+        os.makedirs(binaries, mode=0o700)
+        for name, script in (
+            ("node", '#!/bin/sh\nexec "$npm_node_execpath" "$@"\n'),
+            ("node.cmd", '@"%npm_node_execpath%" %*\n'),
+        ):
+            filename = os.path.join(binaries, name)
+            with open(filename, "w", encoding="utf-8") as stream:
+                stream.write(script)
+            os.chmod(filename, 0o700)
+    root = npx_workspace.name
+    return [
+        *command,
+        "--yes",
+        "--registry=https://registry.npmjs.org/",
+        "--strict-ssl=true",
+        "--ignore-scripts",
+        f"--cache={os.path.join(root, 'cache')}",
+        f"--prefix={root}",
+        "--workspaces",
+        "--include-workspace-root",
+        f"--userconfig={os.path.join(root, 'user.npmrc')}",
+        f"--globalconfig={os.path.join(root, 'global.npmrc')}",
+        f"--script-shell={windows_command_processor() if os.name == 'nt' else '/bin/sh'}",
+        NPX_VW_PACKAGE,
+        "--nointeraction",
+    ]
+
+
+def resolve_cli_command_windows(cli: str = "bw") -> tuple[list[str], str | None]:
+    """Resolve a vault CLI launch command on Windows across launcher flavours.
 
     Install methods differ in what they put on ``PATH``:
 
@@ -298,20 +382,28 @@ def resolve_bw_command_windows() -> tuple[list[str], str | None]:
     paying PowerShell startup. ``.cmd``/``.bat`` is invoked by basename from its
     own directory so an install path with spaces needs no ``cmd`` quoting.
     """
-    for name in ("bw.exe", "bw.com"):
-        found = shutil.which(name)
+    for name in (f"{cli}.exe", f"{cli}.com"):
+        found = find_cli_executable(name)
         if found:
             return [found], None
-    for name in ("bw.cmd", "bw.bat"):
-        found = shutil.which(name)
+    for name in (f"{cli}.cmd", f"{cli}.bat"):
+        found = find_cli_executable(name)
         if found:
-            comspec = os.environ.get("COMSPEC", "cmd.exe")
+            comspec = windows_command_processor()
             return [comspec, "/d", "/c", ntpath.basename(found)], ntpath.dirname(found)
     # `.ps1` is not in PATHEXT, so shutil.which can't see it — search manually.
-    ps1 = find_on_path("bw.ps1")
+    ps1 = find_on_path(f"{cli}.ps1")
     if ps1:
         powershell = (
-            shutil.which("pwsh") or shutil.which("powershell") or "powershell.exe"
+            find_cli_executable("pwsh.exe")
+            or find_cli_executable("powershell.exe")
+            or ntpath.join(
+                os.environ.get("SystemRoot", r"C:\Windows"),
+                "System32",
+                "WindowsPowerShell",
+                "v1.0",
+                "powershell.exe",
+            )
         )
         return [
             powershell,
@@ -322,28 +414,84 @@ def resolve_bw_command_windows() -> tuple[list[str], str | None]:
             "-File",
             ps1,
         ], None
-    raise BitwardenClientError(BW_NOT_FOUND_MSG)
+    raise BitwardenClientError(CLI_NOT_FOUND_MSG)
 
 
-def resolve_bw_command() -> tuple[list[str], str | None]:
-    """Resolve how to launch the Bitwarden CLI as a subprocess.
+def resolve_cli_command() -> tuple[list[str], str | None]:
+    """Resolve vw, bw, then npx; explicit choices require the selected binary.
 
-    Returns ``(argv_prefix, cwd)``: *argv_prefix* is prepended to the ``bw``
-    arguments for every subprocess call, and *cwd* is the working directory to
-    run from (``None`` keeps the caller's cwd).
-
-    On POSIX the resolved ``bw`` is executed directly. On Windows the various
-    shim flavours (``bw.exe``, ``bw.cmd``/``bw.bat``, ``bw.ps1``) are resolved
-    and wrapped appropriately — see :func:`resolve_bw_command_windows`.
-
-    Raises :class:`BitwardenClientError` if ``bw`` cannot be found.
+    Returns the argv prefix and working directory, handling Windows launchers.
+    An explicit KP2BW_CLI selection never falls back to another CLI/profile.
     """
-    if os.name == "nt":
-        return resolve_bw_command_windows()
-    path = shutil.which("bw")
-    if path is None:
-        raise BitwardenClientError(BW_NOT_FOUND_MSG)
-    return [path], None
+    selected = os.environ.get("KP2BW_CLI", "auto")
+    if selected not in {"auto", "bw", "vw"}:
+        raise BitwardenClientError("KP2BW_CLI must be auto, bw or vw")
+    for cli in ("vw", "bw", "npx") if selected == "auto" else (selected,):
+        if os.name == "nt":
+            try:
+                command, cwd = resolve_cli_command_windows(cli)
+            except BitwardenClientError:
+                continue
+        else:
+            path = find_cli_executable(cli)
+            if path is None:
+                continue
+            command, cwd = [path], None
+        # vw uses a global flag rather than BW_NOINTERACTION. Include it for
+        # every subprocess, including diagnostics and inventory verification.
+        if cli == "npx":
+            # Keep launcher context (e.g. mise) while npm exec runs only in
+            # the private workspace root selected by its explicit flags.
+            return isolate_npx(command), cwd
+        if cli == "vw":
+            command.append("--nointeraction")
+        return command, cwd
+    raise BitwardenClientError(CLI_NOT_FOUND_MSG)
+
+
+def cli_environment(
+    *, session: str | None = None, command: list[str] | None = None
+) -> dict[str, str]:
+    """Use each CLI's native profile and only the current migration session."""
+    env = {**os.environ, "BW_NOINTERACTION": "true"}
+    # Windows npm launchers run from their installation directory. Keep an
+    # explicitly relative profile anchored to the caller's working directory.
+    for key in ("BITWARDENCLI_APPDATA_DIR", "VW_APPDATA_DIR", "NODE_EXTRA_CA_CERTS"):
+        if env.get(key):
+            env[key] = os.path.abspath(env[key])
+    if command is not None and uses_npx(command):
+        bootstrap = NPX_VW_PACKAGE in command
+        for key in list(env):
+            normalized = key.upper()
+            if (
+                normalized.startswith(("NPM_", "NPX_", "LD_", "DYLD_"))
+                or normalized
+                in {
+                    "NODE_OPTIONS",
+                    "NODE_PATH",
+                    "NODE_TLS_REJECT_UNAUTHORIZED",
+                    "BASH_ENV",
+                    "ENV",
+                }
+                or bootstrap
+                and normalized
+                in {
+                    "NODE_EXTRA_CA_CERTS",
+                    "NODE_USE_SYSTEM_CA",
+                    "SSL_CERT_FILE",
+                    "SSL_CERT_DIR",
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "ALL_PROXY",
+                }
+            ):
+                del env[key]
+        env["PATH"] = os.pathsep.join(cli_path_entries())
+    for key in ("BW_SESSION", "VW_SESSION"):
+        env.pop(key, None)
+        if session:
+            env[key] = session
+    return env
 
 
 def parse_listening_pids(netstat_output: str, port: int) -> set[int]:
@@ -778,9 +926,9 @@ class BitwardenServeClient:
     organization_id: str | None
     collection_id: str | None  # fixed target collection for dedup scoping
     closed: bool
-    bw_cmd: list[str]  # argv prefix for invoking bw (handles Windows shims)
-    bw_cwd: str | None  # cwd for bw subprocess calls (set for shim invocation)
-    bw_via_shell: bool  # True when bw runs through a cmd.exe wrapper
+    cli_command: list[str]  # argv prefix for the selected CLI (including launchers)
+    cli_cwd: str | None  # cwd for CLI subprocess calls (set for launcher invocation)
+    cli_via_shell: bool  # True when Windows must terminate the launcher tree
     inventory_session: str | None = None
     inventory_needs_check: bool = False
     inventory_cache: dict[str, list[Any]] | None = None
@@ -798,14 +946,31 @@ class BitwardenServeClient:
         org_id: str | None = None,
         collection_id: str | None = None,
     ) -> None:
-        # Resolve how to launch bw before binding sockets, installing signal
-        # handlers, or spawning anything. This fails fast with an actionable
-        # message when bw is missing, and transparently wraps Windows .cmd/.bat
-        # shims so an npm-installed CLI works rather than crashing later.
-        self.bw_cmd, self.bw_cwd = resolve_bw_command()
-        self.bw_via_shell = len(self.bw_cmd) > 1
-        self.bw_version = bw_cli_version(self.bw_cmd, self.bw_cwd) or "unknown"
-        logger.log(VERBOSE, f"Bitwarden CLI version {self.bw_version}")
+        # Resolve the vault CLI before binding sockets or installing handlers.
+        # Windows npm launchers are wrapped so they can run as subprocesses.
+        self.cli_command, self.cli_cwd = resolve_cli_command()
+        self.cli_via_shell = os.name == "nt" and (
+            self.cli_cwd is not None
+            or "-File" in self.cli_command
+            or NPX_VW_PACKAGE in self.cli_command
+        )
+        self.cli_version = get_cli_version(self.cli_command, self.cli_cwd) or "unknown"
+        if NPX_VW_PACKAGE in self.cli_command:
+            if self.cli_version == "unknown":
+                raise BitwardenClientError(
+                    "Could not start Vaultwarden CLI through npx. "
+                    "Check npm registry access or install @kjanat/vaultwarden-cli."
+                )
+            # Resolve latest once. Every child in this migration must use the
+            # same published version, even if a release lands during the run.
+            self.cli_command[self.cli_command.index(NPX_VW_PACKAGE)] = (
+                f"@kjanat/vaultwarden-cli@{self.cli_version}"
+            )
+            self.cli_command.insert(
+                self.cli_command.index(f"@kjanat/vaultwarden-cli@{self.cli_version}"),
+                "--offline",
+            )
+        logger.log(VERBOSE, f"CLI version {self.cli_version}")
 
         self.serve_port = find_free_port()
         self.http_base_url = f"http://127.0.0.1:{self.serve_port}"
@@ -865,23 +1030,22 @@ class BitwardenServeClient:
         """Run ``bw unlock --raw`` once; ``None`` when it times out."""
         try:
             return subprocess.run(
-                [*self.bw_cmd, "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
+                [*self.cli_command, "unlock", "--raw", "--passwordenv", "_KP2BW_BW_PW"],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
                 stdin=subprocess.DEVNULL,
-                cwd=self.bw_cwd,
+                cwd=self.cli_cwd,
                 env={
-                    **os.environ,
-                    "BW_NOINTERACTION": "true",
+                    **cli_environment(command=self.cli_command),
                     "_KP2BW_BW_PW": password,
                 },
             )
         except FileNotFoundError as exc:
             # The resolved command (bw, or cmd.exe for a shim) could not be
             # executed — surface the actionable message, not a raw traceback.
-            raise BitwardenClientError(BW_NOT_FOUND_MSG) from exc
+            raise BitwardenClientError(CLI_NOT_FOUND_MSG) from exc
         except subprocess.TimeoutExpired:
             logger.warning("bw unlock timed out while obtaining session key")
             return None
@@ -934,21 +1098,14 @@ class BitwardenServeClient:
         the parent process environment is never leaked to the child.
         """
         cmd = [
-            *self.bw_cmd,
+            *self.cli_command,
             "serve",
             "--port",
             str(self.serve_port),
             "--hostname",
             "127.0.0.1",
         ]
-        # Annotated so the type stays dict[str, str] after env.pop() below;
-        # without it the inferred type widens and subprocess.Popen's overload
-        # no longer resolves to Popen[bytes].
-        env: dict[str, str] = {**os.environ, "BW_NOINTERACTION": "true"}
-        if session:
-            env["BW_SESSION"] = session
-        else:
-            env.pop("BW_SESSION", None)
+        env = cli_environment(session=session, command=self.cli_command)
         logger.log(
             VERBOSE,
             f"Starting bw serve on port {self.serve_port} "
@@ -959,7 +1116,7 @@ class BitwardenServeClient:
                 cmd,
                 stdin=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                cwd=self.bw_cwd,
+                cwd=self.cli_cwd,
                 env=env,
                 # POSIX: run bw serve in its own session/process group so teardown
                 # can kill the launcher *and* its node worker together (see
@@ -969,7 +1126,7 @@ class BitwardenServeClient:
                 start_new_session=True,
             )
         except FileNotFoundError as exc:
-            raise BitwardenClientError(BW_NOT_FOUND_MSG) from exc
+            raise BitwardenClientError(CLI_NOT_FOUND_MSG) from exc
 
     def wait_for_ready(self) -> None:
         """Poll ``GET /status`` until the server is responsive."""
@@ -1026,7 +1183,7 @@ class BitwardenServeClient:
         if self.serve_process is not None:
             logger.log(VERBOSE, "Terminating bw serve process")
             terminate_serve(
-                self.serve_process, via_shell=self.bw_via_shell, port=self.serve_port
+                self.serve_process, via_shell=self.cli_via_shell, port=self.serve_port
             )
 
         self.serve_process = None
@@ -1069,7 +1226,7 @@ class BitwardenServeClient:
             except subprocess.TimeoutExpired:
                 return
         if code is not None:
-            version = getattr(self, "bw_version", "unknown")
+            version = getattr(self, "cli_version", "unknown")
             raise BitwardenServeExitedError(
                 f"bw serve exited during migration (CLI {version}, exit {code}); "
                 "stop and use a tested CLI/server pair from "
@@ -1174,7 +1331,7 @@ class BitwardenServeClient:
             kinds.append("org-collections")
         expected: dict[str, str] = {}
         for kind in kinds:
-            args = [*self.bw_cmd, "list", kind]
+            args = [*self.cli_command, "list", kind]
             if kind == "org-collections":
                 args.extend(["--organizationid", self.organization_id or ""])
             try:
@@ -1186,13 +1343,10 @@ class BitwardenServeClient:
                     check=False,
                     timeout=self.http_timeout,
                     stdin=subprocess.DEVNULL,
-                    cwd=self.bw_cwd,
-                    env={
-                        **os.environ,
-                        "BW_NOINTERACTION": "true",
-                        "BW_SESSION": self.inventory_session or "",
-                        "VW_SESSION": self.inventory_session or "",
-                    },
+                    cwd=self.cli_cwd,
+                    env=cli_environment(
+                        session=self.inventory_session, command=self.cli_command
+                    ),
                 )
             except OSError, UnicodeError, subprocess.TimeoutExpired:
                 raise BitwardenClientError(
@@ -1309,7 +1463,7 @@ class BitwardenServeClient:
             metadata.organizations, metadata.policies, self.organization_id
         )
         if metadata.kind == "bitwarden":
-            version = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", self.bw_version)
+            version = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", self.cli_version)
             if version is None or tuple(map(int, version.groups())) < (2025, 1, 3):
                 raise BitwardenClientError(
                     "The active CLI has no verified native SSH support"
@@ -1554,13 +1708,14 @@ class BitwardenServeClient:
             return cached
         try:
             result = subprocess.run(
-                [*self.bw_cmd, "--help"],
+                [*self.cli_command, "--help"],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
                 stdin=subprocess.DEVNULL,
-                cwd=self.bw_cwd,
+                cwd=self.cli_cwd,
+                env=cli_environment(command=self.cli_command),
             )
             supported = (
                 result.returncode == 0
@@ -1590,7 +1745,7 @@ class BitwardenServeClient:
             or hidden(existing) != hidden(item)
         ):
             raise BitwardenClientError(
-                f"Item {item_id}: this CLI cannot retain the requested password history update; use @kjanat/vaultwarden-cli through the bw adapter. No item update was sent."
+                f"Item {item_id}: this CLI cannot retain the requested password history update; use @kjanat/vaultwarden-cli with KP2BW_CLI=vw. No item update was sent."
             )
 
     def verify_history(

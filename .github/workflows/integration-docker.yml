@@ -86,6 +86,7 @@ jobs:
         with: { persist-credentials: false }
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       - run: uv run pytest -q tests/test_script_adapters.py
+        env: { KP2BW_RUN_NPX_TESTS: "1" }
 
   e2e:
     name: e2e (${{ matrix.lane }}, ${{ matrix.group }}, ${{ matrix.cli-package }} ${{ matrix.bw-version }}, Vaultwarden ${{ matrix.server-version }})
@@ -96,6 +97,7 @@ jobs:
     env:
       KP2BW_E2E_CORE_ONLY: "1"
       KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
+      KP2BW_CLI: ${{ matrix.cli-package == '@kjanat/vaultwarden-cli' && 'vw' || 'bw' }}
       BW_SERVER_URL: https://localhost:18443
       KP2BW_E2E_VAULTWARDEN_CONTAINER: vaultwarden
       BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem

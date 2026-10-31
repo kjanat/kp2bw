@@ -17,6 +17,8 @@ def main() -> None:
     expected_version = os.environ["KP2BW_CONTAINER_VERSION"]
     expected_bw = os.environ["KP2BW_CONTAINER_BW_VERSION"]
     expected_package = os.environ["KP2BW_CONTAINER_CLI_PACKAGE"]
+    cli = "vw" if expected_package == "@kjanat/vaultwarden-cli" else "bw"
+    cli_options = ["--nointeraction"] if cli == "vw" else []
     root = Path(__file__).resolve().parents[1]
     volume = f"kp2bw-image-test-{uuid4().hex}"
     stopped = f"{volume}-stop"
@@ -101,18 +103,12 @@ def main() -> None:
             ]
             assert "Import KeePass" in run([*base, image, "--help"])
             assert expected_version in run([*base, image, "--version"])
-            assert run([*base, "--entrypoint", "bw", image, "--version"]) == expected_bw
-            if expected_package == "@kjanat/vaultwarden-cli":
-                assert (
-                    run([*base, "--entrypoint", "vw", image, "--version"])
-                    == expected_bw
-                )
+            cli_entrypoint = ["--entrypoint", cli, image, *cli_options]
+            assert run([*base, *cli_entrypoint, "--version"]) == expected_bw
             assert run([*base, "--entrypoint", "id", image, "-u"]) == "10001"
             run([
                 *base,
-                "--entrypoint",
-                "bw",
-                image,
+                *cli_entrypoint,
                 "config",
                 "server",
                 os.environ.get("BW_SERVER_URL", "https://localhost:18443"),
@@ -120,9 +116,7 @@ def main() -> None:
             run(
                 [
                     *base,
-                    "--entrypoint",
-                    "bw",
-                    image,
+                    *cli_entrypoint,
                     "login",
                     "integration@example.com",
                     "--passwordenv",
@@ -133,7 +127,7 @@ def main() -> None:
             )
             # An already authenticated CLI may report a one-off key backfill
             # error while unlocking; a fresh invocation must still retain login.
-            status = json.loads(run([*base, "--entrypoint", "bw", image, "status"]))
+            status = json.loads(run([*base, *cli_entrypoint, "status"]))
             assert status["status"] != "unauthenticated", (
                 "Login did not survive container replacement"
             )

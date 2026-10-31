@@ -35,8 +35,9 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 
 - No pytest collection model; scripts use `main()` and `AssertionError` checks.
 - E2E command wrapper redacts sensitive args/output before logging.
-- `vw_bw_adapter.sh` maps the test profile/session to `VW_APPDATA_DIR`/`VW_SESSION` and invokes the published `vw`
-  CLI through the existing `bw` test contract; it must never fall back to the official CLI.
+- Fixtures set both CLI profile paths to the same isolated test directory. `vw_bw_adapter.sh` keeps the fixture
+  setup commands using `bw` compatible with `vw`; kp2bw itself uses native `vw` in the Vaultwarden CLI matrix lane.
+  Matrix lanes explicitly select their CLI so another installed binary cannot change the tested implementation.
 - Integration expectations include idempotency (second run must not duplicate items).
 - `bw_serve_exit_test.py` terminates a test process during a simulated request and verifies fatal batch abort,
   attachment-path propagation, and recovery from disconnects while the process remains alive.
@@ -134,7 +135,11 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
   It verifies non-root execution, read-only database/keyfile input, login persistence across containers, attachment bytes,
   unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
   architectures. `container_publish_test.py` exercises the publication helpers with mocked registry/Docker commands, checks retry
-  identity, draft asset protection and alias routing, and verifies interactive/noninteractive adapter arguments.
+  identity, draft asset protection and alias routing.
 
 - CI sets `KP2BW_E2E_CORE_ONLY=1` for the core integration script and runs its independent trailing fixtures
   in separate attachment, format and scope jobs for both CLIs. Default local/docker execution still runs all fixtures.
+
+- `npx_bootstrap_test.py` uses the real npm registry without vault access: a hostile project supplies local launchers,
+  package metadata, `.npmrc` and injected environment settings. CI checks official-registry bootstrap and offline CLI
+  execution on Linux and Windows. The pytest adapter is gated by `KP2BW_RUN_NPX_TESTS=1`.

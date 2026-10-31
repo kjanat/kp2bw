@@ -67,8 +67,8 @@ def main() -> None:
             client.organization_id = None
             client.collection_id = None
             client.folder_cache = {}
-            client.bw_cmd = ["synthetic-bw"]
-            client.bw_cwd = None
+            client.cli_command = ["synthetic-bw"]
+            client.cli_cwd = None
             client.http_timeout = 30
             client.inventory_session = "synthetic-session"
             client.inventory_needs_check = True

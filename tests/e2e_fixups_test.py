@@ -34,6 +34,7 @@ def main() -> None:
         env = os.environ.copy()
         env.update(
             BITWARDENCLI_APPDATA_DIR=str(Path(directory) / "profile"),
+            VW_APPDATA_DIR=str(Path(directory) / "profile"),
             NODE_EXTRA_CA_CERTS=str(cert),
             BW_NOINTERACTION="true",
             KP2BW_BITWARDEN_PASSWORD=password,

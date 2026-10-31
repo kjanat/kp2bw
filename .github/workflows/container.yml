@@ -6,7 +6,6 @@ on:
     paths:
       - Dockerfile
       - Dockerfile.dockerignore
-      - scripts/vw-bw.sh
       - scripts/release*.py
       - src/**
       - pyproject.toml
@@ -76,7 +75,7 @@ jobs:
           printf 'server=ghcr.io/dani-garcia/vaultwarden@%s\n' "$(crane digest "ghcr.io/dani-garcia/vaultwarden:$server")" >> "$GITHUB_OUTPUT"
       - name: Smoke test the distribution used by every image
         run: uv run --isolated --no-project --with dist/kp2bw-*.whl tests/smoke_test.py
-      - name: Check CLI adapter and publication tags
+      - name: Check publication tags and retries
         run: uv run python tests/container_publish_test.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with: { name: container-wheel, path: "dist/kp2bw-*.whl", if-no-files-found: error }
