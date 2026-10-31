@@ -8,6 +8,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-10-31
+
+### Added
+
+- Detect the Vaultwarden CLI (`vw`) directly and prefer it over the Bitwarden CLI (`bw`). Set `KP2BW_CLI=bw` or
+  `KP2BW_CLI=vw` to require one installed CLI; an explicit choice never falls back to the other.
+- Run the latest `@kjanat/vaultwarden-cli` through `npx` when neither CLI is installed. kp2bw resolves the version once
+  and runs it offline for the rest of the migration. The download uses the public npm registry in a private npm workspace
+  with an empty npm configuration and lifecycle scripts disabled.
+
+### Changed
+
+- Container images with the Vaultwarden CLI (`latest`, `vw` and unsuffixed or `-vw` version tags) no longer contain the
+  `bw` adapter. Use `--entrypoint vw` for setup commands such as `config server` and `login`. Existing `/data` volumes
+  keep their login.
+- `.env` files only set `KP2BW_*` options, `BITWARDENCLI_APPDATA_DIR`, `VW_APPDATA_DIR` and `NODE_EXTRA_CA_CERTS`. Set
+  other variables in the shell.
+
+### Security
+
+- Ignore the current directory and relative `PATH` entries when locating `vw`, `bw`, `npx`, `cmd.exe` and PowerShell,
+  including the implicit current-directory search on Windows. A launcher placed in the migration directory no longer
+  receives the vault password.
+
 ## [3.9.0] - 2026-10-31
 
 ### Added
@@ -708,7 +732,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.9.0...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.10.0...HEAD
+[3.10.0]: https://github.com/kjanat/kp2bw/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/kjanat/kp2bw/compare/v3.8.4...v3.9.0
 [3.8.4]: https://github.com/kjanat/kp2bw/compare/v3.8.3...v3.8.4
 [3.8.3]: https://github.com/kjanat/kp2bw/compare/v3.8.2...v3.8.3
