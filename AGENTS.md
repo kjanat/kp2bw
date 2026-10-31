@@ -34,7 +34,7 @@ kp2bw/
 | Bitwarden HTTP transport | `src/kp2bw/bw_serve.py`               | `bw serve` lifecycle, dedup index, batch create, attachment upload |
 | Workflow policy details  | `.github/workflows/AGENTS.md`         | Trigger matrix, cross-workflow dependencies, output contracts      |
 | Release version gating   | `.github/actions/version-check/`      | Normalizes release/tag prefixes; drives workflow gates             |
-| Main package publishing  | `.github/workflows/publish.yml`       | Triggered by GitHub Release events, not tag push                   |
+| Main package publishing  | `.github/workflows/publish.yml`       | Version tags create drafts; public release is last                 |
 | Stubs publishing         | `.github/workflows/publish-stubs.yml` | Triggered by `stubs-v*` tags                                       |
 | Codegen drift check      | `.github/workflows/codegen-check.yml` | Fails PRs when `bw_api_types.py` drifts from spec                  |
 | Regenerate API types     | `scripts/generate-bw-types.sh`        | Run after editing `specs/vault-management-api.json`                |
@@ -63,7 +63,7 @@ kp2bw/
 - Never log raw `bw` command strings or raw command output.
 - Never use bare `Exception`; use project exceptions (`BitwardenClientError`, `ConversionError`).
 - Do not rewrite valid Python 3.14 comma-form `except X, Y:` syntax to tuple form.
-- Do not assume publish-on-tag for main package; main publish is release-event driven.
+- Main release publication starts on `v*` tag push; GitHub release publication is the final step.
 - Do not change the `version-check` action's output shape (`name`, `version`, `pypi_url`) without workflow
   updates.
 
@@ -73,7 +73,7 @@ kp2bw/
 - Release workflows smoke-test built artifacts (`uv run --isolated --no-project --with dist/...`).
 - E2E fixture storage uses allowlist `.gitignore` to keep required DB/cert artifacts tracked.
 - Dedup/idempotency is treated as an invariant (convert flow + e2e re-run assertion).
-- Main publish `workflow_dispatch.dry` exists but does not currently gate publish step; stubs workflow does gate.
+- Main publish manual dispatch is always dry-run; version tag pushes create drafts and publish only after all gates pass.
 
 ## COMMANDS
 

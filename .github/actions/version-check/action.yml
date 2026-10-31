@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://www.schemastore.org/github-action.json
 ---
 name: Version Check
-description: Check out the repository, sync uv, and verify that the package version matches the release tag or requested version.
+description: Check out the repository, sync uv, and verify that the package version matches the pushed version tag or manually requested dry-run version.
 author: Kaj Kowalski
 branding: { icon: tag, color: blue }
 

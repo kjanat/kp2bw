@@ -133,8 +133,8 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 - `container_image_test.py` runs the production image against a disposable server using a fresh named state volume.
   It verifies non-root execution, read-only database/keyfile input, login persistence across containers, attachment bytes,
   unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
-  architectures. `container_publish_test.py` exercises the actual publication script with synthetic registry/Docker
-  commands, checks tag routing and overwrite refusal, and verifies interactive/noninteractive adapter arguments.
+  architectures. `container_publish_test.py` exercises the publication helpers with mocked registry/Docker commands, checks retry
+  identity, draft asset protection and alias routing, and verifies interactive/noninteractive adapter arguments.
 
 - CI sets `KP2BW_E2E_CORE_ONLY=1` for the core integration script and runs its independent trailing fixtures
   in separate attachment, format and scope jobs for both CLIs. Default local/docker execution still runs all fixtures.
