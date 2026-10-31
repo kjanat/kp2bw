@@ -178,14 +178,14 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 | `--force-update`                       | Overwrite items even if edited in Bitwarden since the last run (default: protect such edits)                                                                                                        | `KP2BW_FORCE_UPDATE`                  |
 | `--entry-id UUID`                      | Sync only this KeePass entry; combine with `--force-update` to overwrite just its destination item                                                                                                  | -                                     |
 | `--item-id UUID`                       | Sync only this existing Bitwarden item                                                                                                                                                              | -                                     |
-| `--preview`                            | [Preview the migration](docs/migration-preview.md) as `text` (default) or `json`, without writing to Bitwarden                                                                                      | -                                     |
+| `--preview`                            | [Preview the migration](https://github.com/kjanat/kp2bw/blob/HEAD/docs/migration-preview.md) as `text` (default) or `json`, without writing to Bitwarden                                            | -                                     |
 | `--preview-target`                     | With `--preview`: also inspect the destination vault without modifying it                                                                                                                           | -                                     |
 | `--password-history`                   | Import up to five previous passwords (default: on; disable with `--no-password-history`)                                                                                                            | `KP2BW_PASSWORD_HISTORY`              |
 | `--archive-history`                    | Archive full KeePass history, including historical secrets, as an attachment (default: off)                                                                                                         | `KP2BW_ARCHIVE_HISTORY`               |
-| `--map-templates`                      | Map KeePass templates to cards, identities and secure notes (default: off; [mapping guide](docs/template-mapping.md))                                                                               | `KP2BW_MAP_TEMPLATES`                 |
+| `--map-templates`                      | Map KeePass templates to cards, identities and secure notes (default: off; [mapping guide](https://github.com/kjanat/kp2bw/blob/HEAD/docs/template-mapping.md))                                     | `KP2BW_MAP_TEMPLATES`                 |
 | `--template-map JSON`                  | Override template and field mappings; requires `--map-templates`                                                                                                                                    | `KP2BW_TEMPLATE_MAP`                  |
-| `--ssh-map JSON`                       | Explicit mappings for [native SSH key items](docs/ssh-mapping.md)                                                                                                                                   | `KP2BW_SSH_MAP`                       |
-| `--checkpoint PATH`                    | Save verified attachment mappings for [resumable uploads](docs/attachment-checkpoints.md)                                                                                                           | `KP2BW_CHECKPOINT`                    |
+| `--ssh-map JSON`                       | Explicit mappings for [native SSH key items](https://github.com/kjanat/kp2bw/blob/HEAD/docs/ssh-mapping.md)                                                                                         | `KP2BW_SSH_MAP`                       |
+| `--checkpoint PATH`                    | Save verified attachment mappings for [resumable uploads](https://github.com/kjanat/kp2bw/blob/HEAD/docs/attachment-checkpoints.md)                                                                 | `KP2BW_CHECKPOINT`                    |
 | `--fixup`                              | Upgrade known legacy kp2bw fields in Bitwarden, then exit (no KeePass database required)                                                                                                            | `KP2BW_FIXUP`                         |
 | `--include-oversize-secrets`           | Offload over-limit secret fields[^offload] to a `.txt` attachment instead of dropping them (default: off)                                                                                           | `KP2BW_INCLUDE_OVERSIZE_SECRETS`      |
 | `--uri-match MODE`                     | Match mode for plain URLs: `default`(default, account default)/`domain`/`host`/`startswith`/`exact`/`regex`/`never`                                                                                 | `KP2BW_URI_MATCH`                     |
@@ -292,7 +292,7 @@ See [TROUBLESHOOTING].
 
 ## Security
 
-See the [security policy](SECURITY.md).
+See the [security policy](https://github.com/kjanat/kp2bw/blob/HEAD/SECURITY.md).
 
 [^offload]: Bitwarden limits encrypted text field size; the available space depends on UTF-8 encoding and encryption
     overhead.
