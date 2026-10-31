@@ -3,8 +3,6 @@
 import importlib.util
 import json
 import os
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
@@ -21,41 +19,10 @@ def load_script(name: str) -> ModuleType:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parents[1]
     images = load_script("release_images")
     release = load_script("release")
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
-        vw = work / "vw"
-        vw.write_text(
-            f'#!{sys.executable}\nimport json, os, sys\nprint(json.dumps([sys.argv[1:], os.environ.get("VW_APPDATA_DIR"), os.environ.get("VW_SESSION")]))\n'
-        )
-        vw.chmod(0o755)
-        for noninteractive in ("true", "false"):
-            result = subprocess.run(
-                ["sh", str(root / "scripts/vw-bw.sh"), "login", "two words"],
-                env={
-                    **os.environ,
-                    "PATH": f"{work}:{os.environ['PATH']}",
-                    "BITWARDENCLI_APPDATA_DIR": str(work / "profile with spaces"),
-                    "BW_SESSION": "synthetic-session",
-                    "BW_NOINTERACTION": noninteractive,
-                },
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=10,
-            )
-            expected = (
-                ["--nointeraction", "login", "two words"]
-                if noninteractive == "true"
-                else ["login", "two words"]
-            )
-            assert json.loads(result.stdout) == [
-                expected,
-                str(work / "profile with spaces"),
-                "synthetic-session",
-            ]
         # Identical partial publication is resumable; different version bytes fail.
         for previous in (None, "sha256:expected", "sha256:different"):
 
@@ -200,7 +167,7 @@ def main() -> None:
             else:
                 raise AssertionError("Public release assets could be changed")
             commands.assert_not_called()
-    print("publication retries, immutable assets, CLI adapters and aliases passed")
+    print("publication retries, immutable assets and aliases passed")
 
 
 if __name__ == "__main__":

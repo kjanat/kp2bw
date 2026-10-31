@@ -19,8 +19,10 @@ from . import VERBOSE, __title__, __version__
 from .bw_serve import (
     KP2BW_ID_FIELD_NAME,
     KP2BW_SYNC_FIELD_NAME,
+    NPX_VW_PACKAGE,
     BitwardenServeClient,
-    ensure_bw_available,
+    ensure_cli_available,
+    resolve_cli_command,
 )
 from .console import console
 from .convert import COLLECTION_FOLDER_MODES, Converter, collect_keepass_uris
@@ -131,7 +133,7 @@ def resolve_bool_option(arg_val: bool | None, env_var: str, *, default: bool) ->
 
 
 def load_dotenv() -> str | None:
-    """Load a ``.env`` file (searched upward from the CWD) into ``os.environ``.
+    """Load supported application/profile settings from the nearest ``.env``.
 
     Returns the path that was loaded, or ``None`` when no ``.env`` is found.
     ``usecwd=True`` anchors the search at the user's working directory rather
@@ -150,7 +152,15 @@ def load_dotenv() -> str | None:
     if not dotenv_path:
         return None
     for key, value in dotenv_values(dotenv_path).items():
-        if value is not None and not os.environ.get(key):
+        if (
+            (
+                key.startswith("KP2BW_")
+                or key
+                in {"BITWARDENCLI_APPDATA_DIR", "VW_APPDATA_DIR", "NODE_EXTRA_CA_CERTS"}
+            )
+            and value is not None
+            and not os.environ.get(key)
+        ):
             os.environ[key] = value
     return dotenv_path
 
@@ -1039,7 +1049,7 @@ def main() -> None:
     # user isn't asked for passwords only to hit a missing-`bw` failure later.
     if not args.preview or args.preview_target:
         try:
-            ensure_bw_available()
+            ensure_cli_available()
         except BitwardenClientError as exc:
             fail(exc)
 
@@ -1091,17 +1101,23 @@ def main() -> None:
     # bw confirmation
     if not skip_confirm and not args.preview:
         confirm: str | None = None
-        print("Do you have bw cli installed and is it set up?")
-        print(
-            "1) If you use an on premise installation, use bw config to set the url: bw config server <url>"
+        command, _ = resolve_cli_command()
+        cli = (
+            f"npx --yes {NPX_VW_PACKAGE}"
+            if NPX_VW_PACKAGE in command
+            else "vw"
+            if "--nointeraction" in command
+            else "bw"
         )
+        print(f"Is {cli} configured and logged in?")
+        print(f"1) For a self-hosted server: {cli} config server <url>")
         print(
-            "2) execute bw login once, as this script uses bw unlock only: bw login <user>"
+            f"2) Log in once: {cli} login <user> (kp2bw uses {cli} unlock afterwards)"
         )
         print(" ")
 
         while confirm not in {"y", "n"}:
-            confirm = input("Confirm that you have set up bw cli [y/n]: ").lower()
+            confirm = input(f"Confirm that you have set up {cli} cli [y/n]: ").lower()
 
         if confirm == "n":
             print("exiting...")

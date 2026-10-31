@@ -86,7 +86,7 @@ def assert_dotenv_supplies_keepass_file() -> None:
         # Neutralize the side-effecting downstream: no real bw, no real migration.
         # patch.object auto-restores both names when the block exits.
         with (
-            mock.patch.object(cli, "ensure_bw_available", return_value=None),
+            mock.patch.object(cli, "ensure_cli_available", return_value=None),
             mock.patch.object(cli, "Converter", CapturingConverter),
         ):
             cli.main()
@@ -178,7 +178,7 @@ def assert_org_disables_personal_folders_by_default() -> None:
 
         def run() -> object:
             with (
-                mock.patch.object(cli, "ensure_bw_available", return_value=None),
+                mock.patch.object(cli, "ensure_cli_available", return_value=None),
                 mock.patch.object(cli, "Converter", CapturingConverter),
             ):
                 cli.main()
@@ -230,7 +230,7 @@ def assert_totp_pps_reaches_converter() -> None:
         def run(argv: list[str]) -> object:
             sys.argv = argv
             with (
-                mock.patch.object(cli, "ensure_bw_available", return_value=None),
+                mock.patch.object(cli, "ensure_cli_available", return_value=None),
                 mock.patch.object(cli, "Converter", CapturingConverter),
             ):
                 cli.main()
@@ -258,7 +258,36 @@ def assert_totp_pps_reaches_converter() -> None:
                 os.environ[key] = value
 
 
+def assert_dotenv_cannot_configure_executable_loading() -> None:
+    with (
+        mock.patch.object(cli, "find_dotenv", return_value="synthetic.env"),
+        mock.patch.object(
+            cli,
+            "dotenv_values",
+            return_value={
+                "npm_config_registry": "https://untrusted.invalid",
+                "NPM_CONFIG_USERCONFIG": "untrusted.npmrc",
+                "PATH": "untrusted-bin",
+                "COMSPEC": "untrusted.cmd",
+                "NODE_OPTIONS": "--require untrusted.js",
+                "HOME": "untrusted-home",
+                "KP2BW_CLI": "vw",
+                "KP2BW_KEEPASS_FILE": "source.kdbx",
+                "VW_APPDATA_DIR": "vault-profile",
+            },
+        ),
+        mock.patch.dict(os.environ, {}, clear=True),
+    ):
+        assert cli.load_dotenv() == "synthetic.env"
+        assert dict(os.environ) == {
+            "KP2BW_CLI": "vw",
+            "KP2BW_KEEPASS_FILE": "source.kdbx",
+            "VW_APPDATA_DIR": "vault-profile",
+        }
+
+
 def main() -> None:
+    assert_dotenv_cannot_configure_executable_loading()
     assert_dotenv_supplies_keepass_file()
     assert_empty_env_var_defers_to_dotenv()
     assert_org_disables_personal_folders_by_default()

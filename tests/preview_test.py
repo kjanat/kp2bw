@@ -253,7 +253,7 @@ def main() -> None:
             patch("kp2bw.cli.load_dotenv", return_value=None),
             patch("kp2bw.cli.configure_logging", return_value=None),
             patch(
-                "kp2bw.cli.ensure_bw_available",
+                "kp2bw.cli.ensure_cli_available",
                 side_effect=AssertionError("Invalid modes opened Bitwarden"),
             ),
         ):
@@ -421,7 +421,7 @@ def main() -> None:
             patch("kp2bw.cli.configure_logging", return_value=None),
             patch("kp2bw.cli.read_password", return_value="synthetic") as passwords,
             patch(
-                "kp2bw.cli.ensure_bw_available",
+                "kp2bw.cli.ensure_cli_available",
                 side_effect=AssertionError("Preview required bw"),
             ),
             patch(
@@ -462,7 +462,7 @@ def main() -> None:
                 "kp2bw.cli.read_password",
                 side_effect=["synthetic", "destination-password"],
             ),
-            patch("kp2bw.cli.ensure_bw_available") as availability,
+            patch("kp2bw.cli.ensure_cli_available") as availability,
             patch("kp2bw.cli.BitwardenServeClient", return_value=target) as client,
             redirect_stdout(output),
         ):

@@ -46,6 +46,7 @@ def main() -> None:
         profile = os.environ.get("KP2BW_E2E_BW_PROFILE")
         env.update(
             BITWARDENCLI_APPDATA_DIR=profile or str(tmp / "bw"),
+            VW_APPDATA_DIR=profile or str(tmp / "bw"),
             NODE_EXTRA_CA_CERTS=cert,
         )
         env["BW_NOINTERACTION"] = "true"

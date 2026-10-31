@@ -166,7 +166,7 @@ def assert_cli_prints_one_error_line_for_wrong_password() -> None:
             ]
             exit_code: object = None
             with (
-                mock.patch.object(cli, "ensure_bw_available", return_value=None),
+                mock.patch.object(cli, "ensure_cli_available", return_value=None),
                 console.capture() as captured,
             ):
                 try:

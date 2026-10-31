@@ -134,7 +134,7 @@ def main() -> None:
         patch.object(cli.sys, "argv", ["kp2bw", "--fixup", "-y"]),
         patch.object(cli, "load_dotenv", return_value=None),
         patch.object(cli, "configure_logging", return_value=None),
-        patch.object(cli, "ensure_bw_available"),
+        patch.object(cli, "ensure_cli_available"),
         patch.object(
             cli, "read_password", side_effect=AssertionError("unexpected prompt")
         ),

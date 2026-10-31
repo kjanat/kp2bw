@@ -49,8 +49,8 @@ def done(
 
 def session(unlock: Unlock) -> str | None:
     client = object.__new__(BitwardenServeClient)
-    client.bw_cmd = ["bw"]
-    client.bw_cwd = None
+    client.cli_command = ["bw"]
+    client.cli_cwd = None
     with (
         mock.patch.object(bw_serve.subprocess, "run", unlock),
         mock.patch.object(bw_serve, "warn_login_compatibility", return_value=None),
