@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-10-31
+
 ### Added
 
 - Add container images for amd64 and arm64 with persistent authentication and a non-root runtime. The `latest` and
@@ -706,7 +708,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.8.4...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.9.0...HEAD
+[3.9.0]: https://github.com/kjanat/kp2bw/compare/v3.8.4...v3.9.0
 [3.8.4]: https://github.com/kjanat/kp2bw/compare/v3.8.3...v3.8.4
 [3.8.3]: https://github.com/kjanat/kp2bw/compare/v3.8.2...v3.8.3
 [3.8.2]: https://github.com/kjanat/kp2bw/compare/v3.8.1...v3.8.2
