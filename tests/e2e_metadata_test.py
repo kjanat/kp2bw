@@ -222,6 +222,7 @@ def check_legacy_ref_upgrade(tmp: Path, env: dict[str, str], password: str) -> N
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
             repeated = bw.get_item(item_id)
             assert repeated["revisionDate"] == updated["revisionDate"]
+            assert "attachments" in repeated and "attachments" in updated
             assert repeated["attachments"] == updated["attachments"]
     finally:
         with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:

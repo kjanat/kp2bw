@@ -25,9 +25,9 @@ def remote_digest(reference: str) -> str | None:
 
 
 def publish(directory: Path, image: str, version: str) -> None:
-    manifests = {}
+    manifests: dict[str, str] = {}
     for cli in ("vw", "bw"):
-        tags = []
+        tags: list[str] = []
         for arch in ("amd64", "arm64"):
             run(
                 "docker",

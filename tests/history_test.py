@@ -250,6 +250,7 @@ def check_legacy_ref_history() -> None:
         )
         assert outcome == "updated"
         payload = client.update_item_if_revision.call_args.args[1]
+        assert "passwordHistory" in desired
         assert payload["passwordHistory"] == desired["passwordHistory"]
         assert any(
             field["name"] == "KeePass:KP2BW_HISTORY:1"
@@ -290,12 +291,13 @@ def check_native_legacy_history_names() -> None:
             "type": 0,
         })
         # Reproduce the old native-item signature independently of the helper.
+        native_values: list[tuple[str, str]] = []
         old_content = (
             item_type,
             legacy["name"],
             legacy["notes"] or "",
             fields_signature(legacy["fields"]),
-            [],
+            native_values,
         )
         old_stamp = hashlib.sha256(repr(old_content).encode()).hexdigest()
         legacy["fields"].append({"name": "KP2BW_SYNC", "value": old_stamp, "type": 0})

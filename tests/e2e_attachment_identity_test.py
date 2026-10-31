@@ -103,12 +103,16 @@ def check_legacy_collision_retry(
         assert records == plan.records
         remote = [(a["id"], a["fileName"]) for a in full.get("attachments") or []]
         assert len(remote) == 3
-        for _ in range(2):
-            retry = plan_attachments(
+        retries = [
+            plan_attachments(
                 sources, records, remote, lambda aid: bw.get_attachment(item_id, aid)
             )
-            assert not retry.uploads
-            assert retry.sources[1].filename == pending.filename
+            for _ in range(2)
+        ]
+        for attempt in retries:
+            assert not attempt.uploads
+            assert attempt.sources[1].filename == pending.filename
+        retry = retries[-1]
         converter.persist_attachment_plan(bw, item_id, retry, set())
         for stale_id in retry.stale.values():
             bw.delete_attachment(item_id, stale_id)
