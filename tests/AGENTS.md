@@ -35,14 +35,17 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 
 - No pytest collection model; scripts use `main()` and `AssertionError` checks.
 - E2E command wrapper redacts sensitive args/output before logging.
-- Fixtures set both CLI profile paths to the same isolated test directory. `vw_bw_adapter.sh` keeps the fixture
-  setup commands using `bw` compatible with `vw`; kp2bw itself uses native `vw` in the Vaultwarden CLI matrix lane.
+- `e2e_support.py` logs in once per process with the CLI selected by `KP2BW_CLI` and opens one `bw serve` or
+  `vw serve` client. Every read, write and in-process conversion (`Converter.convert(client)`) uses that client; a read
+  after a write first syncs, because the official CLI can answer from its cache before a PUT lands there. CLI
+  entrypoint runs and crash children get a private copy of the logged-in profile and session.
   Matrix lanes explicitly select their CLI so another installed binary cannot change the tested implementation.
 - Integration expectations include idempotency (second run must not duplicate items).
 - `bw_serve_exit_test.py` terminates a test process during a simulated request and verifies fatal batch abort,
   attachment-path propagation, and recovery from disconnects while the process remains alive.
-- The Vaultwarden E2E runs focused REF/TOTP/protected-field checks after golden snapshots, so those checks can mutate
-  the vault without changing the comprehensive golden fixtures.
+- `e2e_vaultwarden_test.py [CHECK...]` runs the named checks in order over one client, or the whole suite without
+  arguments. Goldens run first on a clean vault; the focused REF/TOTP/protected-field checks (`refs`) mutate it only
+  afterwards.
 - It also runs `e2e_metadata_test.py` with metadata explicitly enabled: persisted JSON tags/expiry, untouched YAML
   upgrades with and without sync stamps, protected metadata/notes edits, omitted empty metadata, and unchanged
   revisions on reruns. Synthetic items are cleaned up by both unique name and source UUID. The standalone script
@@ -67,7 +70,7 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
   `e2e_checkpoint_test.py` kills migration processes before upload, after upload, after mapping and after deletion,
   then checks convergence and a rerun without attachment body transfers. With
   `KP2BW_E2E_VAULTWARDEN_CONTAINER`, it also removes a synthetic encrypted body from that disposable container to
-  exercise recovery of an actual orphan slot. Both CLI jobs run these checks after golden snapshots.
+  exercise recovery of an actual orphan slot. Each crash boundary is its own check (`crash_*`) on its own entry.
 - The final live attachment batch regression verifies four distinct files on each of two items, unchanged reruns,
   replacement and a falsely acknowledged upload that must fail without deleting the old copy.
   `e2e_attachment_batch_test.py` can also run independently against an official Bitwarden test account using
@@ -136,8 +139,8 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
   unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
   architectures.
 
-- CI sets `KP2BW_E2E_CORE_ONLY=1` for the core integration script and runs its independent trailing fixtures
-  in separate attachment, format and scope jobs for both CLIs. Default local/docker execution still runs all fixtures.
+- CI runs one job per CLI. The job starts one disposable server per worker from the same image and runs the workers
+  in parallel, each with `BW_SERVER_URL` and `KP2BW_E2E_VAULTWARDEN_CONTAINER` set to its own server.
 
 - `npx_bootstrap_test.py` uses the real npm registry without vault access: a hostile project supplies local launchers,
   package metadata, `.npmrc` and injected environment settings. CI checks official-registry bootstrap and offline CLI

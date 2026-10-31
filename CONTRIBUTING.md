@@ -15,12 +15,16 @@ checks through `uv run`, using the project's locked dependencies. Run `dprint fm
 
 ## Compatibility tests
 
-CI tests the newest stable releases of `@bitwarden/cli` and `@kjanat/vaultwarden-cli` against the newest stable
-Vaultwarden server. All test groups for both CLIs must pass. The run summary records exact versions and the server image
-digest.
+CI tests the newest stable releases of [`@bitwarden/cli`][npm:bw] and [`@kjanat/vaultwarden-cli`][npm:vw] against the
+newest stable Vaultwarden server. All test groups for both CLIs must pass. The run summary records exact versions and
+the server image digest.
 
-The official CLI job also compares golden snapshots. `tests/vw_bw_adapter.sh` maps the existing `bw` test commands and
-profile/session variables to `vw`, exercising the published CLI and its `@kjanat/vaultwarden` SDK.
+The official CLI job also compares golden snapshots. The Vaultwarden CLI job runs the same checks with `vw`, exercising
+the published CLI and its [`@kjanat/vaultwarden`][npm:vw-sdk] SDK.
+
+[npm:bw]: @bitwarden/cli
+[npm:vw]: @kjanat/vaultwarden-cli
+[npm:vw-sdk]: @kjanat/vaultwarden
 
 ## Container development
 
