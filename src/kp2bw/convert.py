@@ -9,7 +9,7 @@ import re
 import shlex
 import time
 from collections.abc import Mapping
-from contextlib import ExitStack, nullcontext
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from dataclasses import dataclass, replace
 from itertools import islice
 from pathlib import Path
@@ -3726,7 +3726,21 @@ class Converter:
                     raise
                 self.preview_failures.setdefault(identifier, []).append(str(exc))
 
-    def convert(self) -> int:
+    def destination(
+        self, client: BitwardenServeClient | None
+    ) -> AbstractContextManager[BitwardenServeClient]:
+        fixed_collection = self.bitwarden_coll_id
+        if fixed_collection in COLLECTION_FOLDER_MODES:
+            fixed_collection = None
+        if client is None:
+            return BitwardenServeClient(
+                self.bitwarden_password,
+                org_id=self.bitwarden_organization_id,
+                collection_id=fixed_collection,
+            )
+        return client.scope(self.bitwarden_organization_id, fixed_collection)
+
+    def convert(self, client: BitwardenServeClient | None = None) -> int:
         """Run the full KeePass-to-Bitwarden migration pipeline.
 
         Returns the number of non-fatal failures (rejected entry creates plus
@@ -3737,11 +3751,7 @@ class Converter:
             fixed_collection = self.bitwarden_coll_id
             if fixed_collection in COLLECTION_FOLDER_MODES:
                 fixed_collection = None
-            with BitwardenServeClient(
-                self.bitwarden_password,
-                org_id=self.bitwarden_organization_id,
-                collection_id=fixed_collection,
-            ) as bw:
+            with self.destination(client) as bw:
                 visible = bw.list_items()
                 scoped = bw.list_items(
                     organization_id=self.bitwarden_organization_id,
@@ -3765,4 +3775,7 @@ class Converter:
         self.prepare_entries()
 
         # store aggregated entries in bw
-        return self.create_bitwarden_items_for_entries()
+        if client is None:
+            return self.create_bitwarden_items_for_entries()
+        with self.destination(client) as bw:
+            return self.create_bitwarden_items_for_entries(bw)

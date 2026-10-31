@@ -58,17 +58,43 @@ jobs:
                 Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             }
           }
-          $groups = [ordered]@{
-            core = @('e2e_vaultwarden_test.py')
-            attachments = @('e2e_attachment_batch_test.py', 'e2e_attachment_identity_test.py')
-            formats = @('e2e_templates_test.py', 'e2e_history_archive_test.py', 'e2e_field_limits_test.py')
-            scope = @('e2e_scope_test.py', 'e2e_item_selection_test.py', 'e2e_fixups_test.py')
-          }
+          $workers = @(
+            'golden',
+            'refs reserved_fields passkey',
+            'metadata',
+            'ssh',
+            'checkpoint',
+            'crash_before_upload',
+            'crash_after_upload',
+            'crash_after_mapping',
+            'crash_after_delete',
+            'crash_lost_checkpoint',
+            'crash_orphan_slot',
+            'preview',
+            'preview_resume',
+            'attachment_batch',
+            'attachment_identity',
+            'attachment_legacy',
+            'templates',
+            'history_archive',
+            'field_limits',
+            'field_limits_org',
+            'scope',
+            'item_selection',
+            'fixups'
+          )
+          $shards = @(
+            @('scope', 'history_archive', 'metadata', 'field_limits_org', 'crash_orphan_slot', 'golden', 'field_limits', 'attachment_legacy'),
+            @('preview_resume', 'attachment_identity', 'item_selection', 'templates', 'crash_lost_checkpoint', 'crash_after_upload', 'crash_after_delete', 'checkpoint'),
+            @('preview', 'ssh', 'fixups', 'refs reserved_fields passkey', 'crash_after_mapping', 'crash_before_upload', 'attachment_batch')
+          )
+          $assigned = @($shards | ForEach-Object { $_ })
+          if (Compare-Object $assigned $workers) { throw 'Shards do not cover each worker once' }
           $jobs = @(foreach ($row in $include) {
-            foreach ($group in $groups.Keys) {
+            for ($i = 0; $i -lt $shards.Count; $i++) {
               $job = $row.Clone()
-              $job.group = $group
-              $job.scripts = $groups[$group]
+              $job.shard = "$($i + 1)/$($shards.Count)"
+              $job.workers = $shards[$i]
               $job
             }
           })
@@ -89,17 +115,15 @@ jobs:
         env: { KP2BW_RUN_NPX_TESTS: "1" }
 
   e2e:
-    name: e2e (${{ matrix.lane }}, ${{ matrix.group }}, ${{ matrix.cli-package }} ${{ matrix.bw-version }}, Vaultwarden ${{ matrix.server-version }})
+    name: e2e (${{ matrix.lane }} ${{ matrix.shard }}, ${{ matrix.cli-package }} ${{ matrix.bw-version }}, Vaultwarden ${{ matrix.server-version }})
     needs: [config, unit]
     runs-on: ubuntu-latest
     permissions: { contents: read }
-    timeout-minutes: 40
+    timeout-minutes: 10
     env:
       BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
-      BW_SERVER_URL: https://localhost:18443
+      E2E_WORKERS: ${{ toJson(matrix.workers) }}
       KP2BW_CLI: ${{ matrix.cli-package == '@kjanat/vaultwarden-cli' && 'vw' || 'bw' }}
-      KP2BW_E2E_CORE_ONLY: "1"
-      KP2BW_E2E_VAULTWARDEN_CONTAINER: vaultwarden
       KP2BW_SNAPSHOT_GOLDEN: ${{ matrix.cli-package == '@bitwarden/cli' }}
       KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
     strategy: { fail-fast: false, matrix: "${{ fromJson(needs.config.outputs.matrix) }}" }
@@ -111,30 +135,29 @@ jobs:
         env: { VAULTWARDEN_IMAGE: "${{ matrix.server-image }}" }
         run: docker build --pull --build-arg "VAULTWARDEN_IMAGE=$env:VAULTWARDEN_IMAGE" -f tests/Dockerfile.vaultwarden -t kp2bw-vaultwarden tests
 
-      - name: Start Vaultwarden
-        run: docker run -d --name vaultwarden -p 18443:443
-          -e I_REALLY_WANT_VOLATILE_STORAGE=true
-          -e SIGNUPS_ALLOWED=false
-          -e DOMAIN=$env:BW_SERVER_URL
-          -e ROCKET_PORT=443
-          -e 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}'
-          kp2bw-vaultwarden
-
-      - name: Wait for Vaultwarden
+      - name: Start one Vaultwarden server per worker
+        shell: bash
         run: |
-          curl --retry 30 --retry-connrefused --retry-delay 2 -fsk $env:BW_SERVER_URL | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host @"
-          ::error::Vaultwarden did not become healthy
-          ::group::Vaultwarden logs
-          "@
-            docker logs vaultwarden
-            Write-Host ::endgroup::
-            exit 1
-          }
-          Write-Host "Vaultwarden is healthy"
-          docker exec vaultwarden /vaultwarden --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          count=$(jq length <<<"${E2E_WORKERS}")
+          for ((i = 0; i < count; i++)); do
+            port=$((18443 + i))
+            docker run -d --name "vaultwarden-${i}" -p "${port}:443" \
+              -e I_REALLY_WANT_VOLATILE_STORAGE=true \
+              -e SIGNUPS_ALLOWED=false \
+              -e "DOMAIN=https://localhost:${port}" \
+              -e ROCKET_PORT=443 \
+              -e 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}' \
+              kp2bw-vaultwarden >/dev/null
+          done
+          for ((i = 0; i < count; i++)); do
+            if ! curl --retry 30 --retry-all-errors --retry-delay 1 --fail --silent --insecure --output /dev/null "https://localhost:$((18443 + i))"; then
+              echo "::error::Vaultwarden ${i} did not become healthy"
+              docker logs "vaultwarden-${i}"
+              exit 1
+            fi
+          done
+          echo "${count} Vaultwarden servers are healthy"
+          docker exec vaultwarden-0 /vaultwarden --version
 
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       - run: uv sync --frozen
@@ -150,33 +173,53 @@ jobs:
         env: { VW_VERSION: "${{ matrix.bw-version }}" }
         run: |
           npm install --global --ignore-scripts --prefix "${RUNNER_TEMP}/vw-cli" "@kjanat/vaultwarden-cli@${VW_VERSION}"
-          mkdir -p "${RUNNER_TEMP}/vw-adapter"
-          install -m 755 tests/vw_bw_adapter.sh "${RUNNER_TEMP}/vw-adapter/bw"
           echo "${RUNNER_TEMP}/vw-cli/bin" >> "${GITHUB_PATH}"
-          echo "${RUNNER_TEMP}/vw-adapter" >> "${GITHUB_PATH}"
           "${RUNNER_TEMP}/vw-cli/bin/vw" --version
 
-      - name: Run end-to-end group (${{ matrix.group }})
-        env: { E2E_SCRIPTS: "${{ toJson(matrix.scripts) }}" }
+      - name: Run end-to-end workers in parallel
+        shell: bash
         run: |
-          foreach ($script in ($env:E2E_SCRIPTS | ConvertFrom-Json)) {
-            Write-Host "::group::$script"
-            $timer = [System.Diagnostics.Stopwatch]::StartNew()
-            uv run "tests/$script"
-            $code = $LASTEXITCODE
-            $timer.Stop()
-            Write-Host "$script completed in $($timer.Elapsed), exit $code"
-            Write-Host '::endgroup::'
-            if ($code -ne 0) { exit $code }
-          }
+          names=$(jq -r '.[]' <<<"${E2E_WORKERS}")
+          mapfile -t workers <<<"${names}"
+          logs="${RUNNER_TEMP}/e2e"
+          mkdir -p "${logs}"
+          for i in "${!workers[@]}"; do
+            read -ra checks <<<"${workers[i]}"
+            (
+              start=${SECONDS}
+              code=0
+              BW_SERVER_URL="https://localhost:$((18443 + i))" \
+                KP2BW_E2E_VAULTWARDEN_CONTAINER="vaultwarden-${i}" \
+                uv run tests/e2e_vaultwarden_test.py "${checks[@]}" >"${logs}/${i}.log" 2>&1 || code=$?
+              echo "${code} $((SECONDS - start))" >"${logs}/${i}.status"
+            ) &
+          done
+          wait
+          failed=0
+          for i in "${!workers[@]}"; do
+            read -r code elapsed <"${logs}/${i}.status"
+            echo "::group::${workers[i]}: exit ${code} after ${elapsed}s"
+            cat "${logs}/${i}.log"
+            echo "::endgroup::"
+            if [[ "${code}" != 0 ]]; then
+              echo "::error::End-to-end worker '${workers[i]}' failed"
+              failed=1
+            fi
+          done
+          exit "${failed}"
 
       - name: Show Vaultwarden logs on failure
         if: failure() || cancelled()
+        shell: bash
         run: |
-          Write-Host ::group::Vaultwarden` logs
-          docker logs vaultwarden
-          Write-Host ::endgroup::
+          for name in $(docker ps -a --format '{{.Names}}' --filter name=vaultwarden-); do
+            echo "::group::${name} logs"
+            docker logs "${name}"
+            echo "::endgroup::"
+          done
 
       - name: Cleanup
         if: always()
-        run: docker rm -f vaultwarden 2>$null; exit 0
+        shell: bash
+        run: |
+          docker ps -aq --filter name=vaultwarden- | xargs -r docker rm -f

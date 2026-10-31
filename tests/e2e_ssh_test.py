@@ -2,19 +2,16 @@
 
 import copy
 import json
-import os
-import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
-from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from e2e_vaultwarden_test import run, run_migration
+from e2e_support import Vault, vault_main
 from pykeepass import create_database
 
-from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.convert import Converter
+from kp2bw.ssh_mapping import parse_ssh_rules
 
 
 def private_key() -> str:
@@ -30,23 +27,19 @@ def private_key() -> str:
     )
 
 
-def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
-    env = env.copy()
+def run_ssh_test(vault: Vault) -> None:
+    tmp = vault.tmp
+    rules = [
+        {"group": "SSH", "fields": {"privateKey": "Private Key"}},
+        {"group": "Referenced keys", "fields": {"privateKey": "Password"}},
+        {
+            "field": {"name": "Type", "value": "Excluded"},
+            "fields": {"privateKey": "Private Key"},
+        },
+    ]
     mapping = tmp / "ssh-map.json"
-    mapping.write_text(
-        json.dumps([
-            {"group": "SSH", "fields": {"privateKey": "Private Key"}},
-            {"group": "Referenced keys", "fields": {"privateKey": "Password"}},
-            {
-                "field": {"name": "Type", "value": "Excluded"},
-                "fields": {"privateKey": "Private Key"},
-            },
-        ]),
-        encoding="utf-8",
-    )
-    env.update(
-        KP2BW_SSH_MAP=str(mapping), BW_NOINTERACTION="true", KP2BW_SKIP_EXPIRED="true"
-    )
+    mapping.write_text(json.dumps(rules), encoding="utf-8")
+    env = {"KP2BW_SSH_MAP": str(mapping), "KP2BW_SKIP_EXPIRED": "true"}
     source = tmp / "ssh.kdbx"
     db = create_database(source, password="synthetic")
     group = db.add_group(db.root_group, "SSH")
@@ -85,50 +78,56 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     db.save()
 
     def migrate() -> None:
-        run_migration(source, "synthetic", password, env)
+        converter = Converter(
+            str(source),
+            "synthetic",
+            None,
+            vault.password,
+            None,
+            None,
+            False,
+            999,
+            None,
+            skip_expired=True,
+            migrate_metadata=False,
+            ssh_rules=parse_ssh_rules(rules),
+        )
+        assert converter.convert(vault.client) == 0
 
     alias_revision: str | None = None
     chain_revisions: tuple[str | None, str | None] | None = None
 
     def read() -> tuple[BwItemResponse, BwItemResponse]:
         nonlocal alias_revision, chain_revisions
-        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-            target = bw.get_item_by_uuid(chain_target.uuid.hex.upper())
-            chained = bw.get_item_by_uuid(chain_alias.uuid.hex.upper())
-            assert target is not None and chained is not None
-            target, chained = bw.get_item(target["id"]), bw.get_item(chained["id"])
-            assert target["type"] == 5 and target.get("sshKey")
-            chain_login = chained.get("login")
-            assert chained["type"] == 1 and chain_login is not None
-            assert chain_login["username"] == "chain-user"
-            assert chain_login["password"] == original
-            assert any(
-                uri["uri"] == "https://chained-login.example.test"
-                for uri in chain_login["uris"]
-            )
-            revisions = (target.get("revisionDate"), chained.get("revisionDate"))
-            if chain_revisions is not None:
-                assert revisions == chain_revisions
-            chain_revisions = revisions
-            assert bw.get_item_by_uuid(excluded.uuid.hex.upper()) is None
-            login = bw.get_item_by_uuid(alias.uuid.hex.upper())
-            assert login is not None
-            login = bw.get_item(login["id"])
-            credentials = login.get("login")
-            assert credentials is not None
-            assert login["type"] == 1 and credentials["username"] == "ssh-user"
-            assert credentials["password"] == "synthetic-password"
-            assert any(
-                uri["uri"] == "https://ssh-login.example.test"
-                for uri in credentials["uris"]
-            )
-            if alias_revision is not None:
-                assert login["revisionDate"] == alias_revision
-            alias_revision = login["revisionDate"]
-            native = bw.get_item_by_uuid(entry.uuid.hex.upper())
-            fallback = bw.get_item_by_uuid(broken.uuid.hex.upper())
-            assert native is not None and fallback is not None
-            return bw.get_item(native["id"]), bw.get_item(fallback["id"])
+        target = vault.item(chain_target.uuid.hex.upper())
+        chained = vault.item(chain_alias.uuid.hex.upper())
+        assert target["type"] == 5 and target.get("sshKey")
+        chain_login = chained.get("login")
+        assert chained["type"] == 1 and chain_login is not None
+        assert chain_login["username"] == "chain-user"
+        assert chain_login["password"] == original
+        assert any(
+            uri["uri"] == "https://chained-login.example.test"
+            for uri in chain_login["uris"]
+        )
+        revisions = (target.get("revisionDate"), chained.get("revisionDate"))
+        if chain_revisions is not None:
+            assert revisions == chain_revisions
+        chain_revisions = revisions
+        assert vault.find(excluded.uuid.hex.upper()) is None
+        login = vault.item(alias.uuid.hex.upper())
+        credentials = login.get("login")
+        assert credentials is not None
+        assert login["type"] == 1 and credentials["username"] == "ssh-user"
+        assert credentials["password"] == "synthetic-password"
+        assert any(
+            uri["uri"] == "https://ssh-login.example.test"
+            for uri in credentials["uris"]
+        )
+        if alias_revision is not None:
+            assert login["revisionDate"] == alias_revision
+        alias_revision = login["revisionDate"]
+        return vault.item(entry.uuid.hex.upper()), vault.item(broken.uuid.hex.upper())
 
     migrate()
     initial, fallback = read()
@@ -145,29 +144,22 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
     assert unchanged_fallback["revisionDate"] == fallback["revisionDate"]
     entry.set_custom_property("Private Key", private_key(), protect=True)
     db.save()
-    run_migration(
+    vault.migrate(
         source,
         "synthetic",
-        password,
-        env,
-        extra_args=(
-            "--entry-id",
-            str(entry.uuid),
-            "--item-id",
-            initial["id"],
-        ),
+        extra_args=("--entry-id", str(entry.uuid), "--item-id", initial["id"]),
+        env=env,
     )
     rotated, _ = read()
     assert rotated["id"] == initial["id"]
     assert rotated.get("sshKey") != initial.get("sshKey")
     migrate()
     assert read()[0]["revisionDate"] == rotated["revisionDate"]
-    with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-        edited = copy.deepcopy(rotated)
-        key = edited.get("sshKey")
-        assert key is not None
-        key["publicKey"] += " manual-comment"
-        bw.update_item(edited["id"], edited)
+    edited = copy.deepcopy(rotated)
+    key = edited.get("sshKey")
+    assert key is not None
+    key["publicKey"] += " manual-comment"
+    vault.client.update_item(edited["id"], edited)
     migrate()
     protected = read()[0]
     assert protected.get("sshKey") == edited.get("sshKey")
@@ -175,15 +167,7 @@ def run_ssh_test(tmp: Path, env: dict[str, str], password: str) -> None:
 
 
 def main() -> None:
-    env = os.environ.copy()
-    env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
-    env["VW_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
-    env["BW_NOINTERACTION"] = "true"
-    status = json.loads(run(["bw", "status"], env=env))
-    assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")
-    assert status.get("userEmail", "").casefold() == env["BW_TEST_EMAIL"].casefold()
-    with tempfile.TemporaryDirectory() as directory:
-        run_ssh_test(Path(directory), env, env["BW_TEST_PASSWORD"])
+    vault_main(run_ssh_test)
 
 
 if __name__ == "__main__":

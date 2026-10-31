@@ -1,18 +1,17 @@
 """Verify native passkeys and recoverable failures through the real CLI."""
 
 import uuid
-from pathlib import Path
-from typing import cast
 
-from e2e_vaultwarden_test import bw_json, get_session, run, run_migration
+from e2e_support import Vault, vault_main
 from passkey_conversion_test import MARKED_ID, source_properties, verify_native_key
 from pykeepass import create_database
 
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.convert import Converter
 
 
-def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
-    source = tmp / "passkeys.kdbx"
+def run_passkey_test(vault: Vault) -> None:
+    source = vault.tmp / "passkeys.kdbx"
     kp_password = "SyntheticPasskeyPassword123!"
     database = create_database(source, password=kp_password)
     prefix = f"Passkey {uuid.uuid4().hex}"
@@ -29,22 +28,28 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
         for name, value in properties.items():
             entry.set_custom_property(name, value, protect=True)
     database.save()
-    session = get_session(env, password)
 
     def read_cases() -> dict[str, BwItemResponse]:
-        nonlocal session
-        session = get_session(env, password)
-        run(["bw", "sync", "--session", session], env=env)
-        items = bw_json(env, "list", "items", "--session", session)
-        result: dict[str, BwItemResponse] = {}
-        for case in cases:
-            matches = [item for item in items if item.get("name") == f"{prefix} {case}"]
-            assert len(matches) == 1, "Passkey fixture missing or duplicated"
-            result[case] = cast(BwItemResponse, matches[0])
-        return result
+        named = vault.named(*(f"{prefix} {case}" for case in cases))
+        return {case: named[f"{prefix} {case}"] for case in cases}
+
+    def migrate() -> None:
+        converter = Converter(
+            str(source),
+            kp_password,
+            None,
+            vault.password,
+            None,
+            None,
+            False,
+            999,
+            None,
+            migrate_metadata=False,
+        )
+        assert converter.convert(vault.client) == 0
 
     try:
-        run_migration(source, kp_password, password, env)
+        vault.migrate(source, kp_password)
         first = read_cases()
         login = first["valid"].get("login")
         assert login is not None
@@ -64,7 +69,7 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
             "invalid"
         ]
         assert all(field["type"] == 1 for field in recovered.values())
-        run_migration(source, kp_password, password, env)
+        migrate()
         second = read_cases()
         for case in cases:
             assert second[case]["id"] == first[case]["id"]
@@ -72,26 +77,13 @@ def run_passkey_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 "Unchanged passkey rewritten"
             )
     finally:
-        session = get_session(env, password)
-        run(["bw", "sync", "--session", session], env=env)
-        for item in bw_json(env, "list", "items", "--session", session):
-            candidate = cast(BwItemResponse, item)
-            if not str(candidate.get("name")).startswith(prefix):
-                continue
-            if any(
-                field["name"] == "KP2BW_ID" and field["value"] in source_ids
-                for field in candidate.get("fields") or []
-            ):
-                run(
-                    [
-                        "bw",
-                        "delete",
-                        "item",
-                        str(candidate["id"]),
-                        "--permanent",
-                        "--session",
-                        session,
-                    ],
-                    env=env,
-                )
+        vault.delete_sources(source_ids, {f"{prefix} {case}" for case in cases})
     print("live passkey validation, recovery and idempotency regression passed")
+
+
+def main() -> None:
+    vault_main(run_passkey_test)
+
+
+if __name__ == "__main__":
+    main()

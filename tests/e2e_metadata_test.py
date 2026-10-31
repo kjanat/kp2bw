@@ -3,37 +3,22 @@
 import copy
 import json
 import logging
-import os
-import tempfile
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import cast
-from unittest.mock import patch
 
-from e2e_vaultwarden_test import bw_json, get_session, run, run_migration
+from e2e_support import Vault, vault_main
 from pykeepass import create_database
-from snapshot import JsonValue, as_object
 
 from kp2bw.attachments import records_from_fields
-from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.bw_types import BwItemResponse
 from kp2bw.convert import Converter
 from kp2bw.item_sync import pre_history_content_signature, stamp_content
 
-type JsonObject = dict[str, JsonValue]
-
 logger = logging.getLogger("e2e.metadata")
 
 
-def metadata(item: JsonObject) -> str | None:
-    fields = item.get("fields") or []
-    assert isinstance(fields, list)
-    matches = [
-        as_object(f).get("value")
-        for f in fields
-        if as_object(f).get("name") == "KP2BW_META"
-    ]
+def metadata(item: BwItemResponse) -> str | None:
+    matches = [f["value"] for f in item["fields"] if f["name"] == "KP2BW_META"]
     assert len(matches) <= 1, "Duplicated metadata field"
     if not matches:
         return None
@@ -41,9 +26,10 @@ def metadata(item: JsonObject) -> str | None:
     return matches[0]
 
 
-def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
+def run_metadata_test(vault: Vault) -> None:
     """Use an existing authenticated profile and clean up only owned fixtures."""
-    source = tmp / "metadata.kdbx"
+    password = vault.password
+    source = vault.tmp / "metadata.kdbx"
     kp_password = "SyntheticMetadataPassword123!"
     db = create_database(source, password=kp_password)
     run_id = uuid.uuid4().hex
@@ -65,20 +51,24 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
             entry.expiry_time = expiry
     db.save()
 
-    def read_items() -> dict[str, JsonObject]:
-        session = get_session(env, password)
-        run(["bw", "sync", "--session", session], env=env)
-        items = bw_json(env, "list", "items", "--session", session)
-        result: dict[str, JsonObject] = {}
+    def read_items() -> dict[str, BwItemResponse]:
+        items = vault.items()
+        result: dict[str, BwItemResponse] = {}
         for case, name in names.items():
             matches = [item for item in items if item.get("name") == name]
             assert len(matches) == 1, "Missing or duplicated metadata fixture"
             result[case] = matches[0]
         return result
 
+    def migrate() -> None:
+        converter = Converter(
+            str(source), kp_password, None, password, None, None, False, 999, None
+        )
+        assert converter.convert(vault.client) == 0
+
     try:
         logger.info("Checking persisted JSON tags and expiry")
-        run_migration(source, kp_password, password, env, metadata=True)
+        vault.migrate(source, kp_password, metadata=True)
         initial = read_items()
         for case, item in initial.items():
             value = metadata(item)
@@ -90,28 +80,28 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
         # Seed the actual historical wire representation, including its stamp.
         # Preserve this literal independently of today's metadata serializer.
         old_yaml = "expires: '2040-01-01T00:00:00+00:00'\ntags:\n- b\n- a\n- \"caf\\xE9\"\n- 'line\n\n  break'\n- \"\\N\\L\\P\""
-        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-            for case in ("yaml", "unstamped", "edited-meta", "edited-notes"):
-                item = cast(BwItemResponse, copy.deepcopy(initial[case]))
+        bw = vault.client
+        for case in ("yaml", "unstamped", "edited-meta", "edited-notes"):
+            item = copy.deepcopy(initial[case])
+            for field in item["fields"]:
+                if field["name"] == "KP2BW_META":
+                    field["value"] = old_yaml
+            stamp_content(item)
+            if case == "unstamped":
+                item["fields"] = [
+                    f for f in item["fields"] if f["name"] != "KP2BW_SYNC"
+                ]
+            elif case == "edited-meta":
                 for field in item["fields"]:
                     if field["name"] == "KP2BW_META":
-                        field["value"] = old_yaml
-                stamp_content(item)
-                if case == "unstamped":
-                    item["fields"] = [
-                        f for f in item["fields"] if f["name"] != "KP2BW_SYNC"
-                    ]
-                elif case == "edited-meta":
-                    for field in item["fields"]:
-                        if field["name"] == "KP2BW_META":
-                            field["value"] = "tags:\n- manually-edited"
-                elif case == "edited-notes":
-                    item["notes"] = "Manually edited in Bitwarden"
-                bw.update_item(str(item["id"]), item)
+                        field["value"] = "tags:\n- manually-edited"
+            elif case == "edited-notes":
+                item["notes"] = "Manually edited in Bitwarden"
+            bw.update_item(str(item["id"]), item)
         seeded = read_items()
         assert metadata(seeded["yaml"]) == old_yaml
         logger.info("Checking safe YAML upgrades and protected manual edits")
-        run_migration(source, kp_password, password, env, metadata=True)
+        migrate()
         upgraded = read_items()
         for case in ("yaml", "unstamped"):
             assert upgraded[case]["id"] == seeded[case]["id"]
@@ -123,39 +113,17 @@ def run_metadata_test(tmp: Path, env: dict[str, str], password: str) -> None:
                 "Untouched or protected item was rewritten"
             )
         logger.info("Checking metadata-enabled unchanged rerun")
-        run_migration(source, kp_password, password, env, metadata=True)
+        migrate()
         assert read_items() == upgraded, "Metadata rerun changed content or revisions"
     finally:
-        session = get_session(env, password)
-        run(["bw", "sync", "--session", session], env=env)
-        for item in bw_json(env, "list", "items", "--session", session):
-            if item.get("name") not in names.values():
-                continue
-            fields = item.get("fields") or []
-            assert isinstance(fields, list)
-            if any(
-                as_object(f).get("name") == "KP2BW_ID"
-                and str(as_object(f).get("value")) in source_ids
-                for f in fields
-            ):
-                run(
-                    [
-                        "bw",
-                        "delete",
-                        "item",
-                        str(item["id"]),
-                        "--permanent",
-                        "--session",
-                        session,
-                    ],
-                    env=env,
-                )
-    check_legacy_ref_upgrade(tmp, env, password)
+        vault.delete_sources(source_ids, names.values())
+    check_legacy_ref_upgrade(vault)
     print("live JSON metadata and YAML upgrade regression passed")
 
 
-def check_legacy_ref_upgrade(tmp: Path, env: dict[str, str], password: str) -> None:
-    source = tmp / "legacy-ref-metadata.kdbx"
+def check_legacy_ref_upgrade(vault: Vault) -> None:
+    bw = vault.client
+    source = vault.tmp / "legacy-ref-metadata.kdbx"
     db = create_database(source, password="synthetic")
     entry = db.add_entry(
         db.root_group, "Legacy REF metadata", "user", "pw", url="https://target.example"
@@ -174,7 +142,7 @@ def check_legacy_ref_upgrade(tmp: Path, env: dict[str, str], password: str) -> N
         str(source),
         "synthetic",
         None,
-        password,
+        vault.password,
         None,
         None,
         False,
@@ -197,51 +165,32 @@ def check_legacy_ref_upgrade(tmp: Path, env: dict[str, str], password: str) -> N
         if field["name"] == "KP2BW_SYNC":
             field["value"] = old_stamp
     historical["login"]["uris"].append({"uri": "https://alias.example", "match": None})
-    with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-        item_id = bw.create_item(historical)
+    item_id = bw.create_item(historical)
     try:
-        with patch.dict(os.environ, env):
-            assert converter.convert() == 0
-        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-            updated = bw.get_item(item_id)
-            assert any(
-                field["name"] == "KeePass:KP2BW_HISTORY:1"
-                for field in updated["fields"]
-            )
-            assert not any(
-                field["name"] == "KP2BW_HISTORY" for field in updated["fields"]
-            )
-            records = records_from_fields(updated["fields"])
-            assert len(records) == 1
-            metadata_bytes = bw.get_attachment(
-                item_id, next(iter(records.values())).attachment_id
-            )
-            assert json.loads(metadata_bytes) == {"tags": entry.tags}
-        with patch.dict(os.environ, env):
-            assert converter.convert() == 0
-        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-            repeated = bw.get_item(item_id)
-            assert repeated["revisionDate"] == updated["revisionDate"]
-            assert "attachments" in repeated and "attachments" in updated
-            assert repeated["attachments"] == updated["attachments"]
+        assert converter.convert(bw) == 0
+        updated = vault.fresh().get_item(item_id)
+        assert any(
+            field["name"] == "KeePass:KP2BW_HISTORY:1" for field in updated["fields"]
+        )
+        assert not any(field["name"] == "KP2BW_HISTORY" for field in updated["fields"])
+        records = records_from_fields(updated["fields"])
+        assert len(records) == 1
+        metadata_bytes = bw.get_attachment(
+            item_id, next(iter(records.values())).attachment_id
+        )
+        assert json.loads(metadata_bytes) == {"tags": entry.tags}
+        assert converter.convert(bw) == 0
+        repeated = vault.fresh().get_item(item_id)
+        assert repeated["revisionDate"] == updated["revisionDate"]
+        assert "attachments" in repeated and "attachments" in updated
+        assert repeated["attachments"] == updated["attachments"]
     finally:
-        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-            bw.request("DELETE", f"/object/item/{item_id}")
+        vault.delete(item_id)
 
 
 def main() -> None:
-    """Run independently using a saved, authenticated test-account profile."""
-    env = os.environ.copy()
-    env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
-    env["VW_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
-    env["BW_NOINTERACTION"] = "true"
-    status = json.loads(run(["bw", "status"], env=env))
-    assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")
-    assert status.get("userEmail", "").casefold() == env["BW_TEST_EMAIL"].casefold()
-    with tempfile.TemporaryDirectory() as directory:
-        run_metadata_test(Path(directory), env, env["BW_TEST_PASSWORD"])
+    vault_main(run_metadata_test)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     main()

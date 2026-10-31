@@ -14,8 +14,8 @@ import socket
 import ssl
 import subprocess
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from tempfile import TemporaryDirectory
 from types import FrameType, TracebackType
@@ -2119,6 +2119,32 @@ class BitwardenServeClient:
         """Re-query the vault and rebuild the dedup indexes."""
         self.folder_cache = self.list_folders()
         self.build_dedup_index()
+
+    @contextmanager
+    def scope(self, org_id: str | None, collection_id: str | None) -> Generator[Self]:
+        saved = (
+            self.organization_id,
+            self.collection_id,
+            self.collections,
+            self.folder_cache,
+            self.by_uuid,
+            self.legacy_by_folder_name,
+        )
+        self.organization_id = org_id
+        self.collection_id = collection_id
+        try:
+            self.refresh_dedup_index()
+            self.collections = self.list_collections() if org_id else None
+            yield self
+        finally:
+            (
+                self.organization_id,
+                self.collection_id,
+                self.collections,
+                self.folder_cache,
+                self.by_uuid,
+                self.legacy_by_folder_name,
+            ) = saved
 
     def update_dedup_entry(self, kp_uuid: str, item: BwItemResponse) -> None:
         """Refresh the cached item for *kp_uuid* after an in-place update.

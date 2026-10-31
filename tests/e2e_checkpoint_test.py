@@ -7,12 +7,12 @@ import re
 import signal
 import subprocess
 import sys
-import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Never
 from unittest.mock import patch
 
-from e2e_vaultwarden_test import run
+from e2e_support import Vault, vault_main
 from pykeepass import create_database
 
 from kp2bw.attachments import AttachmentPlan
@@ -101,24 +101,12 @@ def crash_migration(mode: str, source: Path, checkpoint: Path) -> None:
         )
 
 
-def run_crash(mode: str, source: Path, checkpoint: Path, env: dict[str, str]) -> None:
+def run_crash(mode: str, source: Path, checkpoint: Path, vault: Vault) -> None:
     if os.name != "posix":
         raise AssertionError(
             "Hard-kill integration regression requires POSIX process groups"
         )
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            str(Path(__file__).resolve()),
-            mode,
-            str(source),
-            str(checkpoint),
-        ],
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    process = vault.child(Path(__file__).resolve(), mode, str(source), str(checkpoint))
     try:
         assert process.wait(timeout=180) == 91, (
             "Migration did not reach its crash boundary"
@@ -131,163 +119,180 @@ def run_crash(mode: str, source: Path, checkpoint: Path, env: dict[str, str]) ->
         except ProcessLookupError:
             pass
         _ = process.wait(timeout=10)
+    vault.sync()
 
 
-def remove_uploaded_body(checkpoint: Path, env: dict[str, str], password: str) -> None:
+def remove_uploaded_body(checkpoint: Path, vault: Vault, container: str) -> None:
     """Leave a real orphan slot only inside the explicitly selected test container."""
-    assert env["BW_SERVER_URL"].startswith("https://localhost:")
-    assert env["BW_TEST_EMAIL"] == "integration@example.com"
+    assert vault.account.server.startswith("https://localhost:")
+    assert vault.account.email == "integration@example.com"
     records = [
         CheckpointRecord.parse(value)
         for value in json.loads(checkpoint.read_text())["records"]
     ]
     assert len(records) == 1 and records[0].phase == "pending"
     pending = records[0]
-    with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-        item = bw.get_item(pending.item_id)
-        matches = [
-            att["id"]
-            for att in item.get("attachments") or []
-            if att["id"] not in pending.before_ids
-            and hashlib.sha256(att["fileName"].encode()).hexdigest()
-            == pending.name_digest
-        ]
-        assert len(matches) == 1
-        assert re.fullmatch(r"[a-zA-Z0-9_-]+", pending.item_id) and re.fullmatch(
-            r"[a-zA-Z0-9_-]+", matches[0]
+    item = vault.client.get_item(pending.item_id)
+    matches = [
+        att["id"]
+        for att in item.get("attachments") or []
+        if att["id"] not in pending.before_ids
+        and hashlib.sha256(att["fileName"].encode()).hexdigest() == pending.name_digest
+    ]
+    assert len(matches) == 1
+    assert re.fullmatch(r"[a-zA-Z0-9_-]+", pending.item_id) and re.fullmatch(
+        r"[a-zA-Z0-9_-]+", matches[0]
+    )
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            container,
+            "rm",
+            "--",
+            f"/data/attachments/{pending.item_id}/{matches[0]}",
+        ],
+        check=False,
+        capture_output=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, "Could not remove the synthetic uploaded body"
+
+
+class CheckpointFixture:
+    def __init__(self, vault: Vault, name: str) -> None:
+        self.vault = vault
+        self.source = vault.tmp / f"{name}.kdbx"
+        self.checkpoint = vault.tmp / f"{name}-checkpoint.json"
+        self.db = create_database(self.source, password="synthetic")
+        self.entry = self.db.add_entry(
+            self.db.root_group, f"Synthetic checkpoint {name}", "", ""
         )
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                env["KP2BW_E2E_VAULTWARDEN_CONTAINER"],
-                "rm",
-                "--",
-                f"/data/attachments/{pending.item_id}/{matches[0]}",
-            ],
-            check=False,
-            capture_output=True,
-            timeout=15,
+        self.entry.add_attachment(
+            self.db.add_binary(b"synthetic checkpoint contents"), "file.txt"
         )
-        assert result.returncode == 0, "Could not remove the synthetic uploaded body"
+        self.db.save()
+        self.downloads = 0
+        self.uploads = 0
 
+    def replace(self, contents: bytes) -> None:
+        self.entry.attachments[0].id = self.db.add_binary(contents)
+        self.db.save()
 
-def run_checkpoint_test(tmp: Path, env: dict[str, str], password: str) -> None:
-    source = tmp / "checkpoint.kdbx"
-    checkpoint = tmp / "checkpoint.json"
-    db = create_database(source, password="synthetic")
-    entry = db.add_entry(db.root_group, "Synthetic checkpoint", "", "")
-    entry.add_attachment(db.add_binary(b"synthetic checkpoint contents"), "file.txt")
-    db.save()
-    original_download = BitwardenServeClient.get_attachment
-    original_upload = BitwardenServeClient.upload_attachments
-    downloads = 0
-    uploads = 0
+    def migrate(self) -> None:
+        original_download = BitwardenServeClient.get_attachment
+        original_upload = BitwardenServeClient.upload_attachments
 
-    def download(
-        client: BitwardenServeClient, item_id: str, attachment_id: str
-    ) -> bytes:
-        nonlocal downloads
-        downloads += 1
-        return original_download(client, item_id, attachment_id)
+        def download(
+            client: BitwardenServeClient, item_id: str, attachment_id: str
+        ) -> bytes:
+            self.downloads += 1
+            return original_download(client, item_id, attachment_id)
 
-    def upload(
-        client: BitwardenServeClient,
-        items: list[tuple[str, list[tuple[str, bytes]]]],
-        *,
-        max_concurrency: int = 4,
-    ) -> list[tuple[str, str]]:
-        nonlocal uploads
-        uploads += sum(len(files) for _, files in items)
-        return original_upload(client, items, max_concurrency=max_concurrency)
+        def upload(
+            client: BitwardenServeClient,
+            items: list[tuple[str, list[tuple[str, bytes]]]],
+            *,
+            max_concurrency: int = 4,
+        ) -> list[tuple[str, str]]:
+            self.uploads += sum(len(files) for _, files in items)
+            return original_upload(client, items, max_concurrency=max_concurrency)
 
-    def migrate() -> None:
+        self.uploads = self.downloads = 0
         with (
-            patch.dict(os.environ, env),
             patch.object(BitwardenServeClient, "get_attachment", download),
             patch.object(BitwardenServeClient, "upload_attachments", upload),
         ):
-            converter = converter_for(source, checkpoint, password)
-            assert converter.convert() == 0
+            converter = converter_for(self.source, self.checkpoint, self.vault.password)
+            assert converter.convert(self.vault.client) == 0
 
-    migrate()
-    assert uploads == 1 and downloads > 0
-    uploads = downloads = 0
-    migrate()
-    assert uploads == downloads == 0, (
+
+def run_checkpoint_test(vault: Vault) -> None:
+    fixture = CheckpointFixture(vault, "checkpoint")
+    fixture.migrate()
+    assert fixture.uploads == 1 and fixture.downloads > 0
+    fixture.migrate()
+    assert fixture.uploads == fixture.downloads == 0, (
         "An unchanged verified rerun must not transfer attachment bodies"
     )
-    with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-        listed = bw.get_item_by_uuid(entry.uuid.hex.upper())
-        assert listed is not None
-        item = bw.get_item(listed["id"])
-        item["favorite"] = True
-        bw.update_item(item["id"], item)
-    migrate()
-    assert downloads > 0 and uploads == 0, (
+    item = vault.item(fixture.entry.uuid.hex.upper())
+    item["favorite"] = True
+    vault.client.update_item(item["id"], item)
+    fixture.migrate()
+    assert fixture.downloads > 0 and fixture.uploads == 0, (
         "A changed remote revision must invalidate cached verification"
     )
-    uploads = downloads = 0
-    migrate()
-    assert uploads == downloads == 0
-    checkpoint.write_text("{", encoding="utf-8")
-    migrate()
-    assert downloads > 0 and uploads == 0, (
+    fixture.migrate()
+    assert fixture.uploads == fixture.downloads == 0
+    fixture.checkpoint.write_text("{", encoding="utf-8")
+    fixture.migrate()
+    assert fixture.downloads > 0 and fixture.uploads == 0, (
         "A corrupt checkpoint must safely reverify without reupload"
     )
-    modes = [
-        "before-upload",
-        "after-upload",
-        "after-mapping",
-        "after-delete",
-        "lost-checkpoint",
-    ]
-    if env.get("KP2BW_E2E_VAULTWARDEN_CONTAINER"):
-        modes.append("orphan-slot")
-    for mode in modes:
-        contents = ("replacement at " + mode).encode()
-        entry.attachments[0].id = db.add_binary(contents)
-        db.save()
-        run_crash(
-            "after-upload" if mode in {"orphan-slot", "lost-checkpoint"} else mode,
-            source,
-            checkpoint,
-            {**env, "BW_TEST_PASSWORD": password},
-        )
-        if mode == "orphan-slot":
-            remove_uploaded_body(checkpoint, env, password)
-        elif mode == "lost-checkpoint":
-            checkpoint.unlink()
-        uploads = downloads = 0
-        migrate()
-        assert uploads == (1 if mode in {"before-upload", "orphan-slot"} else 0), (
-            "Recovery repeated a completed byte upload"
-        )
-        with patch.dict(os.environ, env), BitwardenServeClient(password) as bw:
-            listed = bw.get_item_by_uuid(entry.uuid.hex.upper())
-            assert listed is not None
-            recovered = bw.get_item(listed["id"])
-            attachments = recovered.get("attachments") or []
-            assert len(attachments) == 1, (
-                "Replacement recovery must converge to one mapped file"
-            )
-            assert bw.get_attachment(recovered["id"], attachments[0]["id"]) == contents
-        uploads = downloads = 0
-        migrate()
-        assert uploads == downloads == 0, "Recovered verification was not reusable"
     print("live attachment checkpoint cache test passed")
 
 
+def run_crash_recovery(vault: Vault, mode: str) -> None:
+    container = vault.account.container
+    if mode == "orphan-slot" and not container:
+        print("orphan-slot recovery needs KP2BW_E2E_VAULTWARDEN_CONTAINER; skipped")
+        return
+    fixture = CheckpointFixture(vault, f"crash-{mode}")
+    fixture.migrate()
+    assert fixture.uploads == 1
+    contents = ("replacement at " + mode).encode()
+    fixture.replace(contents)
+    run_crash(
+        "after-upload" if mode in {"orphan-slot", "lost-checkpoint"} else mode,
+        fixture.source,
+        fixture.checkpoint,
+        vault,
+    )
+    if mode == "orphan-slot" and container:
+        remove_uploaded_body(fixture.checkpoint, vault, container)
+    elif mode == "lost-checkpoint":
+        fixture.checkpoint.unlink()
+    fixture.migrate()
+    assert fixture.uploads == (1 if mode in {"before-upload", "orphan-slot"} else 0), (
+        "Recovery repeated a completed byte upload"
+    )
+    recovered = vault.item(fixture.entry.uuid.hex.upper())
+    attachments = recovered.get("attachments") or []
+    assert len(attachments) == 1, (
+        "Replacement recovery must converge to one mapped file"
+    )
+    assert vault.attachment(recovered["id"], attachments[0]["fileName"]) == contents
+    fixture.migrate()
+    assert fixture.uploads == fixture.downloads == 0, (
+        "Recovered verification was not reusable"
+    )
+    print(f"live attachment crash recovery at {mode} passed")
+
+
+CRASH_MODES = (
+    "before-upload",
+    "after-upload",
+    "after-mapping",
+    "after-delete",
+    "lost-checkpoint",
+    "orphan-slot",
+)
+
+
+def crash_check(mode: str) -> Callable[[Vault], None]:
+    def check(vault: Vault) -> None:
+        run_crash_recovery(vault, mode)
+
+    return check
+
+
 def main() -> None:
-    env = os.environ.copy()
-    env["BITWARDENCLI_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
-    env["VW_APPDATA_DIR"] = env["KP2BW_E2E_BW_PROFILE"]
-    env["BW_NOINTERACTION"] = "true"
-    status = json.loads(run(["bw", "status"], env=env))
-    assert status.get("serverUrl", "").rstrip("/") == env["BW_SERVER_URL"].rstrip("/")
-    assert status.get("userEmail", "").casefold() == env["BW_TEST_EMAIL"].casefold()
-    with tempfile.TemporaryDirectory() as directory:
-        run_checkpoint_test(Path(directory), env, env["BW_TEST_PASSWORD"])
+    def run_all(vault: Vault) -> None:
+        run_checkpoint_test(vault)
+        for mode in CRASH_MODES:
+            run_crash_recovery(vault, mode)
+
+    vault_main(run_all)
 
 
 if __name__ == "__main__":

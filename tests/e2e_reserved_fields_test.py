@@ -1,19 +1,18 @@
 """Keep reserved source fields through live migration and unchanged reruns."""
 
 import uuid
-from pathlib import Path
-from typing import cast
 
-from e2e_vaultwarden_test import bw_json, get_session, run, run_migration
+from e2e_support import Vault, vault_main
 from pykeepass import create_database
 from reserved_fields_test import append_field
 
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.convert import Converter
 from kp2bw.source_fields import source_field_name
 
 
-def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> None:
-    source = tmp / "reserved-fields.kdbx"
+def run_reserved_fields_test(vault: Vault) -> None:
+    source = vault.tmp / "reserved-fields.kdbx"
     kp_password = "SyntheticReservedFields123!"
     database = create_database(source, password=kp_password)
     prefix = f"Reserved {uuid.uuid4().hex}"
@@ -33,15 +32,12 @@ def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> N
     database.save()
 
     def read_cases() -> dict[str, BwItemResponse]:
-        session = get_session(env, password)
-        run(["bw", "sync", "--session", session], env=env)
         result: dict[str, BwItemResponse] = {}
-        for item in bw_json(env, "list", "items", "--session", session):
-            candidate = cast(BwItemResponse, item)
+        for candidate in vault.items():
             name = candidate.get("name")
             if name not in identities:
                 continue
-            assert name is not None and name not in result, "Duplicated source item"
+            assert name not in result, "Duplicated source item"
             fields = candidate.get("fields") or []
             field_map = {field["name"]: field for field in fields}
             assert len(fields) == len(field_map), "Duplicated field names"
@@ -53,10 +49,16 @@ def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> N
         assert result.keys() == identities.keys(), "Missing source item"
         return result
 
+    def migrate() -> None:
+        converter = Converter(
+            str(source), kp_password, None, vault.password, None, None, False, 999, None
+        )
+        assert converter.convert(vault.client) == 0
+
     try:
-        run_migration(source, kp_password, password, env, metadata=True)
+        migrate()
         first = read_cases()
-        run_migration(source, kp_password, password, env, metadata=True)
+        migrate()
         second = read_cases()
         for name in identities:
             assert first[name]["id"] == second[name]["id"]
@@ -64,26 +66,13 @@ def run_reserved_fields_test(tmp: Path, env: dict[str, str], password: str) -> N
                 "Unchanged source item rewritten"
             )
     finally:
-        session = get_session(env, password)
-        run(["bw", "sync", "--session", session], env=env)
-        for item in bw_json(env, "list", "items", "--session", session):
-            candidate = cast(BwItemResponse, item)
-            if candidate.get("name") not in identities:
-                continue
-            if any(
-                field["name"] == "KP2BW_ID" and field["value"] in identities.values()
-                for field in candidate.get("fields") or []
-            ):
-                run(
-                    [
-                        "bw",
-                        "delete",
-                        "item",
-                        str(candidate["id"]),
-                        "--permanent",
-                        "--session",
-                        session,
-                    ],
-                    env=env,
-                )
+        vault.delete_sources(set(identities.values()), identities.keys())
     print("live reserved-field preservation and idempotency regression passed")
+
+
+def main() -> None:
+    vault_main(run_reserved_fields_test)
+
+
+if __name__ == "__main__":
+    main()

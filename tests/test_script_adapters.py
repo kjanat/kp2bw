@@ -119,6 +119,10 @@ def test_convert_update_script() -> None:
     run_script_main("convert_update_test.py")
 
 
+def test_convert_client_script() -> None:
+    run_script_main("convert_client_test.py")
+
+
 def test_convert_resilience_script() -> None:
     run_script_main("convert_resilience_test.py")
 
