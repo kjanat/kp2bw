@@ -13,8 +13,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with: { install_args: bun uv python }
       - uses: kjanat/runner@b32ea932a1813ae0be44e755c16df9f9f5ca86a4 # master
       - uses: kjanat/install-dprint@v2
       - if: ${{ github.event.pull_request.user.login == 'renovate[bot]' }}

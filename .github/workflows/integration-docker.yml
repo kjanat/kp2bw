@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
       - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with: { install_args: crane }
       - name: Discover stable CLI and server releases
         id: resolve
         run: |
@@ -144,6 +145,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
       - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with: { install_args: uv python nodejs }
       - run: uv run pytest -q tests/test_script_adapters.py
         env: { KP2BW_RUN_NPX_TESTS: "1" }
 
@@ -174,10 +176,8 @@ jobs:
           -t kp2bw-vaultwarden tests
 
       - parallel:
-          - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-            with: { enable-cache: true, cache-python: true }
-          - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-            with: { node-version-file: .tool-versions }
+          - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+            with: { install_args: uv python nodejs }
           - name: Restore ${{ matrix.cli-package }} ${{ matrix.bw-version }}
             id: cli-cache
             uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
