@@ -3,18 +3,6 @@
 name: Container
 on:
   pull_request:
-    paths:
-      - Dockerfile
-      - Dockerfile.dockerignore
-      - scripts/release*.sh
-      - src/**
-      - pyproject.toml
-      - uv.lock
-      - tests/container_image_test.py
-      - tests/Dockerfile.vaultwarden
-      - tests/fixtures/**
-      - .github/workflows/container.yml
-      - .github/workflows/publish.yml
   workflow_call:
     inputs:
       distribution-artifact: { type: string, required: true }
@@ -24,7 +12,33 @@ permissions: { contents: read }
 defaults: { run: { shell: bash } }
 env: { MISE_MINIMUM_RELEASE_AGE: "0s", MISE_NPM_PACKAGE_MANAGER: npm }
 jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { pull-requests: read }
+    outputs: { image: "${{ steps.filter.outputs.image }}" }
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            image:
+              - Dockerfile
+              - Dockerfile.dockerignore
+              - scripts/release*.sh
+              - src/**
+              - pyproject.toml
+              - uv.lock
+              - tests/container_image_test.py
+              - tests/Dockerfile.vaultwarden
+              - tests/fixtures/**
+              - .github/workflows/container.yml
+              - .github/workflows/publish.yml
+
   prepare:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result == 'skipped' || needs.changes.outputs.image == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -158,3 +172,15 @@ jobs:
           compression-level: 0
           retention-days: 90
       - cancel: server
+
+  container:
+    needs: [changes, prepare, validate]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - env: { RESULTS: "${{ join(needs.*.result, ' ') }}" }
+        run: |
+          for result in ${RESULTS}; do
+            [[ ${result} == success || ${result} == skipped ]]
+          done

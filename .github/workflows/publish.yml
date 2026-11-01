@@ -120,7 +120,7 @@ jobs:
 
   container:
     needs: [check, build]
-    permissions: { contents: read, id-token: write, attestations: write }
+    permissions: { contents: read, pull-requests: read, id-token: write, attestations: write }
     uses: $/.github/workflows/container.yml
     with:
       distribution-artifact: release-distributions

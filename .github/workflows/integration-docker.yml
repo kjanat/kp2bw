@@ -284,3 +284,16 @@ jobs:
         if: always()
         shell: bash
         run: docker ps -aq --filter name=vaultwarden- | xargs -r docker rm -f
+
+  integration:
+    needs: [config, unit, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - shell: bash
+        env: { RESULTS: "${{ join(needs.*.result, ' ') }}" }
+        run: |
+          for result in ${RESULTS}; do
+            [[ ${result} == success ]]
+          done

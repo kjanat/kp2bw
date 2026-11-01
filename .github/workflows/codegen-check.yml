@@ -2,11 +2,28 @@
 ---
 name: Codegen drift check
 on:
-  pull_request: { paths: [src/kp2bw/bw_api_types.py, specs/vault-management-api.json] }
+  pull_request:
   push: { branches: [master], paths: [src/kp2bw/bw_api_types.py, specs/vault-management-api.json] }
 permissions: {}
 jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { pull-requests: read }
+    outputs: { api: "${{ steps.filter.outputs.api }}" }
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            api:
+              - src/kp2bw/bw_api_types.py
+              - specs/vault-management-api.json
+
   check-bw-api-types:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result == 'skipped' || needs.changes.outputs.api == 'true') }}
     runs-on: ubuntu-latest
     permissions: { contents: read }
     timeout-minutes: 5
@@ -23,3 +40,16 @@ jobs:
             echo "::error file=src/kp2bw/bw_api_types.py::Generated file is out of sync with specs/vault-management-api.json. Run 'bash scripts/generate-bw-types.sh' and commit the result."
             exit 1
           fi
+
+  codegen:
+    needs: [changes, check-bw-api-types]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - shell: bash
+        env: { RESULTS: "${{ join(needs.*.result, ' ') }}" }
+        run: |
+          for result in ${RESULTS}; do
+            [[ ${result} == success || ${result} == skipped ]]
+          done
