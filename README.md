@@ -24,6 +24,18 @@
     alt="Compatibility tests"
   >
 </a>
+<a href="https://npm.im/@kjanat/vaultwarden-cli">
+  <img
+    src="https://img.shields.io/npm/v/@kjanat/vaultwarden-cli?logo=npm&label=vw"
+    alt="Latest Vaultwarden CLI"
+  >
+</a>
+<a href="https://npm.im/@bitwarden/cli">
+  <img
+    src="https://img.shields.io/npm/v/@bitwarden/cli?logo=npm&label=bw"
+    alt="Latest Bitwarden CLI"
+  >
+</a>
 
 Migrates KeePass databases to Bitwarden.
 
@@ -110,7 +122,7 @@ kp2bw passwords.kdbx
 uvx --from git+https://github.com/kjanat/kp2bw kp2bw passwords.kdbx
 ```
 
-The [container image](https://github.com/kjanat/kp2bw/pkgs/container/kp2bw) `ghcr.io/kjanat/kp2bw:latest` contains the
+The [container image](https://ghcr.io/kjanat/kp2bw:latest) `ghcr.io/kjanat/kp2bw:latest` contains the
 [Vaultwarden CLI](https://github.com/kjanat/vw/tree/master/apps/cli); `ghcr.io/kjanat/kp2bw:bw` contains the Bitwarden
 CLI. Password history imports into existing items need the Vaultwarden CLI.
 
