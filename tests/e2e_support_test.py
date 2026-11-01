@@ -6,10 +6,25 @@ import e2e_support
 from e2e_support import Account, Vault
 from scope_fixture import SCOPE_COLLECTION
 
+from kp2bw.exceptions import BitwardenHttpError
+
+MISSING = BitwardenHttpError(
+    "bw serve returned HTTP 400 for GET /list/object/org-collections: Organization not found.",
+    status_code=400,
+)
+
 
 class Recorder:
-    def __init__(self, visible_after: int | None) -> None:
+    def __init__(
+        self,
+        visible_after: int | None,
+        *,
+        missing_until: int = 0,
+        error: BitwardenHttpError = MISSING,
+    ) -> None:
         self.visible_after = visible_after
+        self.missing_until = missing_until
+        self.error = error
         self.events: list[str] = []
         self.reads = 0
 
@@ -21,6 +36,8 @@ class Recorder:
         assert organization == "org-id"
         self.events.append("read")
         self.reads += 1
+        if self.reads <= self.missing_until:
+            raise self.error
         if self.visible_after is not None and self.reads > self.visible_after:
             return {SCOPE_COLLECTION: "collection-id"}
         return {}
@@ -66,6 +83,27 @@ def check_resyncs_after_a_stale_round() -> None:
     assert recorder.events[13:] == ["sync", "read"]
 
 
+def check_missing_organization_is_stale() -> None:
+    recorder = Recorder(visible_after=2, missing_until=2)
+    assert organization(recorder) == "org-id"
+    assert recorder.events == ["sync", "read", "sleep 0.1", "read", "sleep 0.2", "read"]
+
+
+def check_other_errors_propagate() -> None:
+    error = BitwardenHttpError(
+        "bw serve returned HTTP 500 for GET /list/object/org-collections: boom",
+        status_code=500,
+    )
+    recorder = Recorder(visible_after=None, missing_until=1, error=error)
+    try:
+        _ = organization(recorder)
+    except BitwardenHttpError as raised:
+        assert raised is error
+    else:
+        raise AssertionError("An unrelated CLI error must fail the fixture")
+    assert recorder.events == ["sync", "read"]
+
+
 def check_bounded_failure() -> None:
     recorder = Recorder(visible_after=None)
     try:
@@ -81,6 +119,8 @@ def check_bounded_failure() -> None:
 def main() -> None:
     check_visible_after_stale_reads()
     check_resyncs_after_a_stale_round()
+    check_missing_organization_is_stale()
+    check_other_errors_propagate()
     check_bounded_failure()
     print("e2e organization visibility wait passed")
 
