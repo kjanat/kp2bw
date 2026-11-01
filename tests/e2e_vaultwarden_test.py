@@ -90,8 +90,8 @@ KP_PASSWORD = "KpSnapshotPassword123!"
 def golden_enabled() -> bool:
     """Whether to compare/update golden snapshots this run.
 
-    The official CLI job sets ``KP2BW_SNAPSHOT_GOLDEN`` to compare expected
-    vault contents. Both CLIs run behavioral and idempotency checks.
+    Both CLI jobs set ``KP2BW_SNAPSHOT_GOLDEN`` to compare expected vault
+    contents, in addition to the behavioral and idempotency checks.
     ``KP2BW_UPDATE_SNAPSHOTS`` enables regeneration and implies comparison.
     Both accept ``1``/``true``/``yes``/``on`` (see ``env_flag``).
     """

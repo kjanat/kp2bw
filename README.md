@@ -18,10 +18,16 @@
     alt="GitHub Sponsors"
   >
 </a>
-<a href="https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml?query=branch%3Amaster">
+<a href="https://github.com/kjanat/kp2bw/actions/workflows/integration-vaultwarden.yml?query=branch%3Amaster">
   <img
-    src="https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml/badge.svg?branch=master"
-    alt="Compatibility tests"
+    src="https://github.com/kjanat/kp2bw/actions/workflows/integration-vaultwarden.yml/badge.svg?branch=master"
+    alt="Vaultwarden CLI compatibility tests"
+  >
+</a>
+<a href="https://github.com/kjanat/kp2bw/actions/workflows/integration-bitwarden.yml?query=branch%3Amaster">
+  <img
+    src="https://github.com/kjanat/kp2bw/actions/workflows/integration-bitwarden.yml/badge.svg?branch=master"
+    alt="Bitwarden CLI compatibility tests"
   >
 </a>
 <a href="https://npm.im/@kjanat/vaultwarden-cli">
@@ -298,7 +304,8 @@ aborts the run. The summary counts failed entries, and a re-run picks up where i
 server (e.g. Vaultwarden) where individual writes time out, raise the per-request HTTP timeout with `KP2BW_HTTP_TIMEOUT`
 (seconds; default 180, capped at 3600) to let those creates finish in the first place.
 
-Check the [compatibility test results] for your CLI and server versions.
+Check the compatibility test results for the [Vaultwarden CLI][vw results] and the [Bitwarden CLI][bw results] with your
+server version.
 
 See [TROUBLESHOOTING].
 
@@ -315,7 +322,8 @@ See the [security policy](https://github.com/kjanat/kp2bw/blob/HEAD/SECURITY.md)
 
 ["🧪 Test this PR"]: https://github.com/kjanat/kp2bw/pull/34#issuecomment-4763225590 "Example"
 [Bitwarden CLI]: https://bitwarden.com/help/cli/
-[compatibility test results]: https://github.com/kjanat/kp2bw/actions/workflows/integration-docker.yml
+[vw results]: https://github.com/kjanat/kp2bw/actions/workflows/integration-vaultwarden.yml
+[bw results]: https://github.com/kjanat/kp2bw/actions/workflows/integration-bitwarden.yml
 [TROUBLESHOOTING]: https://github.com/kjanat/kp2bw/blob/HEAD/TROUBLESHOOTING.md
 [`.env.example`]: https://github.com/kjanat/kp2bw/blob/HEAD/.env.example
 [jampe/kp2bw]: https://github.com/jampe/kp2bw

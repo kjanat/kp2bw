@@ -3,9 +3,8 @@
 name: Integration (Docker)
 on:
   workflow_call:
-  pull_request:
-  push: { branches: [master] }
-  workflow_dispatch:
+    inputs:
+      lane: { type: string, required: true, description: "bitwarden or vaultwarden" }
 permissions: {}
 # Compatibility tests must include newly published stable releases.
 env: { MISE_MINIMUM_RELEASE_AGE: "0s", MISE_NPM_PACKAGE_MANAGER: npm }
@@ -23,6 +22,7 @@ jobs:
         with: { install_args: crane }
       - name: Discover stable CLI and server releases
         id: resolve
+        env: { LANE: "${{ inputs.lane }}" }
         run: |
           $stable = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
           $registry = Invoke-RestMethod 'https://registry.npmjs.org/@bitwarden%2fcli' -Headers @{ Accept = 'application/vnd.npm.install-v1+json' } -TimeoutSec 30
@@ -50,7 +50,8 @@ jobs:
           $include = @(
             @{ 'cli-package' = '@bitwarden/cli'; lane = 'bitwarden'; 'bw-version' = $newestCli; 'server-version' = $newestServer; 'server-image' = $newestImage },
             @{ 'cli-package' = '@kjanat/vaultwarden-cli'; lane = 'vaultwarden'; 'bw-version' = $newestVw; 'server-version' = $newestServer; 'server-image' = $newestImage }
-          )
+          ) | Where-Object { $_.lane -eq $env:LANE }
+          if (-not $include) { throw "Unknown lane '$env:LANE'" }
           if ($env:GITHUB_STEP_SUMMARY) {
             @('### Resolved compatibility matrix', '', '| Lane | CLI package | CLI version | Vaultwarden | Immutable image |', '| --- | --- | --- | --- | --- |') |
               Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
@@ -112,7 +113,7 @@ jobs:
             vaultwarden = @{ shards = 2; slots = 7 }
           }
           $order = @($weights.Keys | Sort-Object @{ Expression = { $weights[$_] }; Descending = $true }, @{ Expression = { $_ } })
-          $jobs = @(foreach ($row in $include) {
+          foreach ($row in $include) {
             $count = $layout[$row.lane].shards
             $bins = $count * $layout[$row.lane].slots
             $load = [int[]]::new($bins)
@@ -123,18 +124,18 @@ jobs:
               $members[$best].Add($check)
               $load[$best] += $weights[$check]
             }
-            for ($i = 0; $i -lt $count; $i++) {
+            $jobs = @(for ($i = 0; $i -lt $count; $i++) {
               $job = $row.Clone()
               $job.shard = "$($i + 1)/$count"
               $job.workers = @(for ($b = $i; $b -lt $bins; $b += $count) {
                 if ($members[$b].Count) { $members[$b] -join ' ' }
               })
               $job
-            }
-          })
-          $matrix = @{ include = $jobs } | ConvertTo-Json -Compress -Depth 6
-          "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Matrix:"; $matrix | yq . -P
+            })
+            $matrix = @{ include = $jobs } | ConvertTo-Json -Compress -Depth 6
+            "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host "Matrix:"; $matrix | yq . -P
+          }
 
   unit:
     name: Script regressions
@@ -158,7 +159,7 @@ jobs:
     env:
       BW_CERT_PATH: ${{ github.workspace }}/tests/fixtures/vaultwarden-certs/cert.pem
       KP2BW_CLI: ${{ matrix.cli-package == '@kjanat/vaultwarden-cli' && 'vw' || 'bw' }}
-      KP2BW_SNAPSHOT_GOLDEN: ${{ matrix.cli-package == '@bitwarden/cli' }}
+      KP2BW_SNAPSHOT_GOLDEN: true
       KP2BW_TEST_CLI_PACKAGE: ${{ matrix.cli-package }}
     strategy: { fail-fast: false, matrix: "${{ fromJson(needs.config.outputs.matrix) }}" }
     steps:
@@ -280,7 +281,7 @@ jobs:
             echo "::endgroup::"
           done
 
-  integration:
+  gate:
     needs: [config, unit, e2e]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest

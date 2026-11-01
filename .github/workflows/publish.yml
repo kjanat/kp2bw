@@ -114,10 +114,17 @@ jobs:
           - name: Smoke test source distribution
             run: uv run --isolated --no-project --with ./dist/kp2bw-*.tar.gz ./tests/smoke_test.py
 
-  integration:
+  vaultwarden:
     needs: draft
     permissions: { contents: read }
     uses: $/.github/workflows/integration-docker.yml
+    with: { lane: vaultwarden }
+
+  bitwarden:
+    needs: draft
+    permissions: { contents: read }
+    uses: $/.github/workflows/integration-docker.yml
+    with: { lane: bitwarden }
 
   container:
     needs: [check, build]
@@ -149,7 +156,7 @@ jobs:
 
   publish:
     if: needs.check.outputs.dry != 'true'
-    needs: [check, smoke, integration, stage-distributions, stage-images]
+    needs: [check, smoke, vaultwarden, stage-distributions, stage-images]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: { name: pypi-kp2bw, url: "${{ needs.check.outputs.pypi_url }}" }

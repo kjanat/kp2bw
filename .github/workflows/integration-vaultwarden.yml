@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Integration (Vaultwarden CLI)
+on:
+  pull_request:
+  push: { branches: [master] }
+  workflow_dispatch:
+permissions: {}
+jobs:
+  vaultwarden:
+    permissions: { contents: read }
+    uses: $/.github/workflows/integration-docker.yml
+    with: { lane: vaultwarden }
