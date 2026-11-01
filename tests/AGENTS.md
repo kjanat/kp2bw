@@ -88,7 +88,8 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
   - `vault_after_update.json` -- after the update pass.
 - Idempotency is proven at the snapshot level: pass 1 == pass 2 (and the refreshed state == its idempotent re-run),
   independent of the golden.
-- Golden comparison is gated by `KP2BW_SNAPSHOT_GOLDEN=1` in the official CLI job.
+- Golden comparison is gated by `KP2BW_SNAPSHOT_GOLDEN=1`, which both CLI lanes set. An empty login password
+  compares equal as `""` and `null`: `bw` stores `null`, `vw` stores the `""` kp2bw sends (`snapshot_test.py`).
 - The golden depends on the CLI and
   Vaultwarden image (`tests/Dockerfile.vaultwarden`). When Renovate bumps either, regenerate and review the diff:
 
@@ -137,8 +138,12 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 - `container_image_test.py` runs the production image against a disposable server using a fresh named state volume.
   It verifies non-root execution, read-only database/keyfile input, login persistence across containers, attachment bytes,
   unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
-  architectures.
+  architectures; a failing bw variant never blocks a release.
 
+- CI runs every check against both CLIs in separate workflows, `integration-vaultwarden.yml` and
+  `integration-bitwarden.yml`, which call `integration-docker.yml` with one `lane` each. Only `vaultwarden / gate` is a
+  required check and only the vaultwarden lane gates a release, so a broken Bitwarden CLI release is reported without
+  blocking merges or publication.
 - CI assigns the checks to shard jobs per CLI by their measured CI duration (heaviest first, least-loaded worker
   slot). Each job runs its worker slots as a `parallel:` step group; every slot starts its own disposable server from
   the same image, with `BW_SERVER_URL` and `KP2BW_E2E_VAULTWARDEN_CONTAINER` set to that server. Update the weights in

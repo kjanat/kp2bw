@@ -127,6 +127,10 @@ def test_e2e_support_script() -> None:
     run_script_main("e2e_support_test.py")
 
 
+def test_snapshot_script() -> None:
+    run_script_main("snapshot_test.py")
+
+
 def test_convert_resilience_script() -> None:
     run_script_main("convert_resilience_test.py")
 
