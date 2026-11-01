@@ -4,31 +4,11 @@ name: Windows CLI launchers
 on:
   workflow_call:
   workflow_dispatch:
-  pull_request:
-  push: { branches: [master], paths-ignore: ["**/*.md", "**/*dprint*", "**/*docker*"] }
+  pull_request: { paths-ignore: &pi ["**/*.md", "**/*dprint*", "**/*docker*"] }
+  push: { branches: [master], paths-ignore: *pi }
 permissions: {}
 jobs:
-  changes:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: { pull-requests: read }
-    outputs: { launchers: "${{ steps.filter.outputs.launchers }}" }
-    steps:
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: filter
-        with:
-          predicate-quantifier: every
-          filters: |
-            launchers:
-              - "**"
-              - "!**/*.md"
-              - "!**/*dprint*"
-              - "!**/*docker*"
-
   cmd-shim:
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result == 'skipped' || needs.changes.outputs.launchers == 'true') }}
     runs-on: windows-latest
     permissions: { contents: read }
     timeout-minutes: 15
@@ -85,15 +65,3 @@ jobs:
       - name: Check isolated npx bootstrap
         if: matrix.cli == 'vw' && matrix.pm == 'npm'
         run: uv run tests/npx_bootstrap_test.py
-
-  windows:
-    needs: [changes, cmd-shim]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    steps:
-      - env: { RESULTS: "${{ join(needs.*.result, ' ') }}" }
-        run: |
-          for result in ${RESULTS}; do
-            [[ ${result} == success || ${result} == skipped ]]
-          done
