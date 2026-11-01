@@ -72,7 +72,7 @@ jobs:
       - name: Attest wheel and source distribution
         if: needs.check.outputs.dry != 'true'
         id: provenance
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with: { subject-path: "dist/*" }
       - if: needs.check.outputs.dry != 'true'
         env: { BUNDLE: "${{ steps.provenance.outputs.bundle-path }}" }
@@ -199,13 +199,13 @@ jobs:
         id: images
         run: ./scripts/release-images.sh publish
       - name: Attest vw image index
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ steps.images.outputs.image }}
           subject-digest: ${{ steps.images.outputs.vw }}
           push-to-registry: true
       - name: Attest bw image index
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ steps.images.outputs.image }}
           subject-digest: ${{ steps.images.outputs.bw }}
