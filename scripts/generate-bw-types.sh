@@ -14,7 +14,7 @@ if uvx --from "datamodel-code-generator[ruff]" datamodel-codegen \
 	--input "${IN_FILE}" \
 	--input-file-type openapi \
 	--output-model-type typing.TypedDict \
-	--target-python-version 3.14 \
+	--target-python-version 3.15 \
 	--no-treat-dot-as-module \
 	--collapse-root-models \
 	--reuse-model \
