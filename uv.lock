@@ -429,7 +429,7 @@ wheels = [
 
 [[package]]
 name = "kp2bw"
-version = "3.10.1"
+version = "3.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
