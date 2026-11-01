@@ -44,6 +44,12 @@ class PreviewFixture:
             ssh_rules=self.ssh_rules,
         )
 
+    def replace_attachment(self) -> None:
+        self.entry.attachments[0].id = self.db.add_binary(
+            b"replacement after interruption"
+        )
+        self.db.save()
+
     def convert(self) -> None:
         assert self.converter().convert(self.vault.client) == 0
 
@@ -150,19 +156,24 @@ def run_preview_protected_test(vault: Vault) -> None:
 def run_preview_resume_test(vault: Vault) -> None:
     fixture = PreviewFixture(vault, "preview-resume")
     fixture.convert()
-    fixture.entry.attachments[0].id = fixture.db.add_binary(
-        b"replacement after interruption"
-    )
-    fixture.db.save()
+    fixture.replace_attachment()
     planned = fixture.preview("update")
     assert planned.entries[0].uploads == 1
     run_crash("after-upload", fixture.source, fixture.checkpoint, vault)
     resumed = fixture.preview("update")
     assert resumed.entries[0].uploads == 0, "Completed upload should be adopted"
     assert resumed.entries[0].attachments == planned.entries[0].attachments
+    print("live preview of an interrupted replacement passed")
+
+
+def run_preview_resume_converge_test(vault: Vault) -> None:
+    fixture = PreviewFixture(vault, "preview-resume-converge")
+    fixture.convert()
+    fixture.replace_attachment()
+    run_crash("after-upload", fixture.source, fixture.checkpoint, vault)
     fixture.convert()
     _ = fixture.preview("unchanged")
-    print("live preview of an interrupted replacement passed")
+    print("live preview after resuming an interrupted replacement passed")
 
 
 def main() -> None:
@@ -171,6 +182,7 @@ def main() -> None:
         run_preview_update_test(vault)
         run_preview_protected_test(vault)
         run_preview_resume_test(vault)
+        run_preview_resume_converge_test(vault)
 
     vault_main(run_all)
 

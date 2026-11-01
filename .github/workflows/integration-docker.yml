@@ -58,63 +58,75 @@ jobs:
                 Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             }
           }
-          $workers = @(
-            'golden',
-            'refs',
-            'metadata',
-            'metadata_legacy_ref',
-            'reserved_fields',
-            'ssh_cli',
-            'ssh',
-            'ssh_rotation',
-            'ssh_protected',
-            'checkpoint',
-            'crash_before_upload',
-            'crash_after_upload',
-            'crash_after_mapping',
-            'crash_after_delete',
-            'crash_lost_checkpoint',
-            'crash_orphan_slot',
-            'passkey',
-            'preview',
-            'preview_update',
-            'preview_protected',
-            'preview_resume',
-            'attachment_batch',
-            'attachment_identity',
-            'attachment_rejected',
-            'attachment_added',
-            'attachment_legacy',
-            'templates_cli',
-            'templates',
-            'templates_selected',
-            'history_archive_cli',
-            'history_archive',
-            'history_updates',
-            'field_limits',
-            'field_limits_org',
-            'scope',
-            'scope_report',
-            'scope_migrate_uris',
-            'scope_strip',
-            'item_selection',
-            'item_selection_force',
-            'item_selection_rejected',
-            'fixups',
-            'fixups_uri_only',
-            'fixups_personal'
-          )
-          $shards = @{ bitwarden = 7; vaultwarden = 2 }
-          $slotCount = 7
+          $weights = [ordered]@{
+            golden = 80
+            attachment_refresh = 60
+            refs = 60
+            metadata = 74
+            metadata_legacy_ref = 53
+            reserved_fields = 38
+            ssh_cli = 67
+            ssh = 61
+            ssh_rotation = 89
+            ssh_protected = 64
+            checkpoint = 49
+            crash_before_upload = 75
+            crash_after_upload = 61
+            crash_after_mapping = 78
+            crash_after_delete = 72
+            crash_lost_checkpoint = 84
+            crash_orphan_slot = 87
+            passkey = 59
+            preview = 61
+            preview_update = 63
+            preview_protected = 68
+            preview_resume = 85
+            preview_resume_converge = 75
+            attachment_batch = 85
+            attachment_identity = 74
+            attachment_rejected = 66
+            attachment_added = 65
+            attachment_legacy = 48
+            templates_cli = 60
+            templates = 70
+            templates_selected = 83
+            history_archive_cli = 69
+            history_archive = 73
+            history_updates = 80
+            field_limits = 63
+            field_limits_org = 80
+            scope = 72
+            scope_report = 77
+            scope_migrate_uris = 79
+            scope_strip = 74
+            item_selection = 71
+            item_selection_force = 63
+            item_selection_rejected = 58
+            fixups = 77
+            fixups_uri_only = 68
+            fixups_personal = 70
+          }
+          $layout = @{
+            bitwarden = @{ shards = 12; slots = 4 }
+            vaultwarden = @{ shards = 2; slots = 7 }
+          }
+          $order = @($weights.Keys | Sort-Object @{ Expression = { $weights[$_] }; Descending = $true }, @{ Expression = { $_ } })
           $jobs = @(foreach ($row in $include) {
-            $count = $shards[$row.lane]
+            $count = $layout[$row.lane].shards
+            $bins = $count * $layout[$row.lane].slots
+            $load = [int[]]::new($bins)
+            $members = @(for ($b = 0; $b -lt $bins; $b++) { ,[System.Collections.Generic.List[string]]::new() })
+            foreach ($check in $order) {
+              $best = 0
+              for ($b = 1; $b -lt $bins; $b++) { if ($load[$b] -lt $load[$best]) { $best = $b } }
+              $members[$best].Add($check)
+              $load[$best] += $weights[$check]
+            }
             for ($i = 0; $i -lt $count; $i++) {
               $job = $row.Clone()
               $job.shard = "$($i + 1)/$count"
-              $checks = @(for ($w = $i; $w -lt $workers.Count; $w += $count) { $workers[$w] })
-              $slots = [math]::Min($slotCount, $checks.Count)
-              $job.workers = @(for ($s = 0; $s -lt $slots; $s++) {
-                @(for ($c = $s; $c -lt $checks.Count; $c += $slots) { $checks[$c] }) -join ' '
+              $job.workers = @(for ($b = $i; $b -lt $bins; $b += $count) {
+                if ($members[$b].Count) { $members[$b] -join ' ' }
               })
               $job
             }
@@ -161,20 +173,31 @@ jobs:
           -f tests/Dockerfile.vaultwarden
           -t kp2bw-vaultwarden tests
 
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - parallel:
+          - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+            with: { enable-cache: true, cache-python: true }
+          - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+            with: { node-version-file: .tool-versions }
+          - name: Restore ${{ matrix.cli-package }} ${{ matrix.bw-version }}
+            id: cli-cache
+            uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+            with:
+              path: ${{ runner.temp }}/cli
+              key: e2e-cli-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cli-package }}-${{ matrix.bw-version }}
+
       - run: uv sync --frozen
 
-      - name: Set up Bitwarden CLI (${{ matrix.bw-version }})
-        if: matrix.cli-package == '@bitwarden/cli'
-        uses: $/.github/actions/setup-bw
-        with: { version: "${{ matrix.bw-version }}" }
-
-      - name: Set up Vaultwarden CLI (${{ matrix.bw-version }})
-        if: matrix.cli-package == '@kjanat/vaultwarden-cli'
+      - name: Install ${{ matrix.cli-package }} ${{ matrix.bw-version }}
+        if: steps.cli-cache.outputs.cache-hit != 'true'
         shell: bash
-        env: { VW_VERSION: "${{ matrix.bw-version }}", VW_FOLDER: "${{ runner.temp }}/vw-cli" }
-        run: npm i -g --ignore-scripts --prefix "${VW_FOLDER}" "@kjanat/vaultwarden-cli@${VW_VERSION}";
-          echo "${VW_FOLDER}/bin" >> "${GITHUB_PATH}"; "${VW_FOLDER}/bin/vw" --version
+        env: { CLI_PACKAGE: "${{ matrix.cli-package }}", CLI_VERSION: "${{ matrix.bw-version }}" }
+        run: npm install --global --ignore-scripts --prefix "${RUNNER_TEMP}/cli" "${CLI_PACKAGE}@${CLI_VERSION}"
+
+      - name: Put the CLI on PATH
+        shell: bash
+        run: |
+          echo "${RUNNER_TEMP}/cli/bin" >> "${GITHUB_PATH}"
+          "${RUNNER_TEMP}/cli/bin/${KP2BW_CLI}" --version
 
       - wait: image
 

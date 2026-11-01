@@ -35,6 +35,7 @@ from e2e_metadata_test import run_metadata_legacy_ref_test, run_metadata_test
 from e2e_passkey_test import run_passkey_test
 from e2e_preview_test import (
     run_preview_protected_test,
+    run_preview_resume_converge_test,
     run_preview_resume_test,
     run_preview_test,
     run_preview_update_test,
@@ -360,12 +361,12 @@ def update_ref_alias_url(path: Path, password: str) -> None:
 LONG_NOTE_V2 = "ROTATED-SECRET-" * 1000  # ~15k chars, comfortably over the limit
 
 
-def edit_big_note_snapshot(path: Path, password: str, new_notes: str) -> None:
-    """Replace the Big Note entry's long note to exercise attachment refresh."""
+def edit_refresh_note_snapshot(path: Path, password: str, new_notes: str) -> None:
+    """Replace the Refresh Note entry's long note to exercise attachment refresh."""
     kp = PyKeePass(str(path), password=password)
-    big = kp.find_entries(title="Big Note", first=True)
+    big = kp.find_entries(title="Refresh Note", first=True)
     if big is None:
-        raise AssertionError("Fixture contract broken: 'Big Note' entry not found")
+        raise AssertionError("Fixture contract broken: 'Refresh Note' entry not found")
     big.notes = new_notes
     kp.save()
 
@@ -727,17 +728,38 @@ def run_golden_test(vault: Vault) -> None:
             "notes.txt attachment content does not match the original long note"
         )
 
+    convert(vault, snapshot_path)
+    s4 = capture_vault(vault)
+    assert_snapshots_equal(s3, s4, label="idempotency (updated state)")
+    print("golden migration, idempotency and update regression passed")
+
+
+def run_attachment_refresh_test(vault: Vault) -> None:
+    snapshot_path = vault.tmp / "refresh.kdbx"
+    create_database(str(snapshot_path), password=KP_PASSWORD)
+    kp = PyKeePass(str(snapshot_path), password=KP_PASSWORD)
+    _ = kp.add_entry(
+        kp.root_group, "Refresh Note", "big-user", "big-pass", notes=LONG_NOTE
+    )
+    kp.save()
+    convert(vault, snapshot_path)
+    big_id = vault.named("Refresh Note")["Refresh Note"]["id"]
+    if vault.attachment(big_id, "notes.txt") != LONG_NOTE.encode():
+        raise AssertionError(
+            "notes.txt attachment content does not match the original long note"
+        )
+
     # --- Attachment refresh: edit the long note (same filename) and re-run.
     # The notes.txt attachment must be replaced with the new content and the
     # stale copy removed -- not left as a duplicate (content-aware sync, #11).
-    logger.info("Editing Big Note's long note and running attachment-refresh pass")
-    edit_big_note_snapshot(snapshot_path, KP_PASSWORD, LONG_NOTE_V2)
+    logger.info("Editing Refresh Note's long note and running attachment-refresh pass")
+    edit_refresh_note_snapshot(snapshot_path, KP_PASSWORD, LONG_NOTE_V2)
     convert(vault, snapshot_path)
 
-    big_after_refresh = [i for i in vault.items() if i.get("name") == "Big Note"]
+    big_after_refresh = [i for i in vault.items() if i.get("name") == "Refresh Note"]
     if len(big_after_refresh) != 1 or big_after_refresh[0]["id"] != big_id:
         raise AssertionError(
-            f"Attachment-refresh re-run must not duplicate 'Big Note': {big_after_refresh}"
+            f"Attachment-refresh re-run must not duplicate 'Refresh Note': {big_after_refresh}"
         )
     notes_copies = [
         att
@@ -758,7 +780,7 @@ def run_golden_test(vault: Vault) -> None:
     convert(vault, snapshot_path)
     s_final = capture_vault(vault)
     assert_snapshots_equal(s_refresh, s_final, label="idempotency (refreshed state)")
-    print("golden migration, idempotency and update regression passed")
+    print("attachment refresh and idempotency regression passed")
 
 
 def run_ref_test(vault: Vault) -> None:
@@ -797,6 +819,7 @@ def run_ref_test(vault: Vault) -> None:
 # personal checks so their organization items never enter personal assertions.
 SUITE: dict[str, Callable[[Vault], None]] = {
     "golden": run_golden_test,
+    "attachment_refresh": run_attachment_refresh_test,
     "refs": run_ref_test,
     "metadata": run_metadata_test,
     "metadata_legacy_ref": run_metadata_legacy_ref_test,
@@ -812,6 +835,7 @@ SUITE: dict[str, Callable[[Vault], None]] = {
     "preview_update": run_preview_update_test,
     "preview_protected": run_preview_protected_test,
     "preview_resume": run_preview_resume_test,
+    "preview_resume_converge": run_preview_resume_converge_test,
     "attachment_batch": run_attachment_batch_test,
     "attachment_identity": run_attachment_identity_test,
     "attachment_rejected": run_attachment_rejected_test,
@@ -845,8 +869,9 @@ def main(names: list[str] | None = None) -> None:
         raise SystemExit(f"Unknown end-to-end checks: {', '.join(unknown)}")
 
     def run_suite(vault: Vault) -> None:
-        for name in names:
-            SUITE[name](vault)
+        for name, check in SUITE.items():
+            if name in names:
+                check(vault)
 
     vault_main(run_suite)
     print("vaultwarden end-to-end integration test passed")

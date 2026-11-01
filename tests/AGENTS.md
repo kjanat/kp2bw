@@ -43,7 +43,7 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - Integration expectations include idempotency (second run must not duplicate items).
 - `bw_serve_exit_test.py` terminates a test process during a simulated request and verifies fatal batch abort,
   attachment-path propagation, and recovery from disconnects while the process remains alive.
-- `e2e_vaultwarden_test.py [CHECK...]` runs the named checks in order over one client, or the whole suite without
+- `e2e_vaultwarden_test.py [CHECK...]` runs the named checks in suite order over one client, or the whole suite without
   arguments. Goldens run first on a clean vault; the focused REF/TOTP/protected-field checks (`refs`) mutate it only
   afterwards.
 - It also runs `e2e_metadata_test.py` with metadata explicitly enabled: persisted JSON tags/expiry, untouched YAML
@@ -139,10 +139,11 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
   unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
   architectures.
 
-- CI splits the checks round-robin into shard jobs per CLI (more shards for the official CLI). Each job starts one
-  disposable server per check from the same image and runs the checks in parallel, each with `BW_SERVER_URL` and
-  `KP2BW_E2E_VAULTWARDEN_CONTAINER` set to its own server. Sequences that need two CLI runs or several slow passes
-  are split into checks with their own fixtures, each starting from a freshly converged entry.
+- CI assigns the checks to shard jobs per CLI by their measured CI duration (heaviest first, least-loaded worker
+  slot). Each job runs its worker slots as a `parallel:` step group; every slot starts its own disposable server from
+  the same image, with `BW_SERVER_URL` and `KP2BW_E2E_VAULTWARDEN_CONTAINER` set to that server. Update the weights in
+  `integration-docker.yml` when a check is added or its duration changes. Sequences that need two CLI runs or several
+  slow passes are split into checks with their own fixtures, each starting from a freshly converged entry.
 - Every CLI flag and environment combination that the e2e scripts exercise keeps at least one `uv run kp2bw` run with
   its exit code asserted; repeated runs of the same combination run in process through `Converter.convert(client)`.
 
