@@ -8,6 +8,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-11-01
+
+### Changed
+
+- Read the post-sync folder, item and collection lists concurrently, each from a private copy of the CLI profile.
+  Migrations start sooner.
+- Container images run Python 3.15.
+
+### Fixed
+
+- Force a sync before verifying uploaded attachments and before resolving rejected URI updates. Stale CLI data no
+  longer fails attachment verification or update reconciliation.
+- Wait for the CLI to return the written version of an updated item before reconciling its attachment records. The
+  official CLI can serve the previous version briefly after an update.
+
 ## [3.10.0] - 2026-10-31
 
 ### Added
@@ -732,7 +747,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.10.0...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.10.1...HEAD
+[3.10.1]: https://github.com/kjanat/kp2bw/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/kjanat/kp2bw/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/kjanat/kp2bw/compare/v3.8.4...v3.9.0
 [3.8.4]: https://github.com/kjanat/kp2bw/compare/v3.8.3...v3.8.4
