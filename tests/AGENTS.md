@@ -139,8 +139,12 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
   unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
   architectures.
 
-- CI runs one job per CLI. The job starts one disposable server per worker from the same image and runs the workers
-  in parallel, each with `BW_SERVER_URL` and `KP2BW_E2E_VAULTWARDEN_CONTAINER` set to its own server.
+- CI splits the checks round-robin into shard jobs per CLI (more shards for the official CLI). Each job starts one
+  disposable server per check from the same image and runs the checks in parallel, each with `BW_SERVER_URL` and
+  `KP2BW_E2E_VAULTWARDEN_CONTAINER` set to its own server. Sequences that need two CLI runs or several slow passes
+  are split into checks with their own fixtures, each starting from a freshly converged entry.
+- Every CLI flag and environment combination that the e2e scripts exercise keeps at least one `uv run kp2bw` run with
+  its exit code asserted; repeated runs of the same combination run in process through `Converter.convert(client)`.
 
 - `npx_bootstrap_test.py` uses the real npm registry without vault access: a hostile project supplies local launchers,
   package metadata, `.npmrc` and injected environment settings. CI checks official-registry bootstrap and offline CLI

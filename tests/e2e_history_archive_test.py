@@ -4,6 +4,7 @@ import base64
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 from e2e_support import Vault, run, vault_main
 from pykeepass import create_database
@@ -16,10 +17,12 @@ from kp2bw.item_sync import content_signature, stamp_content, sync_stamp_matches
 type ItemState = tuple[str, tuple[str, ...]]
 
 
-def run_history_archive_test(vault: Vault) -> None:
+def history_scenario(
+    vault: Vault, name: str, mode: Literal["cli", "archive", "updates"]
+) -> None:
     password = vault.password
     client = vault.client
-    path = vault.tmp / "history.kdbx"
+    path = vault.tmp / f"{name}.kdbx"
     db = create_database(path, password="test")
     entry = db.add_entry(
         db.root_group, f"history-{uuid.uuid4()}", "user", "old password"
@@ -88,7 +91,10 @@ def run_history_archive_test(vault: Vault) -> None:
         return state, archive, original["id"]
 
     try:
-        migrate()
+        if mode == "cli":
+            vault.migrate(path, "test", env=archive_env)
+        else:
+            migrate()
         initial, raw_archive, original_id = read()
         archive = json.loads(raw_archive)
         assert len(archive["records"]) == 1
@@ -98,34 +104,46 @@ def run_history_archive_test(vault: Vault) -> None:
             base64.b64decode(archive["binaries"][str(binary_id)]["base64"])
             == historical_bytes
         )
-        migrate()
-        assert read()[0] == initial, "Unchanged history rewrote the item or attachments"
-        entry.save_history()
-        entry.mtime = datetime(2020, 3, 1, tzinfo=UTC)
-        db.save()
-        migrate()
-        updated, raw_archive, retained_id = read()
-        archive = json.loads(raw_archive)
-        assert len(archive["records"]) == 2 and retained_id == original_id
-        assert updated != initial, "New historical record was not archived"
-        migrate()
-        assert read()[0] == updated, "Updated archive did not settle into a no-op"
+        if mode == "cli":
+            print("live history archive CLI import passed")
+            return
+        updated = initial
+        if mode == "archive":
+            migrate()
+            assert read()[0] == initial, (
+                "Unchanged history rewrote the item or attachments"
+            )
+            entry.save_history()
+            entry.mtime = datetime(2020, 3, 1, tzinfo=UTC)
+            db.save()
+            migrate()
+            updated, raw_archive, retained_id = read()
+            archive = json.loads(raw_archive)
+            assert len(archive["records"]) == 2 and retained_id == original_id
+            assert updated != initial, "New historical record was not archived"
+            migrate()
+            assert read()[0] == updated, "Updated archive did not settle into a no-op"
 
-        # Check a fresh sync/export, independent of serve's decrypted cache.
-        session = client.inventory_session or ""
-        export_env = vault.detached_env({"BW_SESSION": session, "VW_SESSION": session})
-        run(vault.cli_command("sync"), env=export_env, secrets=(session,))
-        exported = json.loads(
-            run(
-                vault.cli_command("export", "--format", "json", "--raw"),
-                env=export_env,
-                secrets=(session,),
-            ).stdout
-        )
-        exported_item = next(
-            item for item in exported["items"] if item["id"] == item_id
-        )
-        assert history_signature(exported_item) == expected_history
+            # Check a fresh sync/export, independent of serve's decrypted cache.
+            session = client.inventory_session or ""
+            export_env = vault.detached_env({
+                "BW_SESSION": session,
+                "VW_SESSION": session,
+            })
+            run(vault.cli_command("sync"), env=export_env, secrets=(session,))
+            exported = json.loads(
+                run(
+                    vault.cli_command("export", "--format", "json", "--raw"),
+                    env=export_env,
+                    secrets=(session,),
+                ).stdout
+            )
+            exported_item = next(
+                item for item in exported["items"] if item["id"] == item_id
+            )
+            assert history_signature(exported_item) == expected_history
+            print("live native history, archive records and export passed")
+            return
 
         supports_updates = client.supports_history_updates()
         entry.history[0].password = "corrected historical password"
@@ -213,11 +231,28 @@ def run_history_archive_test(vault: Vault) -> None:
     finally:
         if item_id is not None:
             vault.delete(item_id)
-    print("live native history, export, update safety, archive and reruns passed")
+    print("live history update safety, merges and edit protection passed")
+
+
+def run_history_archive_cli_test(vault: Vault) -> None:
+    history_scenario(vault, "history-cli", "cli")
+
+
+def run_history_archive_test(vault: Vault) -> None:
+    history_scenario(vault, "history", "archive")
+
+
+def run_history_updates_test(vault: Vault) -> None:
+    history_scenario(vault, "history-updates", "updates")
 
 
 def main() -> None:
-    vault_main(run_history_archive_test)
+    def run_all(vault: Vault) -> None:
+        run_history_archive_cli_test(vault)
+        run_history_archive_test(vault)
+        run_history_updates_test(vault)
+
+    vault_main(run_all)
 
 
 if __name__ == "__main__":

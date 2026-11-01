@@ -125,39 +125,55 @@ def check_legacy_collision_retry(
         bw.request("DELETE", f"/object/item/{item_id}")
 
 
-def run_attachment_identity_test(vault: Vault) -> None:
-    password = vault.password
-    bw = vault.client
-    tmp = vault.tmp
-    source = tmp / "collisions.kdbx"
-    db = create_database(source, password="synthetic")
-    entry = db.add_entry(db.root_group, "Attachment collisions", "user", "pw")
-    entry.notes = "notes" * 3000
-    entry.set_custom_property("notes", "custom" * 3000)
-    expected: dict[str, bytes] = {}
-    for name, values in (
-        ("notes.txt", (b"first original", b"second original")),
-        ("same.bin", (b"same", b"same")),
-    ):
-        for ordinal, data in enumerate(values, 1):
-            entry.add_attachment(db.add_binary(data), name)
-            expected[source_file("original", name, ordinal, name, data).source_id] = (
-                data
-            )
-    expected[source_file("notes", "", 1, "notes.txt", b"").source_id] = (
-        entry.notes or ""
-    ).encode()
-    expected[source_file("field", "notes", 1, "notes.txt", b"").source_id] = (
-        b"custom" * 3000
-    )
-    db.save()
+class IdentityFixture:
+    def __init__(self, vault: Vault, name: str) -> None:
+        self.vault = vault
+        self.source = vault.tmp / f"{name}.kdbx"
+        self.db = create_database(self.source, password="synthetic")
+        self.entry = self.db.add_entry(
+            self.db.root_group, "Attachment collisions", "user", "pw"
+        )
+        self.entry.notes = "notes" * 3000
+        self.entry.set_custom_property("notes", "custom" * 3000)
+        self.expected: dict[str, bytes] = {}
+        for file_name, values in (
+            ("notes.txt", (b"first original", b"second original")),
+            ("same.bin", (b"same", b"same")),
+        ):
+            for ordinal, data in enumerate(values, 1):
+                self.entry.add_attachment(self.db.add_binary(data), file_name)
+                self.expected[
+                    source_file(
+                        "original", file_name, ordinal, file_name, data
+                    ).source_id
+                ] = data
+        self.expected[source_file("notes", "", 1, "notes.txt", b"").source_id] = (
+            self.entry.notes or ""
+        ).encode()
+        self.expected[source_file("field", "notes", 1, "notes.txt", b"").source_id] = (
+            b"custom" * 3000
+        )
+        self.db.save()
 
-    def migrate() -> None:
+    def converter(self) -> Converter:
+        return Converter(
+            keepass_file_path=str(self.source),
+            keepass_password="synthetic",
+            keepass_keyfile_path=None,
+            bitwarden_password=self.vault.password,
+            bitwarden_organization_id=None,
+            bitwarden_coll_id=None,
+            path2name=False,
+            path2nameskip=999,
+            import_tags=None,
+        )
+
+    def migrate(self) -> None:
         converter = Converter(
-            str(source),
+            str(self.source),
             "synthetic",
             None,
-            password,
+            self.vault.password,
             None,
             None,
             False,
@@ -165,27 +181,46 @@ def run_attachment_identity_test(vault: Vault) -> None:
             None,
             migrate_metadata=False,
         )
-        assert converter.convert(bw) == 0
+        assert converter.convert(self.vault.client) == 0
 
-    def verify() -> tuple[str, dict[str, str]]:
-        full = vault.item(entry.uuid.hex.upper())
+    def verify(self) -> tuple[str, dict[str, str]]:
+        full = self.vault.item(self.entry.uuid.hex.upper())
         records = records_from_fields(full["fields"])
-        assert set(records) == set(expected)
+        assert set(records) == set(self.expected)
         attachments = full.get("attachments") or []
-        assert len(attachments) == len(expected)
-        assert len({a["fileName"] for a in attachments}) == len(expected)
+        assert len(attachments) == len(self.expected)
+        assert len({a["fileName"] for a in attachments}) == len(self.expected)
         assert {a["id"] for a in attachments} == {
             r.attachment_id for r in records.values()
         }
-        for key, data in expected.items():
-            assert bw.get_attachment(full["id"], records[key].attachment_id) == data
-        return full.get("revisionDate") or "", {
+        for key, data in self.expected.items():
+            assert (
+                self.vault.client.get_attachment(full["id"], records[key].attachment_id)
+                == data
+            )
+        return full["revisionDate"], {
             key: record.attachment_id for key, record in records.items()
         }
 
-    converter = Converter(
-        str(source), "synthetic", None, password, None, None, False, 999, None
-    )
+    def converged(self) -> tuple[str, dict[str, str]]:
+        self.migrate()
+        state = self.verify()
+        self.migrate()
+        assert self.verify() == state, (
+            "Unchanged import changed revisions or attachment IDs"
+        )
+        return state
+
+    def delete(self) -> None:
+        self.vault.delete(self.vault.item(self.entry.uuid.hex.upper())["id"])
+
+
+def run_attachment_identity_test(vault: Vault) -> None:
+    fixture = IdentityFixture(vault, "collisions")
+    bw = vault.client
+    db, entry, expected = fixture.db, fixture.entry, fixture.expected
+    migrate, verify = fixture.migrate, fixture.verify
+    converter = fixture.converter()
     with (
         patch.object(
             BitwardenServeClient,
@@ -221,10 +256,21 @@ def run_attachment_identity_test(vault: Vault) -> None:
     )
     migrate()
     assert verify() == after
+    fixture.delete()
+    print("attachment collision, identity and replacement round trips passed")
+
+
+def run_attachment_rejected_test(vault: Vault) -> None:
+    fixture = IdentityFixture(vault, "collisions-rejected")
+    bw = vault.client
+    db, entry, expected = fixture.db, fixture.entry, fixture.expected
+    migrate, verify = fixture.migrate, fixture.verify
+    after = fixture.converged()
     # An uploaded replacement must not authorize deletion if the ID mapping
     # cannot be saved. The previous association and all old IDs survive.
     entry.attachments[0].id = db.add_binary(b"replacement with rejected metadata")
     db.save()
+    converter = fixture.converter()
     with (
         patch.object(
             BitwardenServeClient,
@@ -232,17 +278,6 @@ def run_attachment_identity_test(vault: Vault) -> None:
             side_effect=BitwardenClientError("synthetic metadata rejection"),
         ),
     ):
-        converter = Converter(
-            keepass_file_path=str(source),
-            keepass_password="synthetic",
-            keepass_keyfile_path=None,
-            bitwarden_password=password,
-            bitwarden_organization_id=None,
-            bitwarden_coll_id=None,
-            path2name=False,
-            path2nameskip=999,
-            import_tags=None,
-        )
         assert converter.convert(bw) != 0
     full = vault.item(entry.uuid.hex.upper())
     records = records_from_fields(full["fields"])
@@ -264,6 +299,17 @@ def run_attachment_identity_test(vault: Vault) -> None:
     assert recovered[1][first_key] != after[1][first_key]
     migrate()
     assert verify() == recovered
+    fixture.delete()
+    print("attachment replacement with a rejected association recovered")
+
+
+def run_attachment_added_test(vault: Vault) -> None:
+    fixture = IdentityFixture(vault, "collisions-added")
+    bw = vault.client
+    db, entry, expected = fixture.db, fixture.entry, fixture.expected
+    migrate, verify = fixture.migrate, fixture.verify
+    recovered = fixture.converged()
+    converter = fixture.converter()
     # Newly added sources also recover an upload whose association was rejected.
     entry.add_attachment(
         db.add_binary(b"new source after initial migration"), "added.txt"
@@ -303,8 +349,8 @@ def run_attachment_identity_test(vault: Vault) -> None:
         ),
     ):
         assert converter.convert(bw) == 0
-    vault.delete(vault.item(entry.uuid.hex.upper())["id"])
-    print("attachment collision, identity and replacement round trips passed")
+    fixture.delete()
+    print("new attachment source with a rejected association recovered")
 
 
 def run_attachment_legacy_test(vault: Vault) -> None:
@@ -327,6 +373,8 @@ def run_attachment_legacy_test(vault: Vault) -> None:
 def main() -> None:
     def run_all(vault: Vault) -> None:
         run_attachment_identity_test(vault)
+        run_attachment_rejected_test(vault)
+        run_attachment_added_test(vault)
         run_attachment_legacy_test(vault)
 
     vault_main(run_all)

@@ -1,6 +1,7 @@
 """Verify targeted updates, protection and attachment replacement with a live CLI."""
 
 import copy
+from typing import Literal
 from uuid import uuid4
 
 from e2e_support import Vault, vault_main
@@ -11,11 +12,13 @@ from kp2bw.convert import Converter
 from kp2bw.exceptions import ConversionError
 
 
-def run_item_selection_test(vault: Vault) -> None:
+def selection_scenario(
+    vault: Vault, mode: Literal["select", "force", "rejected"]
+) -> None:
     password = vault.password
     bw = vault.client
     tmp = vault.tmp
-    source = tmp / "selection.kdbx"
+    source = tmp / f"selection-{mode}.kdbx"
     db = create_database(source, password="synthetic")
     name = f"Selected item {uuid4()}"
     first = db.add_entry(db.root_group, name, "u", "p")
@@ -69,13 +72,60 @@ def run_item_selection_test(vault: Vault) -> None:
             result[entry.uuid.hex.upper()] = full
         return result
 
+    first_key, second_key = first.uuid.hex.upper(), second.uuid.hex.upper()
+    if mode == "rejected":
+        convert()
+        forced = snapshot()
+        first_id, second_id = forced[first_key]["id"], forced[second_key]["id"]
+        org = vault.organization()
+        for entry_id, item_id, scope in (
+            (str(uuid4()), None, None),
+            (str(first.uuid), second_id, None),
+            (None, str(uuid4()), None),
+            (str(first.uuid), first_id, org),
+        ):
+            try:
+                convert(entry_id, item_id, org=scope)
+            except ConversionError:
+                pass
+            else:
+                raise AssertionError("Invalid or out-of-scope selection succeeded")
+            assert snapshot() == forced, "Rejected selection changed vault state"
+        vault.delete(*(item["id"] for item in forced.values()))
+        print("rejected and out-of-scope selections changed nothing")
+        return
+    if mode == "force":
+        convert()
+        first.notes = "Selected source change"
+        db.save()
+        convert(str(first.uuid))
+        changed = snapshot()
+        first_id = changed[first_key]["id"]
+        assert changed[first_key]["notes"] == first.notes
+        for key in (first_key, second_key):
+            edited = copy.deepcopy(changed[key])
+            edited["notes"] = "Destination edit"
+            bw.update_item(edited["id"], edited)
+        edited_state = snapshot()
+        convert(item_id=first_id)
+        assert snapshot() == edited_state, "Selected sync overwrote destination edits"
+        convert(item_id=first_id, force=True)
+        forced = snapshot()
+        assert forced[first_key]["notes"] == first.notes
+        assert forced[second_key] == edited_state[second_key], (
+            "Force escaped item selection"
+        )
+        convert(str(first.uuid), first_id, force=True)
+        assert snapshot() == forced, "Unchanged selected rerun changed revisions/IDs"
+        vault.delete(*(item["id"] for item in forced.values()))
+        print("selected sync protection and forced overwrite passed")
+        return
     convert(str(first.uuid))
-    assert vault.find(first.uuid.hex.upper()) is not None
-    assert vault.find(second.uuid.hex.upper()) is None
+    assert vault.find(first_key) is not None
+    assert vault.find(second_key) is None
     convert()
     before = snapshot()
-    first_key, second_key = first.uuid.hex.upper(), second.uuid.hex.upper()
-    first_id, second_id = before[first_key]["id"], before[second_key]["id"]
+    first_id = before[first_key]["id"]
     login = before[first_key].get("login")
     assert login is not None and login.get("totp")
     assert any(uri["uri"] == alias.url for uri in login.get("uris") or [])
@@ -99,42 +149,29 @@ def run_item_selection_test(vault: Vault) -> None:
         first_attachment["id"] != (before[first_key].get("attachments") or [])[0]["id"]
     )
     assert bw.get_attachment(first_id, first_attachment["id"]) == b"replacement"
-    for key in (first_key, second_key):
-        edited = copy.deepcopy(changed[key])
-        edited["notes"] = "Destination edit"
-        bw.update_item(edited["id"], edited)
-    edited_state = snapshot()
-    convert(item_id=first_id)
-    assert snapshot() == edited_state, "Selected sync overwrote destination edits"
-    convert(item_id=first_id, force=True)
-    forced = snapshot()
-    assert forced[first_key]["notes"] == first.notes
-    assert forced[second_key] == edited_state[second_key], (
-        "Force escaped item selection"
-    )
-    convert(str(first.uuid), first_id, force=True)
-    assert snapshot() == forced, "Unchanged selected rerun changed revisions/IDs"
+    vault.delete(*(item["id"] for item in changed.values()))
+    print("selected creation, update, no-update and attachment round trips passed")
 
-    org = vault.organization()
-    for entry_id, item_id, scope in (
-        (str(uuid4()), None, None),
-        (str(first.uuid), second_id, None),
-        (None, str(uuid4()), None),
-        (str(first.uuid), first_id, org),
-    ):
-        try:
-            convert(entry_id, item_id, org=scope)
-        except ConversionError:
-            pass
-        else:
-            raise AssertionError("Invalid or out-of-scope selection succeeded")
-        assert snapshot() == forced, "Rejected selection changed vault state"
-    vault.delete(*(item["id"] for item in forced.values()))
-    print("selected sync, force, scope and attachment round trips passed")
+
+def run_item_selection_test(vault: Vault) -> None:
+    selection_scenario(vault, "select")
+
+
+def run_item_selection_force_test(vault: Vault) -> None:
+    selection_scenario(vault, "force")
+
+
+def run_item_selection_rejected_test(vault: Vault) -> None:
+    selection_scenario(vault, "rejected")
 
 
 def main() -> None:
-    vault_main(run_item_selection_test)
+    def run_all(vault: Vault) -> None:
+        run_item_selection_test(vault)
+        run_item_selection_force_test(vault)
+        run_item_selection_rejected_test(vault)
+
+    vault_main(run_all)
 
 
 if __name__ == "__main__":

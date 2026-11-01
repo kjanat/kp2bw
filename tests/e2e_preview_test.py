@@ -105,11 +105,23 @@ def run_preview_test(vault: Vault) -> None:
     unchanged = fixture.preview("unchanged")
     assert planned.entries[0].attachments == unchanged.entries[0].attachments
     assert unchanged.entries[0].uploads == 0
+    print("live preview of a create and an unchanged rerun passed")
+
+
+def run_preview_update_test(vault: Vault) -> None:
+    fixture = PreviewFixture(vault, "preview-update")
+    fixture.convert()
     fixture.entry.notes = "source update"
     fixture.db.save()
     _ = fixture.preview("update")
     fixture.convert()
     _ = fixture.preview("unchanged")
+    print("live preview of a source update passed")
+
+
+def run_preview_protected_test(vault: Vault) -> None:
+    fixture = PreviewFixture(vault, "preview-protected")
+    fixture.convert()
     item = vault.item(fixture.entry.uuid.hex.upper())
     item["notes"] = "destination edit"
     vault.client.update_item(item["id"], item)
@@ -132,7 +144,7 @@ def run_preview_test(vault: Vault) -> None:
     ])
     _ = fixture.preview("protected")
     fixture.convert()
-    print("live preview predictions and read-only transport checks passed")
+    print("live preview of protected destination edits passed")
 
 
 def run_preview_resume_test(vault: Vault) -> None:
@@ -156,6 +168,8 @@ def run_preview_resume_test(vault: Vault) -> None:
 def main() -> None:
     def run_all(vault: Vault) -> None:
         run_preview_test(vault)
+        run_preview_update_test(vault)
+        run_preview_protected_test(vault)
         run_preview_resume_test(vault)
 
     vault_main(run_all)

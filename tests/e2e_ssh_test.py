@@ -3,6 +3,7 @@
 import copy
 import json
 from datetime import UTC, datetime
+from typing import Literal
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -27,8 +28,11 @@ def private_key() -> str:
     )
 
 
-def run_ssh_test(vault: Vault) -> None:
-    tmp = vault.tmp
+def ssh_scenario(
+    vault: Vault, name: str, mode: Literal["cli", "rerun", "rotation", "protected"]
+) -> None:
+    tmp = vault.tmp / name
+    tmp.mkdir()
     rules = [
         {"group": "SSH", "fields": {"privateKey": "Private Key"}},
         {"group": "Referenced keys", "fields": {"privateKey": "Password"}},
@@ -129,7 +133,10 @@ def run_ssh_test(vault: Vault) -> None:
         alias_revision = login["revisionDate"]
         return vault.item(entry.uuid.hex.upper()), vault.item(broken.uuid.hex.upper())
 
-    migrate()
+    if mode == "cli":
+        vault.migrate(source, "synthetic", env=env)
+    else:
+        migrate()
     initial, fallback = read()
     assert initial["type"] == 5 and initial.get("sshKey")
     assert fallback["type"] == 1
@@ -138,24 +145,33 @@ def run_ssh_test(vault: Vault) -> None:
         f["value"] == "unsupported synthetic key" and f["type"] == 1
         for f in fallback["fields"]
     )
-    migrate()
-    unchanged, unchanged_fallback = read()
-    assert unchanged["revisionDate"] == initial["revisionDate"]
-    assert unchanged_fallback["revisionDate"] == fallback["revisionDate"]
-    entry.set_custom_property("Private Key", private_key(), protect=True)
-    db.save()
-    vault.migrate(
-        source,
-        "synthetic",
-        extra_args=("--entry-id", str(entry.uuid), "--item-id", initial["id"]),
-        env=env,
-    )
-    rotated, _ = read()
-    assert rotated["id"] == initial["id"]
-    assert rotated.get("sshKey") != initial.get("sshKey")
-    migrate()
-    assert read()[0]["revisionDate"] == rotated["revisionDate"]
-    edited = copy.deepcopy(rotated)
+    if mode == "cli":
+        print("native SSH CLI import passed")
+        return
+    if mode == "rerun":
+        migrate()
+        unchanged, unchanged_fallback = read()
+        assert unchanged["revisionDate"] == initial["revisionDate"]
+        assert unchanged_fallback["revisionDate"] == fallback["revisionDate"]
+        print("native SSH unchanged rerun passed")
+        return
+    if mode == "rotation":
+        entry.set_custom_property("Private Key", private_key(), protect=True)
+        db.save()
+        vault.migrate(
+            source,
+            "synthetic",
+            extra_args=("--entry-id", str(entry.uuid), "--item-id", initial["id"]),
+            env=env,
+        )
+        rotated, _ = read()
+        assert rotated["id"] == initial["id"]
+        assert rotated.get("sshKey") != initial.get("sshKey")
+        migrate()
+        assert read()[0]["revisionDate"] == rotated["revisionDate"]
+        print("native SSH key rotation passed")
+        return
+    edited = copy.deepcopy(initial)
     key = edited.get("sshKey")
     assert key is not None
     key["publicKey"] += " manual-comment"
@@ -163,11 +179,33 @@ def run_ssh_test(vault: Vault) -> None:
     migrate()
     protected = read()[0]
     assert protected.get("sshKey") == edited.get("sshKey")
-    print("native SSH end-to-end test passed")
+    print("native SSH manual edit protection passed")
+
+
+def run_ssh_cli_test(vault: Vault) -> None:
+    ssh_scenario(vault, "ssh-cli", "cli")
+
+
+def run_ssh_test(vault: Vault) -> None:
+    ssh_scenario(vault, "ssh", "rerun")
+
+
+def run_ssh_rotation_test(vault: Vault) -> None:
+    ssh_scenario(vault, "ssh-rotation", "rotation")
+
+
+def run_ssh_protected_test(vault: Vault) -> None:
+    ssh_scenario(vault, "ssh-protected", "protected")
 
 
 def main() -> None:
-    vault_main(run_ssh_test)
+    def run_all(vault: Vault) -> None:
+        run_ssh_cli_test(vault)
+        run_ssh_test(vault)
+        run_ssh_rotation_test(vault)
+        run_ssh_protected_test(vault)
+
+    vault_main(run_all)
 
 
 if __name__ == "__main__":

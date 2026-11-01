@@ -9,22 +9,55 @@ from pathlib import Path
 
 from e2e_attachment_batch_test import run_attachment_batch_test
 from e2e_attachment_identity_test import (
+    run_attachment_added_test,
     run_attachment_identity_test,
     run_attachment_legacy_test,
+    run_attachment_rejected_test,
 )
 from e2e_checkpoint_test import CRASH_MODES, crash_check, run_checkpoint_test
 from e2e_field_limits_test import run_field_limits_org_test, run_field_limits_test
-from e2e_fixups_test import run_fixups_test
-from e2e_history_archive_test import run_history_archive_test
-from e2e_item_selection_test import run_item_selection_test
-from e2e_metadata_test import run_metadata_test
+from e2e_fixups_test import (
+    run_fixups_personal_test,
+    run_fixups_test,
+    run_fixups_uri_only_test,
+)
+from e2e_history_archive_test import (
+    run_history_archive_cli_test,
+    run_history_archive_test,
+    run_history_updates_test,
+)
+from e2e_item_selection_test import (
+    run_item_selection_force_test,
+    run_item_selection_rejected_test,
+    run_item_selection_test,
+)
+from e2e_metadata_test import run_metadata_legacy_ref_test, run_metadata_test
 from e2e_passkey_test import run_passkey_test
-from e2e_preview_test import run_preview_resume_test, run_preview_test
+from e2e_preview_test import (
+    run_preview_protected_test,
+    run_preview_resume_test,
+    run_preview_test,
+    run_preview_update_test,
+)
 from e2e_reserved_fields_test import run_reserved_fields_test
-from e2e_scope_test import run_scope_test
-from e2e_ssh_test import run_ssh_test
+from e2e_scope_test import (
+    run_scope_migrate_uris_test,
+    run_scope_report_test,
+    run_scope_strip_test,
+    run_scope_test,
+)
+from e2e_ssh_test import (
+    run_ssh_cli_test,
+    run_ssh_protected_test,
+    run_ssh_rotation_test,
+    run_ssh_test,
+)
 from e2e_support import Vault, vault_main
-from e2e_templates_test import run_templates_test
+from e2e_templates_test import (
+    run_templates_cli_test,
+    run_templates_selected_test,
+    run_templates_test,
+)
 from pykeepass import PyKeePass, create_database
 from snapshot import (
     JsonValue,
@@ -766,23 +799,42 @@ SUITE: dict[str, Callable[[Vault], None]] = {
     "golden": run_golden_test,
     "refs": run_ref_test,
     "metadata": run_metadata_test,
+    "metadata_legacy_ref": run_metadata_legacy_ref_test,
     "reserved_fields": run_reserved_fields_test,
+    "ssh_cli": run_ssh_cli_test,
     "ssh": run_ssh_test,
+    "ssh_rotation": run_ssh_rotation_test,
+    "ssh_protected": run_ssh_protected_test,
     "checkpoint": run_checkpoint_test,
     **{f"crash_{mode.replace('-', '_')}": crash_check(mode) for mode in CRASH_MODES},
     "passkey": run_passkey_test,
     "preview": run_preview_test,
+    "preview_update": run_preview_update_test,
+    "preview_protected": run_preview_protected_test,
     "preview_resume": run_preview_resume_test,
     "attachment_batch": run_attachment_batch_test,
     "attachment_identity": run_attachment_identity_test,
+    "attachment_rejected": run_attachment_rejected_test,
+    "attachment_added": run_attachment_added_test,
     "attachment_legacy": run_attachment_legacy_test,
+    "templates_cli": run_templates_cli_test,
     "templates": run_templates_test,
+    "templates_selected": run_templates_selected_test,
+    "history_archive_cli": run_history_archive_cli_test,
     "history_archive": run_history_archive_test,
+    "history_updates": run_history_updates_test,
     "field_limits": run_field_limits_test,
     "field_limits_org": run_field_limits_org_test,
     "scope": run_scope_test,
+    "scope_report": run_scope_report_test,
+    "scope_migrate_uris": run_scope_migrate_uris_test,
+    "scope_strip": run_scope_strip_test,
     "item_selection": run_item_selection_test,
+    "item_selection_force": run_item_selection_force_test,
+    "item_selection_rejected": run_item_selection_rejected_test,
     "fixups": run_fixups_test,
+    "fixups_uri_only": run_fixups_uri_only_test,
+    "fixups_personal": run_fixups_personal_test,
 }
 
 

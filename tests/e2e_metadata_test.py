@@ -117,11 +117,10 @@ def run_metadata_test(vault: Vault) -> None:
         assert read_items() == upgraded, "Metadata rerun changed content or revisions"
     finally:
         vault.delete_sources(source_ids, names.values())
-    check_legacy_ref_upgrade(vault)
     print("live JSON metadata and YAML upgrade regression passed")
 
 
-def check_legacy_ref_upgrade(vault: Vault) -> None:
+def run_metadata_legacy_ref_test(vault: Vault) -> None:
     bw = vault.client
     source = vault.tmp / "legacy-ref-metadata.kdbx"
     db = create_database(source, password="synthetic")
@@ -186,10 +185,15 @@ def check_legacy_ref_upgrade(vault: Vault) -> None:
         assert repeated["attachments"] == updated["attachments"]
     finally:
         vault.delete(item_id)
+    print("legacy REF metadata attachment upgrade passed")
 
 
 def main() -> None:
-    vault_main(run_metadata_test)
+    def run_all(vault: Vault) -> None:
+        run_metadata_test(vault)
+        run_metadata_legacy_ref_test(vault)
+
+    vault_main(run_all)
 
 
 if __name__ == "__main__":

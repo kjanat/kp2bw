@@ -13,11 +13,13 @@ import signal
 import socket
 import ssl
 import subprocess
+import sys
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from types import FrameType, TracebackType
 from typing import Any, NamedTuple, Self, cast
 
@@ -447,6 +449,33 @@ def resolve_cli_command() -> tuple[list[str], str | None]:
             command.append("--nointeraction")
         return command, cwd
     raise BitwardenClientError(CLI_NOT_FOUND_MSG)
+
+
+def cli_profile_dir(command: list[str]) -> str | None:
+    if "--nointeraction" in command or uses_npx(command):
+        configured = os.environ.get("VW_APPDATA_DIR")
+        default = os.path.join(
+            os.environ.get("XDG_CONFIG_HOME")
+            or os.path.join(os.path.expanduser("~"), ".config"),
+            "vaultwarden-cli",
+        )
+    else:
+        configured = os.environ.get("BITWARDENCLI_APPDATA_DIR")
+        portable = os.path.join(os.path.dirname(command[0]), "bw-data")
+        if os.path.isdir(portable):
+            return None
+        if sys.platform == "darwin":
+            default = os.path.expanduser("~/Library/Application Support/Bitwarden CLI")
+        elif os.name == "nt":
+            default = os.path.join(os.environ.get("APPDATA", ""), "Bitwarden CLI")
+        else:
+            default = os.path.join(
+                os.environ.get("XDG_CONFIG_HOME")
+                or os.path.join(os.path.expanduser("~"), ".config"),
+                "Bitwarden CLI",
+            )
+    profile = os.path.abspath(configured or default)
+    return profile if os.path.isdir(profile) else None
 
 
 def cli_environment(
@@ -1318,52 +1347,91 @@ class BitwardenServeClient:
             raise BitwardenClientError("CLI unlock returned no inventory session")
         self.inventory_session = session
 
+    def inventory_snapshot(self, kind: str, env: dict[str, str]) -> object:
+        args = [*self.cli_command, "list", kind]
+        if kind == "org-collections":
+            args.extend(["--organizationid", self.organization_id or ""])
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=self.http_timeout,
+                stdin=subprocess.DEVNULL,
+                cwd=self.cli_cwd,
+                env=env,
+            )
+        except OSError, UnicodeError, subprocess.TimeoutExpired:
+            raise BitwardenClientError(
+                "Could not verify the post-sync CLI inventory"
+            ) from None
+        if result.returncode != 0:
+            raise BitwardenClientError("Read-only CLI inventory verification failed")
+        try:
+            return json.loads(result.stdout)
+        except ValueError:
+            raise BitwardenClientError(
+                "CLI inventory verification returned invalid JSON"
+            ) from None
+
     def verify_inventory(self) -> None:
         """Verify post-sync HTTP lists against fresh CLI process snapshots.
 
         A successful sync can precede the serve process's cache publication.
         Bootstrap reads must not interpret that transient empty/stale cache as
-        an empty vault. These bounded read-only commands reuse the same profile
-        and HTTP unlock session; item and attachment operations remain HTTP.
+        an empty vault. These bounded commands reuse the HTTP unlock session,
+        each on a private copy of the profile; item and attachment operations
+        remain HTTP.
         """
         kinds = ["folders", "items"]
         if self.organization_id:
             kinds.append("org-collections")
-        expected: dict[str, str] = {}
-        for kind in kinds:
-            args = [*self.cli_command, "list", kind]
-            if kind == "org-collections":
-                args.extend(["--organizationid", self.organization_id or ""])
+        profile = cli_profile_dir(self.cli_command)
+        workspace = mkdtemp(prefix="kp2bw-inventory-")
+        try:
+            envs: dict[str, dict[str, str]] = {}
+            for kind in kinds:
+                env = cli_environment(
+                    session=self.inventory_session, command=self.cli_command
+                )
+                if profile is not None:
+                    # `bw list` rewrites data.json under a file lock.
+                    private = os.path.join(workspace, kind)
+                    shutil.copytree(
+                        profile,
+                        private,
+                        ignore=shutil.ignore_patterns("*.lock", ".lock"),
+                    )
+                    env["BITWARDENCLI_APPDATA_DIR"] = private
+                    env["VW_APPDATA_DIR"] = private
+                envs[kind] = env
+            if profile is None:
+                outputs = {
+                    kind: self.inventory_snapshot(kind, envs[kind]) for kind in kinds
+                }
+            else:
+                with ThreadPoolExecutor(len(kinds)) as pool:
+                    futures = {
+                        kind: pool.submit(self.inventory_snapshot, kind, envs[kind])
+                        for kind in kinds
+                    }
+                    outputs = {
+                        kind: future.result() for kind, future in futures.items()
+                    }
+        except OSError:
+            raise BitwardenClientError(
+                "Could not verify the post-sync CLI inventory"
+            ) from None
+        finally:
             try:
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    check=False,
-                    timeout=self.http_timeout,
-                    stdin=subprocess.DEVNULL,
-                    cwd=self.cli_cwd,
-                    env=cli_environment(
-                        session=self.inventory_session, command=self.cli_command
-                    ),
-                )
-            except OSError, UnicodeError, subprocess.TimeoutExpired:
-                raise BitwardenClientError(
-                    "Could not verify the post-sync CLI inventory"
-                ) from None
-            if result.returncode != 0:
-                raise BitwardenClientError(
-                    "Read-only CLI inventory verification failed"
-                )
-            try:
-                expected[kind] = inventory_signature(
-                    json.loads(result.stdout), kind=kind
-                )
-            except ValueError:
-                raise BitwardenClientError(
-                    "CLI inventory verification returned invalid JSON"
-                ) from None
+                shutil.rmtree(workspace)
+            except OSError:
+                logger.warning("Could not remove the private inventory profile copies")
+        expected = {
+            kind: inventory_signature(rows, kind=kind) for kind, rows in outputs.items()
+        }
         for attempt in range(6):
             observed: dict[str, list[Any]] = {}
             for kind in kinds:

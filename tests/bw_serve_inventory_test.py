@@ -1,7 +1,11 @@
 """Incomplete post-sync lists must not authorize duplicate imports."""
 
 import json
+import os
 import subprocess
+import tempfile
+import threading
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -10,6 +14,78 @@ import httpx
 from kp2bw.bw_serve import BitwardenServeClient
 from kp2bw.exceptions import BitwardenClientError
 from kp2bw.inventory import inventory_signature
+
+
+def check_profile_copies(items: list[dict[str, Any]]) -> None:
+    lock = threading.Lock()
+    with tempfile.TemporaryDirectory() as directory:
+        for profile_exists in (True, False):
+            profile = Path(directory) / f"profile-{profile_exists}"
+            if profile_exists:
+                profile.mkdir()
+                (profile / "data.json").write_text('{"state": "original"}')
+                (profile / "data.json.lock").mkdir()
+            client = object.__new__(BitwardenServeClient)
+            client.organization_id = "org"
+            client.collection_id = None
+            client.folder_cache = {}
+            client.cli_command = ["synthetic-bw"]
+            client.cli_cwd = None
+            client.http_timeout = 30
+            client.inventory_session = "synthetic-session"
+            client.inventory_needs_check = True
+            client.sleep = lambda _: None
+            barrier = threading.Barrier(3, timeout=5)
+            profiles: list[str] = []
+
+            def respond(request: httpx.Request) -> httpx.Response:
+                assert request.method == "GET"
+                rows = items if request.url.path.endswith("/items") else []
+                return httpx.Response(
+                    200, json={"success": True, "data": {"data": rows}}
+                )
+
+            def run(
+                args: list[str],
+                profile_exists: bool = profile_exists,
+                profile: Path = profile,
+                barrier: threading.Barrier = barrier,
+                profiles: list[str] = profiles,
+                **kwargs: Any,
+            ) -> subprocess.CompletedProcess[str]:
+                env = kwargs["env"]
+                if profile_exists:
+                    private = env["BITWARDENCLI_APPDATA_DIR"]
+                    assert env["VW_APPDATA_DIR"] == private
+                    assert Path(private) != profile
+                    assert (Path(private) / "data.json").read_text() == (
+                        '{"state": "original"}'
+                    )
+                    assert not (Path(private) / "data.json.lock").exists()
+                    (Path(private) / "data.json").write_text('{"state": "rewritten"}')
+                    with lock:
+                        profiles.append(private)
+                    barrier.wait()
+                else:
+                    assert env["BITWARDENCLI_APPDATA_DIR"] == str(profile)
+                rows = items if args[2] == "items" else []
+                return subprocess.CompletedProcess(args, 0, json.dumps(rows), "")
+
+            client.http = httpx.Client(
+                base_url="http://localhost", transport=httpx.MockTransport(respond)
+            )
+            try:
+                with (
+                    patch.dict(os.environ, {"BITWARDENCLI_APPDATA_DIR": str(profile)}),
+                    patch("kp2bw.bw_serve.subprocess.run", side_effect=run),
+                ):
+                    client.verify_inventory()
+            finally:
+                client.http.close()
+            if profile_exists:
+                assert len(set(profiles)) == 3, "Each list needs its own profile copy"
+                assert not any(Path(private).exists() for private in profiles)
+                assert (profile / "data.json").read_text() == '{"state": "original"}'
 
 
 def main() -> None:
@@ -75,6 +151,7 @@ def main() -> None:
             client.sleep = lambda _: None
             reads = 0
             commands = 0
+            profile = tempfile.TemporaryDirectory()
 
             def respond(
                 request: httpx.Request,
@@ -115,7 +192,10 @@ def main() -> None:
                 base_url="http://localhost", transport=httpx.MockTransport(respond)
             )
             try:
-                with patch("kp2bw.bw_serve.subprocess.run", side_effect=run):
+                with (
+                    patch.dict(os.environ, {"BITWARDENCLI_APPDATA_DIR": profile.name}),
+                    patch("kp2bw.bw_serve.subprocess.run", side_effect=run),
+                ):
                     if recovers:
                         client.build_dedup_index()
                         assert client.get_item_by_uuid("source") is not None
@@ -139,6 +219,8 @@ def main() -> None:
                             )
             finally:
                 client.http.close()
+                profile.cleanup()
+    check_profile_copies(items)
     print("post-sync inventory verification tests passed")
 
 

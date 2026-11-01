@@ -5,7 +5,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -147,9 +148,12 @@ class SharedClient(BitwardenServeClient):
     ) -> dict[str, Any]:
         if method != "GET" and path not in {"/sync", "/unlock"}:
             self.written = True
-        return super().request(
+        response = super().request(
             method, path, json_body=json_body, params=params, idempotent=idempotent
         )
+        if path == "/sync" and params == {"force": "true"}:
+            self.written = False
+        return response
 
     def upload_attachments(
         self,
@@ -232,41 +236,46 @@ class Vault:
             tolerated_error="KeyIdBackfillError",
         )
 
-    def detached_env(self, extra: Mapping[str, str] | None = None) -> dict[str, str]:
+    def detached_env(
+        self, extra: Mapping[str, str] | None = None, unset: Collection[str] = ()
+    ) -> dict[str, str]:
         profile = Path(tempfile.mkdtemp(dir=self.tmp)) / "profile"
         shutil.copytree(self.profile, profile)
-        return {
+        env = {
             **os.environ,
             "BITWARDENCLI_APPDATA_DIR": str(profile),
             "VW_APPDATA_DIR": str(profile),
             **(extra or {}),
         }
+        for name in unset:
+            env.pop(name, None)
+        return env
 
     def kp2bw(
         self,
         *args: str,
         expected: int = 0,
         env: Mapping[str, str] | None = None,
+        unset: Collection[str] = (),
     ) -> subprocess.CompletedProcess[str]:
         result = run(
             ["uv", "run", "kp2bw", *args],
-            env=self.detached_env(env),
+            env=self.detached_env(env, unset),
             expected=expected,
             secrets=(self.password,),
         )
         self.sync()
         return result
 
-    def migrate(
+    def migrate_args(
         self,
         source: Path,
         kp_password: str,
         *,
         metadata: bool = False,
         extra_args: tuple[str, ...] = (),
-        env: Mapping[str, str] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        return self.kp2bw(
+    ) -> tuple[str, ...]:
+        return (
             str(source),
             "--keepass-password",
             kp_password,
@@ -278,8 +287,39 @@ class Vault:
             "-y",
             "-v",
             *extra_args,
+        )
+
+    def migrate(
+        self,
+        source: Path,
+        kp_password: str,
+        *,
+        metadata: bool = False,
+        extra_args: tuple[str, ...] = (),
+        env: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return self.kp2bw(
+            *self.migrate_args(
+                source, kp_password, metadata=metadata, extra_args=extra_args
+            ),
             env=env,
         )
+
+    def kp2bw_parallel(
+        self, runs: Sequence[tuple[Sequence[str], Mapping[str, str] | None]]
+    ) -> list[subprocess.CompletedProcess[str]]:
+        commands = [
+            (["uv", "run", "kp2bw", *args], self.detached_env(env))
+            for args, env in runs
+        ]
+        with ThreadPoolExecutor(len(commands)) as pool:
+            futures = [
+                pool.submit(run, command, env=env, secrets=(self.password,))
+                for command, env in commands
+            ]
+            results = [future.result() for future in futures]
+        self.sync()
+        return results
 
     def child(self, script: Path, *args: str) -> subprocess.Popen[bytes]:
         return subprocess.Popen(
