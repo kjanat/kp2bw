@@ -56,6 +56,8 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
   content-identity checks on retries. Stable releases update major/minor and CLI aliases after anonymous downloads succeed; unsuffixed tags select the `vw` variant.
   Background server/readiness steps use `wait` and `cancel`; PR validation has no package-write permission.
   Each CLI has its own validation job and gate (`container-vw`, `container-bw`); only `container-vw` is a required check.
+  The `changes` filter runs on pull requests only. Validation jobs run whenever `prepare` succeeded, and each gate
+  requires its validation result to equal the `prepare` result.
   A release calls `container.yml` once per CLI and waits for the vw images only. Without tested bw archives for both
   architectures, `release-images.sh` publishes and promotes the vw images alone.
 
