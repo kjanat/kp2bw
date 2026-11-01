@@ -100,7 +100,7 @@ jobs:
   validate-vw:
     name: &validate-name image (${{ matrix.cli }}, ${{ matrix.arch }})
     needs: prepare
-    if: inputs.cli != 'bw'
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && inputs.cli != 'bw' }}
     strategy:
       fail-fast: false
       matrix:
@@ -184,7 +184,7 @@ jobs:
   validate-bw:
     name: *validate-name
     needs: prepare
-    if: inputs.cli != 'vw'
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && inputs.cli != 'vw' }}
     strategy:
       fail-fast: false
       matrix:
@@ -202,11 +202,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps: &gate
-      - env: { RESULTS: "${{ join(needs.*.result, ' ') }}" }
+      - env: { NEEDS: "${{ toJSON(needs) }}" }
         run: |
-          for result in ${RESULTS}; do
-            [[ ${result} == success || ${result} == skipped ]]
-          done
+          jq -e '[.[].result] - ["success", "skipped"] == []
+            and [to_entries[] | select(.key | startswith("validate-")) | .value.result] == [.prepare.result]' <<<"${NEEDS}"
 
   container-bw:
     needs: [changes, prepare, validate-bw]
