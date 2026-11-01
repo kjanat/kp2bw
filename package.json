@@ -31,7 +31,7 @@
 	"catalog": {
 		"@types/bun": "^1.4",
 		"tombi": "^1.5",
-		"runner-run": "^0.26.1",
+		"runner-run": "^0.28.0",
 		"tsc7": "npm:typescript@>=7"
 	},
 	"catalogs": {
