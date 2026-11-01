@@ -13,7 +13,6 @@ jobs:
       - name: Create, update, or archive PR comment
         uses: $/.github/actions/pr-test-comment
         with:
-          python-version: "3.14"
           cli-name: kp2bw
           cli-examples: |
             # Show version

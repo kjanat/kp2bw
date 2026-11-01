@@ -78,7 +78,7 @@ def check_persisted_mapping(failure: str | None) -> None:
         converter.persist_attachment_plan(
             cast(BitwardenServeClient, client), "item", plan, set()
         )
-    except (BitwardenClientError, ConversionError):
+    except BitwardenClientError, ConversionError:
         assert failure is not None
     else:
         assert failure is None

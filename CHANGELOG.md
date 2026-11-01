@@ -8,6 +8,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- kp2bw requires Python 3.15 or newer.
+
 ## [3.10.1] - 2026-11-01
 
 ### Changed
