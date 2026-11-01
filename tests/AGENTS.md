@@ -20,7 +20,6 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 | Integration infra         | `tests/docker-compose.yml`          | Vaultwarden + test container orchestration               |
 | Vaultwarden image seeding | `tests/Dockerfile.vaultwarden`      | Server image + DB/key fixtures                           |
 | Test runner image         | `tests/Dockerfile.test`             | uv + bw CLI from bun.lock + test deps                    |
-| Reusable bw setup         | `.github/actions/setup-bw`          | Installs a chosen `@bitwarden/cli` (matrix-able)         |
 | Fixture retention rules   | `tests/fixtures/.gitignore`         | Allowlist keeps required DB/certs tracked                |
 
 ## CONVENTIONS
