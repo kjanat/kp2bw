@@ -40,7 +40,6 @@
   },
   "catalog": {
     "@types/bun": "^1.4",
-    "dprint": "^0.57",
     "runner-run": "^0.26.1",
     "tombi": "^1.5",
     "tsc7": "npm:typescript@>=7",

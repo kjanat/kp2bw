@@ -15,8 +15,8 @@ WORKDIR /app
 
 # Resolve @bitwarden/cli from the committed package.json + bun.lock (NOT @latest)
 # so the version matches the lockfile -- the golden snapshots are a
-# function of this exact CLI's JSON output, and Dependabot bumps it via the
-# `bun` ecosystem. Copy the manifests first so this layer caches independently
+# function of this exact CLI's JSON output, and Renovate bumps it via the
+# `bun` catalog. Copy the manifests first so this layer caches independently
 # of source changes (bun-in-docker best practice).
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile

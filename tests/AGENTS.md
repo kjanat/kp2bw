@@ -91,7 +91,7 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
   independent of the golden.
 - Golden comparison is gated by `KP2BW_SNAPSHOT_GOLDEN=1` in the official CLI job.
 - The golden depends on the CLI and
-  Vaultwarden image (`tests/Dockerfile.vaultwarden`). When Dependabot bumps either, regenerate and review the diff:
+  Vaultwarden image (`tests/Dockerfile.vaultwarden`). When Renovate bumps either, regenerate and review the diff:
 
   ```bash
   KP2BW_UPDATE_SNAPSHOTS=1 docker compose -f tests/docker-compose.yml up \

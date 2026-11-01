@@ -1,0 +1,37 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": ["config:recommended"],
+	"forkProcessing": "enabled",
+	"labels": ["dependencies"],
+	"rebaseWhen": "conflicted",
+	"gitIgnoredAuthors": ["autofix.ci[bot] <autofix.ci[bot]@users.noreply.github.com>"],
+	"github-actions": { "enabled": false },
+	"customManagers": [
+		{
+			"customType": "regex",
+			"description": "Extract the top-level Bun catalogs that the built-in manager does not read.",
+			"managerFilePatterns": ["/^package\\.json$/"],
+			"matchStringsStrategy": "recursive",
+			"matchStrings": [
+				"\"catalogs?\"\\s*:\\s*\\{[\\s\\S]*?\\n\\t\\}",
+				"\"(?<depName>[^\"\\n]+)\"\\s*:\\s*\"(?:npm:(?<packageName>@?[^\"\\n]+?)@)?(?<currentValue>[^\"\\n:]+)\""
+			],
+			"datasourceTemplate": "npm",
+			"versioningTemplate": "npm"
+		}
+	],
+	"packageRules": [
+		{
+			"matchManagers": ["pep621"],
+			"addLabels": ["python:uv"]
+		},
+		{
+			"matchManagers": ["bun", "custom.regex"],
+			"addLabels": ["javascript"]
+		},
+		{
+			"matchManagers": ["dockerfile", "docker-compose"],
+			"addLabels": ["docker"]
+		}
+	]
+}

@@ -1,6 +1,5 @@
-# Server image for local snapshot checks; Dependabot's `docker`
-# ecosystem (see .github/dependabot.yml, dir /tests) bumps it. Regenerate the
-# snapshots when this changes -- see tests/AGENTS.md.
+# Server image for local snapshot checks; Renovate bumps it (renovate.json).
+# Regenerate the snapshots when this changes -- see tests/AGENTS.md.
 ARG VAULTWARDEN_IMAGE=ghcr.io/dani-garcia/vaultwarden:1.37.4@sha256:efb3cde962015fcc036b2ea625242248611943b27212ebf4392841fb30fad055
 FROM ${VAULTWARDEN_IMAGE}
 COPY fixtures/vaultwarden-data/db.sqlite3 /data/db.sqlite3
