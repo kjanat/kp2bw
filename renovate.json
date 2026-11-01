@@ -2,9 +2,10 @@
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"extends": ["config:recommended"],
 	"forkProcessing": "enabled",
+	"automerge": true,
 	"labels": ["dependencies"],
 	"rebaseWhen": "conflicted",
-	"gitIgnoredAuthors": ["autofix.ci[bot] <autofix.ci[bot]@users.noreply.github.com>"],
+	"gitIgnoredAuthors": ["114827586+autofix-ci[bot]@users.noreply.github.com"],
 	"ignorePaths": ["**/node_modules/**"],
 	"github-actions": { "enabled": false },
 	"customManagers": [
@@ -19,6 +20,34 @@
 			],
 			"datasourceTemplate": "npm",
 			"versioningTemplate": "npm"
+		},
+		{
+			"customType": "regex",
+			"managerFilePatterns": ["/^\\.tool-versions$/"],
+			"matchStrings": ["(?:^|\\n)github:(?<depName>\\S+)\\s+(?<currentValue>\\S+)"],
+			"datasourceTemplate": "github-releases",
+			"extractVersionTemplate": "^v?(?<version>.+)$",
+			"versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:-kjanat)?$"
+		},
+		{
+			"customType": "regex",
+			"managerFilePatterns": ["/^\\.tool-versions$/"],
+			"matchStrings": ["(?:^|\\n)npm:(?<depName>\\S+)\\s+(?<currentValue>\\S+)"],
+			"datasourceTemplate": "npm"
+		},
+		{
+			"customType": "regex",
+			"managerFilePatterns": ["/^\\.tool-versions$/"],
+			"matchStrings": ["(?:^|\\n)(?<depName>ruff|ty|tombi)\\s+(?<currentValue>\\S+)"],
+			"datasourceTemplate": "pypi"
+		},
+		{
+			"customType": "regex",
+			"managerFilePatterns": ["/^\\.tool-versions$/"],
+			"matchStrings": ["(?:^|\\n)crane\\s+(?<currentValue>\\S+)"],
+			"depNameTemplate": "google/go-containerregistry",
+			"datasourceTemplate": "github-releases",
+			"extractVersionTemplate": "^v(?<version>.+)$"
 		}
 	],
 	"packageRules": [
@@ -27,12 +56,20 @@
 			"addLabels": ["python:uv"]
 		},
 		{
-			"matchManagers": ["bun", "custom.regex"],
+			"matchFileNames": ["package.json", "docs/package.json"],
 			"addLabels": ["javascript"]
 		},
 		{
 			"matchManagers": ["dockerfile", "docker-compose"],
 			"addLabels": ["docker"]
+		},
+		{
+			"matchDepNames": ["uv", "ghcr.io/astral-sh/uv", "uv_build"],
+			"groupName": "uv"
+		},
+		{
+			"matchDepNames": ["runner-run", "kjanat/runner"],
+			"groupName": "runner"
 		}
 	]
 }
