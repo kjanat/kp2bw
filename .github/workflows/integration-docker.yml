@@ -280,14 +280,9 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Cleanup
-        if: always()
-        shell: bash
-        run: docker ps -aq --filter name=vaultwarden- | xargs -r docker rm -f
-
   integration:
     needs: [config, unit, e2e]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:

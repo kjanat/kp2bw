@@ -175,7 +175,7 @@ jobs:
 
   container:
     needs: [changes, prepare, validate]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
