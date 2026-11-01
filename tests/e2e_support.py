@@ -20,6 +20,7 @@ from snapshot import objects, opt_str
 
 from kp2bw.bw_serve import BitwardenServeClient, resolve_cli_command
 from kp2bw.bw_types import BwItemResponse
+from kp2bw.exceptions import BitwardenHttpError
 
 logger = logging.getLogger("e2e")
 
@@ -352,10 +353,18 @@ class Vault:
         for _ in range(3):
             self.sync()
             for attempt in range(6):
-                if SCOPE_COLLECTION in self.collections(organization):
+                if SCOPE_COLLECTION in self.visible_collections(organization):
                     return organization
                 time.sleep(min(0.1 * 2**attempt, 1.0))
         raise AssertionError("The new organization's collection never became visible")
+
+    def visible_collections(self, organization: str) -> dict[str, str]:
+        try:
+            return self.collections(organization)
+        except BitwardenHttpError as error:
+            if error.status_code != 400 or "Organization not found" not in str(error):
+                raise
+            return {}
 
     def collections(self, organization: str) -> dict[str, str]:
         response = self.fresh().request(
