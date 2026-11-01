@@ -16,21 +16,22 @@
 		"typecheck": "run -q tsc7 --noEmit",
 		"typecheck:tsc": "tsc --noEmit"
 	},
+	"overrides": {
+		"typescript": "npm:@typescript/typescript6@^6.0.2"
+	},
 	"devDependencies": {
 		"@actions/github-script": "catalog:actions",
 		"@bitwarden/cli": "catalog:ci",
 		"@types/bun": "catalog:",
 		"runner-run": "catalog:",
 		"tombi": "catalog:",
-		"tsc7": "catalog:",
-		"typescript": "catalog:"
+		"tsc7": "catalog:"
 	},
 	"packageManager": "bun@1.4.4",
 	"catalog": {
 		"@types/bun": "^1.4",
 		"tombi": "^1.5",
 		"runner-run": "^0.26.1",
-		"typescript": "<7",
 		"tsc7": "npm:typescript@>=7"
 	},
 	"catalogs": {

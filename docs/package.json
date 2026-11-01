@@ -32,7 +32,6 @@
 		"runner-run": "catalog:",
 		"svelte": "^5.57.3",
 		"svelte-check": "^4.7.6",
-		"typescript": "catalog:",
 		"typescript-eslint": "^8.68.0",
 		"vite": "^8.2.2",
 		"vitest": "^5.0.0",
