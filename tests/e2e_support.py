@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -14,7 +15,7 @@ from types import TracebackType
 from typing import Any, Self
 from unittest.mock import patch
 
-from scope_fixture import create_scope_organization
+from scope_fixture import SCOPE_COLLECTION, create_scope_organization
 from snapshot import objects, opt_str
 
 from kp2bw.bw_serve import BitwardenServeClient, resolve_cli_command
@@ -347,8 +348,14 @@ class Vault:
             self.account.email,
             self.account.password,
         )
-        self.client.sync(force=True)
-        return organization
+        # The official CLI publishes a forced sync to its cache after responding.
+        for _ in range(3):
+            self.sync()
+            for attempt in range(6):
+                if SCOPE_COLLECTION in self.collections(organization):
+                    return organization
+                time.sleep(min(0.1 * 2**attempt, 1.0))
+        raise AssertionError("The new organization's collection never became visible")
 
     def collections(self, organization: str) -> dict[str, str]:
         response = self.fresh().request(

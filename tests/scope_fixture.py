@@ -18,6 +18,8 @@ from Cryptodome.Hash import SHA1
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Util.Padding import pad
 
+SCOPE_COLLECTION = "Scope A"
+
 
 def b64(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
@@ -66,7 +68,7 @@ def create_scope_organization(
         iv = os.urandom(16)
         # PyCryptodome's unrelated CTR overload has an untyped counter dict.
         ciphertext = AES.new(org_key[:32], AES.MODE_CBC, iv).encrypt(  # pyright: ignore[reportUnknownMemberType]
-            pad(b"Scope A", 16)
+            pad(SCOPE_COLLECTION.encode(), 16)
         )
         mac = hmac.digest(org_key[32:], iv + ciphertext, "sha256")
         collection_name = "2." + "|".join(map(b64, (iv, ciphertext, mac)))

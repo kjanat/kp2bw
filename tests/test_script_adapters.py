@@ -123,6 +123,10 @@ def test_convert_client_script() -> None:
     run_script_main("convert_client_test.py")
 
 
+def test_e2e_support_script() -> None:
+    run_script_main("e2e_support_test.py")
+
+
 def test_convert_resilience_script() -> None:
     run_script_main("convert_resilience_test.py")
 

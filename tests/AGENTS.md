@@ -38,8 +38,9 @@ Tests are script-executable smoke/e2e checks, with dockerized Vaultwarden integr
 - `e2e_support.py` logs in once per process with the CLI selected by `KP2BW_CLI` and opens one `bw serve` or
   `vw serve` client. Every read, write and in-process conversion (`Converter.convert(client)`) uses that client; a read
   after a write first syncs, because the official CLI can answer from its cache before a PUT lands there. CLI
-  entrypoint runs and crash children get a private copy of the logged-in profile and session.
-  Matrix lanes explicitly select their CLI so another installed binary cannot change the tested implementation.
+  entrypoint runs and crash children get a private copy of the logged-in profile and session. After creating an
+  organization through the server API, `Vault.organization()` re-syncs and polls, bounded, until its collection is
+  visible through the CLI; `e2e_support_test.py` covers that wait. Matrix lanes explicitly select their CLI so another installed binary cannot change the tested implementation.
 - Integration expectations include idempotency (second run must not duplicate items).
 - `bw_serve_exit_test.py` terminates a test process during a simulated request and verifies fatal batch abort,
   attachment-path propagation, and recovery from disconnects while the process remains alive.
