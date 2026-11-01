@@ -5,6 +5,7 @@
 	"labels": ["dependencies"],
 	"rebaseWhen": "conflicted",
 	"gitIgnoredAuthors": ["autofix.ci[bot] <autofix.ci[bot]@users.noreply.github.com>"],
+	"ignorePaths": ["**/node_modules/**"],
 	"github-actions": { "enabled": false },
 	"customManagers": [
 		{
