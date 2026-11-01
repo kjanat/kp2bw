@@ -10,7 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: kjanat/runner@b32ea932a1813ae0be44e755c16df9f9f5ca86a4 # master
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with: { install_args: bun }
       - run: runner i --pm bun docs:build
         env: { BASE_PATH: "/${{ github.event.repository.name }}" }
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5

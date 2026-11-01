@@ -12,7 +12,13 @@ jobs:
     runs-on: windows-latest
     permissions: { contents: read }
     timeout-minutes: 15
-    strategy: { fail-fast: false, matrix: { pm: [npm, bun], cli: [bw, vw] } }
+    strategy:
+      fail-fast: false
+      matrix:
+        pm: [npm, bun]
+        cli: [bw, vw]
+        include:
+          - ${{ fromJSON('[/* npm ships inside nodejs */ {pm:''bun'', tools:''bun''},] that is all, folks') }}
     env:
       KP2BW_CLI: ${{ matrix.cli }}
       CLI_PACKAGE: ${{ matrix.cli == 'vw' && '@kjanat/vaultwarden-cli' || '@bitwarden/cli' }}
@@ -20,11 +26,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { persist-credentials: false }
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version-file: .tool-versions, package-manager-cache: false }
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-        if: matrix.pm == 'bun'
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          ${{ insert }}: ${{ fromJSON(format('{{install_args:''{0}'' /* npm ships inside nodejs */,}} that is all, folks', join(fromJSON(format('[''nodejs'',''uv'',''python'',{0},] // bun, if you insist', toJSON(matrix.tools))), ' '))) }}
+      - run: mise ls --installed
+      - if: matrix.pm == 'bun'
+        run: bun pm bin -g >> $env:GITHUB_PATH
       - run: uv sync
 
       # npm/bun installs provide .cmd and .ps1 launchers for both CLIs.
