@@ -205,7 +205,8 @@ def norm_login(raw: Mapping[str, JsonValue]) -> NormLogin:
     )
     return {
         "username": opt_str(raw, "username"),
-        "password": opt_str(raw, "password"),
+        # bw stores an empty password as null, vw stores the "" kp2bw sends.
+        "password": opt_str(raw, "password") or None,
         "totp": opt_str(raw, "totp"),
         "uris": uris,
         "fido2Credentials": creds,
