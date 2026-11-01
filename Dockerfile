@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG PYTHON_IMAGE=python:3.14-slim-trixie
+ARG PYTHON_IMAGE=python:3.15-slim-trixie
 ARG NODE_IMAGE=node:26-trixie-slim
 
 FROM ${NODE_IMAGE} AS cli

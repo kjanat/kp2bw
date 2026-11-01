@@ -9,6 +9,6 @@ ruff                        latest
 ty                          latest
 npm:basedpyright            latest
 nodejs                      26
-python                      3.14
+python                      3.15.2
 npm:@bitwarden/cli          latest
 npm:@kjanat/vaultwarden-cli latest
