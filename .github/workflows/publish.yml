@@ -126,18 +126,29 @@ jobs:
     uses: $/.github/workflows/integration-docker.yml
     with: { lane: bitwarden }
 
-  container:
+  container-vw:
     needs: [check, build]
-    permissions: { contents: read, pull-requests: read, id-token: write, attestations: write }
+    permissions: &container-permissions { contents: read, pull-requests: read, id-token: write, attestations: write }
     uses: $/.github/workflows/container.yml
     with:
       distribution-artifact: release-distributions
       version: ${{ needs.check.outputs.version }}
       attest: ${{ needs.check.outputs.dry != 'true' }}
+      cli: vw
+
+  container-bw:
+    needs: [check, build]
+    permissions: *container-permissions
+    uses: $/.github/workflows/container.yml
+    with:
+      distribution-artifact: release-distributions
+      version: ${{ needs.check.outputs.version }}
+      attest: ${{ needs.check.outputs.dry != 'true' }}
+      cli: bw
 
   stage-images:
-    if: needs.check.outputs.dry != 'true'
-    needs: [check, container]
+    if: ${{ !cancelled() && needs.check.outputs.dry != 'true' && needs.container-vw.result == 'success' }}
+    needs: [check, container-vw, container-bw]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions: { contents: write }
@@ -155,7 +166,7 @@ jobs:
         run: ./scripts/release.sh stage images image-archive-sha256.json
 
   publish:
-    if: needs.check.outputs.dry != 'true'
+    if: ${{ !cancelled() && needs.check.outputs.dry != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'skipped') && !contains(needs.*.result, 'cancelled') }}
     needs: [check, smoke, vaultwarden, stage-distributions, stage-images]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -188,6 +199,7 @@ jobs:
 
   publish-images:
     needs: [check, publish]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'skipped') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions: { contents: write, packages: write, id-token: write, attestations: write }
@@ -212,6 +224,7 @@ jobs:
           subject-digest: ${{ steps.images.outputs.vw }}
           push-to-registry: true
       - name: Attest bw image index
+        if: steps.images.outputs.bw != ''
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: ${{ steps.images.outputs.image }}
@@ -228,6 +241,7 @@ jobs:
 
   finalize:
     needs: [check, publish-images]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'skipped') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions: { contents: write, packages: write }

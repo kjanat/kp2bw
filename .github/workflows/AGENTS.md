@@ -55,6 +55,9 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
   the build job before any package publication; stubs do not call it. Publish only the tested image archives, with version-tag
   content-identity checks on retries. Stable releases update major/minor and CLI aliases after anonymous downloads succeed; unsuffixed tags select the `vw` variant.
   Background server/readiness steps use `wait` and `cancel`; PR validation has no package-write permission.
+  Each CLI has its own validation job and gate (`container-vw`, `container-bw`); only `container-vw` is a required check.
+  A release calls `container.yml` once per CLI and waits for the vw images only. Without tested bw archives for both
+  architectures, `release-images.sh` publishes and promotes the vw images alone.
 
 - `publish.yml` creates a draft first, attests wheel/sdist and image archives, and uploads them to the draft. Only the final job
   publishes the GitHub release. `scripts/release.sh` and `scripts/release-images.sh` implement immutable assets, registry checks

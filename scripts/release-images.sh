@@ -21,8 +21,12 @@ remote_digest() {
 }
 
 publish() {
-	local directory=$1 cli arch tag tags candidate checksum previous vw bw
+	local directory=$1 cli arch tag tags candidate checksum previous vw="" bw=""
 	for cli in vw bw; do
+		if [[ ${cli} == bw ]] && ! [[ -f "${directory}/container-bw-amd64.tar" && -f "${directory}/container-bw-arm64.tar" ]]; then
+			echo "bw images were not tested on every architecture; publishing vw images only" >&2
+			continue
+		fi
 		tags=()
 		for arch in amd64 arm64; do
 			docker load --input "${directory}/container-${cli}-${arch}.tar"
@@ -42,16 +46,18 @@ publish() {
 	previous=$(remote_digest "${image}:${version}")
 	[[ -z ${previous} || ${previous} == "${vw}" ]] || fail "Unsuffixed version already identifies a different image"
 	[[ -n ${previous} ]] || crane tag "${image}@${vw}" "${version}"
-	jq -n -S --arg vw "${vw}" --arg bw "${bw}" '{vw: $vw, bw: $bw}' >image-digests.json
+	jq -n -S --arg vw "${vw}" --arg bw "${bw}" '{vw: $vw} + if $bw == "" then {} else {bw: $bw} end' >image-digests.json
 	printf 'image=%s\nvw=%s\nbw=%s\n' "${image}" "${vw}" "${bw}" >>"${GITHUB_OUTPUT:?}"
 }
 
 verify() {
-	local vw bw pair reference checksum attempt actual arch
+	local vw bw pair reference checksum attempt actual arch pairs
 	vw=$(jq -r .vw image-digests.json)
-	bw=$(jq -r .bw image-digests.json)
+	bw=$(jq -r '.bw // empty' image-digests.json)
 	mkdir "${tmp}/docker"
-	for pair in "-vw ${vw}" "-bw ${bw}" " ${vw}"; do
+	pairs=("-vw ${vw}" " ${vw}")
+	[[ -z ${bw} ]] || pairs+=("-bw ${bw}")
+	for pair in "${pairs[@]}"; do
 		reference="${image}:${version}${pair% *}"
 		checksum=${pair#* }
 		for attempt in {1..30}; do
@@ -63,7 +69,7 @@ verify() {
 			sleep 10
 		done
 	done
-	for checksum in "${vw}" "${bw}"; do
+	for checksum in "${vw}" ${bw:+"${bw}"}; do
 		for arch in amd64 arm64; do
 			docker --config "${tmp}/docker" pull --platform "linux/${arch}" "${image}@${checksum}"
 			docker image rm "${image}@${checksum}"
@@ -75,7 +81,7 @@ promote() {
 	local vw bw current installed newest major minor cli checksum tag
 	[[ ${STABLE:?} == true ]] || return 0
 	vw=$(jq -r .vw image-digests.json)
-	bw=$(jq -r .bw image-digests.json)
+	bw=$(jq -r '.bw // empty' image-digests.json)
 	current=$(remote_digest "${image}:latest")
 	if [[ -n ${current} ]]; then
 		installed=$(crane config --platform linux/amd64 "${image}@${current}" | jq -r '.config.Labels["org.opencontainers.image.version"]')
@@ -87,6 +93,7 @@ promote() {
 	minor=${minor%%.*}
 	for cli in vw bw; do
 		checksum=${!cli}
+		[[ -n ${checksum} ]] || continue
 		for tag in "${cli}" "${major}-${cli}" "${major}.${minor}-${cli}"; do
 			crane tag "${image}@${checksum}" "${tag}"
 		done

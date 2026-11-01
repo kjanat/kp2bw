@@ -138,7 +138,7 @@ docker compose -f tests/docker-compose.yml up --abort-on-container-exit --exit-c
 - `container_image_test.py` runs the production image against a disposable server using a fresh named state volume.
   It verifies non-root execution, read-only database/keyfile input, login persistence across containers, attachment bytes,
   unchanged reruns and SIGTERM teardown. The container workflow runs both CLI variants natively on both supported
-  architectures.
+  architectures; a failing bw variant never blocks a release.
 
 - CI runs every check against both CLIs in separate workflows, `integration-vaultwarden.yml` and
   `integration-bitwarden.yml`, which call `integration-docker.yml` with one `lane` each. Only `vaultwarden / gate` is a
