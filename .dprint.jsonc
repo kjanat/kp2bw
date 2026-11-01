@@ -7,16 +7,7 @@
 		"textWrap": "always",
 	},
 	"ruff": { "preview": true, "overrides": [{ "files": ["packages/**"], "preview": false }] },
-	"exec": {
-		"cwd": "${configDir}",
-		"commands": [{
-			"command": "tombi format - --stdin-filename {{file_path}}",
-			"exts": ["toml"],
-			"cacheKeyFiles": ["tombi.toml"],
-			"setupCommand": "npm i -g tombi",
-		}],
-	},
 	"plugins": [
-		"npm:@dprint/exec@0.8.0/plugin.json@9d6234ea05810c775f388c2a4cce82b9116b69294b65e0e1e9d64f1446283ef3",
+		"https://plugins.dprint.dev/kjanat/tombi-0.1.1.wasm"
 	],
 }
