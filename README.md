@@ -20,13 +20,13 @@
 </a>
 <a href="https://github.com/kjanat/kp2bw/actions/workflows/integration-vaultwarden.yml?query=branch%3Amaster">
   <img
-    src="https://github.com/kjanat/kp2bw/actions/workflows/integration-vaultwarden.yml/badge.svg?branch=master"
+    src="https://img.shields.io/github/actions/workflow/status/kjanat/kp2bw/integration-vaultwarden.yml?branch=master&logo=github&label=vw%20e2e"
     alt="Vaultwarden CLI compatibility tests"
   >
 </a>
 <a href="https://github.com/kjanat/kp2bw/actions/workflows/integration-bitwarden.yml?query=branch%3Amaster">
   <img
-    src="https://github.com/kjanat/kp2bw/actions/workflows/integration-bitwarden.yml/badge.svg?branch=master"
+    src="https://img.shields.io/github/actions/workflow/status/kjanat/kp2bw/integration-bitwarden.yml?branch=master&logo=github&label=bw%20e2e"
     alt="Bitwarden CLI compatibility tests"
   >
 </a>
