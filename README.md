@@ -156,8 +156,8 @@ After a successful login, `vw status` prints the following; kp2bw unlocks the va
 ```
 
 kp2bw also supports the [Bitwarden CLI]: set `KP2BW_CLI=bw` in your environment or `.env` and run the same three
-commands with `bw`, which keeps its own login. Without an installed CLI, kp2bw runs `npx --yes
-@kjanat/vaultwarden-cli@latest`; use that command in place of `vw` for the login steps.
+commands with `bw`, which keeps its own login. Without an installed CLI, kp2bw runs
+`npx --yes @kjanat/vaultwarden-cli@latest`; use that command in place of `vw` for the login steps.
 
 ## Usage
 

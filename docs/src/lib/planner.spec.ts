@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { PreviewNode } from './planner';
 import {
 	availableTags,
 	bitwardenTree,
@@ -15,7 +16,6 @@ import {
 	sanitizePlannerState,
 	sourceTree,
 } from './planner';
-import type { PreviewNode } from './planner';
 
 // The default is now a personal import (mirrors `kp2bw vault.kdbx` with no -o);
 // org-specific behaviour is exercised from this explicit baseline.
