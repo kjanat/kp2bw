@@ -42,10 +42,10 @@ kp2bw/
 
 ## CONVENTIONS
 
-- Python baseline is `>=3.14` in root package; stubs package intentionally targets `>=3.11`.
+- Python baseline is `>=3.15` in root package; stubs package intentionally targets `>=3.11`.
 - Formatting is **dprint** (config `.dprint.jsonc`) — run `dprint fmt`; never `tombi`/`taplo` or `uv`'s own output for
   TOML. After dependency edits run `uv lock`; type-stub packages go in the `stubs` dependency-group, not loose in `dev`.
-- Ruff runs in preview mode, target `py314`; stubs package has separate Ruff/Pyright config.
+- Ruff runs in preview mode, target `py315`; stubs package has separate Ruff/Pyright config.
 - Intra-package imports are relative (`from .module import X`).
 - Use names without a leading underscore for project modules, helpers and attributes. Preserve Python special methods
   and names required by external APIs, such as argparse hooks and PyKeePass accessors.

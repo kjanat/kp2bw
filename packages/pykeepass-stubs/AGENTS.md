@@ -26,7 +26,7 @@ packages/pykeepass-stubs/
 
 ## CONVENTIONS
 
-- Python baseline here is `>=3.11` (different from runtime package `>=3.14`).
+- Python baseline here is `>=3.11` (different from runtime package `>=3.15`).
 - Ruff/Pyright configs are local to this package; keep root/runtime and stubs settings separate.
 - `py.typed` must remain `partial` for partial-stub semantics.
 - Keep this package type-only; no runtime module logic.
