@@ -50,8 +50,8 @@ kp2bw looks for `vw`, then `bw`, then uses `npx --yes @kjanat/vaultwarden-cli@la
 is available, it stops before prompting for passwords. Install [Vaultwarden CLI] or the [Bitwarden CLI], or install
 Node.js with `npx`, then retry.
 
-`KP2BW_CLI=bw` or `KP2BW_CLI=vw` explicitly selects that installed command and disables automatic fallback. Run `kp2bw
---doctor` to see the selected command and its resolved version.
+`KP2BW_CLI=bw` or `KP2BW_CLI=vw` explicitly selects that installed command and disables automatic fallback. Run
+`kp2bw --doctor` to see the selected command and its resolved version.
 
 ## Login fails with a 404 (self-hosted server too old for your `bw` CLI)
 
@@ -130,8 +130,8 @@ kp2bw starts the selected CLI’s `serve` command on a random localhost port. If
 - Run `kp2bw --doctor` to check which CLI was selected
 - Log in with that same CLI and profile before running kp2bw
 - Ensure no firewall rules block localhost connections
-- Try `vw serve --port 8087 --hostname 127.0.0.1` manually; replace `vw` with `bw` or `npx --yes
-  @kjanat/vaultwarden-cli@latest` to match the selected command
+- Try `vw serve --port 8087 --hostname 127.0.0.1` manually; replace `vw` with `bw` or
+  `npx --yes @kjanat/vaultwarden-cli@latest` to match the selected command
 
 ## Items skipped unexpectedly during org import
 

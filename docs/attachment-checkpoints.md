@@ -13,9 +13,9 @@ The checkpoint records attachment identities, hashes, sizes and verified destina
 checks remote metadata without downloading or uploading attachment bodies. A changed remote revision causes the files to
 be read and checked again. Destination edits remain protected.
 
-New files uploaded with this option receive a stable suffix before the extension, such as `report
-(kp2bw-<transaction-id>).pdf`. This identifies an interrupted upload even when the CLI never returned its attachment ID.
-Existing associated files keep their names. The suffix remains after successful migration.
+New files uploaded with this option receive a stable suffix before the extension, such as
+`report (kp2bw-<transaction-id>).pdf`. This identifies an interrupted upload even when the CLI never returned its
+attachment ID. Existing associated files keep their names. The suffix remains after successful migration.
 
 After an interrupted replacement, kp2bw checks the uploaded bytes and saves their association before removing the old
 copy. It can reuse a completed upload or retry a slot whose body is confirmed missing. Ambiguous files, unreadable files

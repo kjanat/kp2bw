@@ -1,6 +1,6 @@
 # Server image for local snapshot checks; Renovate bumps it (renovate.json).
 # Regenerate the snapshots when this changes -- see tests/AGENTS.md.
-ARG VAULTWARDEN_IMAGE=ghcr.io/dani-garcia/vaultwarden:1.37.4@sha256:efb3cde962015fcc036b2ea625242248611943b27212ebf4392841fb30fad055
+ARG VAULTWARDEN_IMAGE=ghcr.io/dani-garcia/vaultwarden:1.37.5@sha256:4fe17f415f90087377d37c755e0ea3cf189dcc6794e49cdd2a9adbb4937d9e1f
 FROM ${VAULTWARDEN_IMAGE}
 COPY fixtures/vaultwarden-data/db.sqlite3 /data/db.sqlite3
 COPY fixtures/vaultwarden-data/rsa_key.pem /data/rsa_key.pem

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { availableTags, selectedTags } from '#lib/planner.ts';
 	import type { Mapping, PlannerState, RerunMode } from '#lib/planner.ts';
+	import { availableTags, selectedTags } from '#lib/planner.ts';
 	import HelpMark from './HelpMark.svelte';
 
 	type Choice<T extends string> = {
