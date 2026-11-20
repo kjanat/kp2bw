@@ -36,7 +36,7 @@
 	},
 	"catalogs": {
 		"ci": {
-			"@bitwarden/cli": "2026.10.1"
+			"@bitwarden/cli": "2026.11.0"
 		},
 		"actions": {
 			"@actions/github-script": "github:actions/github-script"
