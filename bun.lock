@@ -50,7 +50,7 @@
       "@actions/github-script": "github:actions/github-script",
     },
     "ci": {
-      "@bitwarden/cli": "2026.11.0",
+      "@bitwarden/cli": "2026.11.1",
     },
   },
   "packages": {
@@ -70,7 +70,7 @@
 
     "@asamuzakjp/css-color": ["@asamuzakjp/css-color@3.2.0", "", { "dependencies": { "@csstools/css-calc": "^2.1.3", "@csstools/css-color-parser": "^3.0.9", "@csstools/css-parser-algorithms": "^3.0.4", "@csstools/css-tokenizer": "^3.0.3", "lru-cache": "^10.4.3" } }, "sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw=="],
 
-    "@bitwarden/cli": ["@bitwarden/cli@2026.11.0", "", { "dependencies": { "@koa/multer": "4.0.0", "@koa/router": "15.7.0", "big-integer": "1.6.52", "browser-hrtime": "1.1.8", "chalk": "4.1.2", "commander": "14.0.0", "core-js": "3.50.0", "form-data": "4.0.6", "https-proxy-agent": "9.1.0", "inquirer": "8.2.6", "jsdom": "26.1.0", "jszip": "3.10.1", "koa": "3.1.2", "koa-bodyparser": "4.4.1", "koa-json": "2.0.2", "lowdb": "1.0.0", "lunr": "2.3.9", "multer": "2.4.0", "node-fetch": "2.7.0", "node-forge": "1.4.0", "open": "8.4.2", "papaparse": "5.7.0", "proper-lockfile": "4.1.2", "rxjs": "7.8.1", "semver": "7.7.3", "tldts": "7.4.2", "zxcvbn": "4.4.2" }, "bin": { "bw": "build/bw.js" } }, "sha512-NXyhO6xahQQL4lfdqe/VGPdkhSRfwvvHVRh3LyJqumzdrMVxPEuwU2m7rBVHY8tVw5/bADuT7qUW43xi2yagbw=="],
+    "@bitwarden/cli": ["@bitwarden/cli@2026.11.1", "", { "dependencies": { "@koa/multer": "4.0.0", "@koa/router": "15.7.0", "big-integer": "1.6.52", "browser-hrtime": "1.1.8", "chalk": "4.1.2", "commander": "14.0.0", "core-js": "3.50.0", "form-data": "4.0.6", "https-proxy-agent": "9.1.0", "inquirer": "8.2.6", "jsdom": "26.1.0", "jszip": "3.10.1", "koa": "3.1.2", "koa-bodyparser": "4.4.1", "koa-json": "2.0.2", "lowdb": "1.0.0", "lunr": "2.3.9", "multer": "2.4.0", "node-fetch": "2.7.0", "node-forge": "1.4.0", "open": "8.4.2", "papaparse": "5.7.0", "proper-lockfile": "4.1.2", "rxjs": "7.8.1", "semver": "7.7.3", "tldts": "7.4.2", "zxcvbn": "4.4.2" }, "bin": { "bw": "build/bw.js" } }, "sha512-urXfe+WoQp6U350yQJyYzdxHSY46V/h3Kdo/0fMiW0l6bE5pvg0ufEaugTJD7sgHdtJBeEgGwP6xDHirYrme8w=="],
 
     "@blazediff/core": ["@blazediff/core@1.10.0", "", {}, "sha512-AOQff0zgR7cGsZL+4E7hVkmujoPUpm0J9xzWGWZj5wCjd3gmxESXAPfKyuzs93VdpQNFhHlBhfOjrcZ+XTERtQ=="],
 
