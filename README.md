@@ -221,8 +221,8 @@ kp2bw [-h] [-V] [-k PASSWORD] [-K FILE] [-b PASSWORD] [-o ID]
 
 Configuration precedence is always: CLI flag > environment variable > built-in default.
 
-Bitwarden CLI 2026.11 and later omit supplied native password history when creating items. Use `KP2BW_CLI=vw` to
-import native history, or use `--no-password-history --archive-history` with Bitwarden CLI to preserve it in an attachment.
+Bitwarden CLI 2026.11 and later omit supplied native password history when creating items. Use `KP2BW_CLI=vw` to import
+native history, or use `--no-password-history --archive-history` with Bitwarden CLI to preserve it in an attachment.
 
 ### Organization collections
 
