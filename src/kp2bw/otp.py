@@ -472,7 +472,13 @@ def tray_totp_config(settings: str | None) -> TotpConfig | None:
     digits_text, _, correction_url = tail.partition(";")
     period = positive_decimal(period_text.strip())
     digits = positive_decimal(digits_text.strip())
-    if not separator or correction_url.strip() or period is None or digits is None:
+    if (
+        not separator
+        or correction_url.strip()
+        or period is None
+        or digits is None
+        or not MIN_SPEC_DIGITS <= digits <= MAX_SPEC_DIGITS
+    ):
         return None
     return TotpConfig(digits, period, DEFAULT_ALGORITHM)
 

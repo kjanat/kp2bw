@@ -736,6 +736,7 @@ def assert_legacy_totp_preserves_unconsumed_secrets() -> None:
         "30;S",
         "30;6;https://clock.example",
         "0;6",
+        "30;5",
         "30;12",
         "4294967296;6",
     ):

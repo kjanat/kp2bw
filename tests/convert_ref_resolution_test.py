@@ -1365,6 +1365,7 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
             url="https://target.example",
         )
         target.set_custom_property("large", "f" * 4000)
+        target.set_custom_property("TOTP Secret", "JBSWY3DPEHPK3PXP")
         target.notes = "n" * 8000
         alias = database.add_entry(
             database.root_group,
@@ -1389,11 +1390,18 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
     desired = items["Old large fields"]
     assert not any(field["name"] == "large" for field in desired["fields"])
     assert not desired["notes"]
+    assert desired["login"]["totp"] == "JBSWY3DPEHPK3PXP"
     # Construct the old output independently: inline plaintext fields, then
     # stamp, then merge the alias URI without restamping (the old bug).
     historical = copy.deepcopy(desired)
     historical["notes"] = "n" * 8000
     historical["fields"].append({"name": "large", "value": "f" * 4000, "type": 0})
+    historical["fields"].append({
+        "name": "TOTP Secret",
+        "value": "JBSWY3DPEHPK3PXP",
+        "type": 0,
+    })
+    historical["login"]["totp"] = None
     historical["login"]["uris"] = [{"uri": "https://target.example", "match": None}]
     converter.restamp(historical)
     historical["login"]["uris"].append({"uri": alias.url or "", "match": None})
@@ -1407,6 +1415,10 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
     )
     assert len(client.updated) == 1
     assert not any(field["name"] == "large" for field in client.updated[0]["fields"])
+    assert not any(
+        field["name"] == "TOTP Secret" for field in client.updated[0]["fields"]
+    )
+    assert (client.updated[0].get("login") or {}).get("totp") == "JBSWY3DPEHPK3PXP"
     edited = copy.deepcopy(existing)
     next(field for field in edited["fields"] if field["name"] == "large")["value"] = (
         "manual destination edit"
