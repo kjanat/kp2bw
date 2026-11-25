@@ -3551,6 +3551,12 @@ class Converter:
                     )
                     continue
                 if not matches:
+                    try:
+                        target.validate_item_create(desired)
+                    except BitwardenClientError as exc:
+                        entry.outcome = "blocked"
+                        entry.blockers.append(str(exc))
+                        continue
                     entry.outcome = "create"
                     attachment_organizations[entry.source_id] = desired.get(
                         "organizationId"

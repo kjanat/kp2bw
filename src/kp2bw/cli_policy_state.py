@@ -131,7 +131,10 @@ def parse_policy_state(
             state.get(prefix + "organizations_organizations"), record=True
         )
         policies = objects(state.get(prefix + "policies_policies"), record=True)
-        policies += objects(state.get(prefix + "policies_policiesNew"), record=True)
+        # Bitwarden state migration 87 consolidated both policy records.
+        state_version = state.get("stateVersion")
+        if not isinstance(state_version, int) or state_version < 87:
+            policies += objects(state.get(prefix + "policies_policiesNew"), record=True)
         billing = state.get(prefix + "billing_accountProfile")
         premium = None
         if isinstance(billing, dict):

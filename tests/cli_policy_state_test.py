@@ -84,14 +84,27 @@ def main() -> None:
                 pass
             else:
                 raise AssertionError("Mismatched or stale CLI metadata was accepted")
-    missing = copy.deepcopy(official)
-    del missing["user_user_policies_policies"]
-    try:
-        parse_policy_state(missing, status, synced_after=started)
-    except BitwardenClientError:
-        pass
-    else:
-        raise AssertionError("Missing policies must not become an empty allow list")
+    modern = copy.deepcopy(official)
+    modern["stateVersion"] = 87
+    del modern["user_user_policies_policiesNew"]
+    policy: dict[str, object] = {"id": "policy", "enabled": True}
+    modern["user_user_policies_policies"] = {"policy": policy}
+    assert parse_policy_state(modern, status, synced_after=started).policies == (
+        policy,
+    )
+
+    for state, key in (
+        (official, "user_user_policies_policiesNew"),
+        (modern, "user_user_policies_policies"),
+    ):
+        missing = dict(state)
+        del missing[key]
+        try:
+            parse_policy_state(missing, status, synced_after=started)
+        except BitwardenClientError:
+            pass
+        else:
+            raise AssertionError("Missing policies must not become an empty allow list")
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "data.json"
         path.write_text(json.dumps(official))

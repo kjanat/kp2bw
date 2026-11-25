@@ -11,6 +11,13 @@
 	"customManagers": [
 		{
 			"customType": "regex",
+			"managerFilePatterns": ["/^\\.dprint\\.jsonc$/"],
+			"matchStrings": ["https://plugins\\.dprint\\.dev/kjanat/tombi-(?<currentValue>[^\"/]+)\\.wasm"],
+			"depNameTemplate": "kjanat/dprint-plugin-tombi",
+			"datasourceTemplate": "github-releases"
+		},
+		{
+			"customType": "regex",
 			"description": "Extract the top-level Bun catalogs that the built-in manager does not read.",
 			"managerFilePatterns": ["/^package\\.json$/"],
 			"matchStringsStrategy": "recursive",

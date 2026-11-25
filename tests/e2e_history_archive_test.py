@@ -44,10 +44,15 @@ def history_scenario(
     source_id = str(entry.uuid).replace("-", "").upper()
     history_id = source_file("history", "", 1, "history.json", b"").source_id
     item_id: str | None = None
-    expected_history = [("old password", "2020-02-01T00:00:00.000Z")]
+    supports_creates = client.supports_history_creates()
+    expected_history = (
+        [("old password", "2020-02-01T00:00:00.000Z")] if supports_creates else []
+    )
     archive_env = {"KP2BW_ARCHIVE_HISTORY": "true"}
+    if not supports_creates:
+        archive_env["KP2BW_PASSWORD_HISTORY"] = "false"
 
-    def migrate(*, password_history: bool = True) -> None:
+    def migrate() -> None:
         converter = Converter(
             str(path),
             "test",
@@ -60,7 +65,7 @@ def history_scenario(
             None,
             migrate_metadata=False,
             archive_history=True,
-            migrate_password_history=password_history,
+            migrate_password_history=supports_creates,
         )
         assert converter.convert(client) == 0
 
@@ -92,6 +97,15 @@ def history_scenario(
 
     try:
         if mode == "cli":
+            if not supports_creates:
+                rejected = vault.kp2bw(
+                    *vault.migrate_args(path, "test"),
+                    "--password-history",
+                    expected=1,
+                    env=archive_env,
+                )
+                assert "No item creation was sent" in " ".join(rejected.stderr.split())
+                assert all(item["name"] != entry.title for item in client.list_items())
             vault.migrate(path, "test", env=archive_env)
         else:
             migrate()
@@ -142,7 +156,7 @@ def history_scenario(
                 item for item in exported["items"] if item["id"] == item_id
             )
             assert history_signature(exported_item) == expected_history
-            print("live native history, archive records and export passed")
+            print("live password history, archive records and export passed")
             return
 
         supports_updates = client.supports_history_updates()
@@ -152,7 +166,7 @@ def history_scenario(
             str(path),
             "--no-metadata",
             "-y",
-            expected=0 if supports_updates else 1,
+            expected=0 if supports_updates or not supports_creates else 1,
             env={
                 **archive_env,
                 "KP2BW_KEEPASS_PASSWORD": "test",
@@ -207,11 +221,18 @@ def history_scenario(
             assert read()[0] == updated, (
                 "Empty source history did not settle into a no-op"
             )
-        else:
+        elif supports_creates:
             assert "No item update was sent" in " ".join(result.stderr.split())
             assert read()[0] == updated, (
                 "Unsupported update changed the item or its attachments"
             )
+        else:
+            updated, raw_archive, retained_id = read()
+            archive = json.loads(raw_archive)
+            assert "corrected historical password" in archive["records"][0]["xml"]
+            assert retained_id == original_id and updated != initial
+            migrate()
+            assert read()[0] == updated
 
         assert item_id is not None
         item = vault.fresh().get_item(item_id)
