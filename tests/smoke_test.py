@@ -1,6 +1,8 @@
 import subprocess
 import sys
+import sysconfig
 from importlib.metadata import entry_points, files, version
+from pathlib import Path
 
 
 def assert_distribution_files() -> None:
@@ -44,22 +46,21 @@ def assert_imports() -> None:
 
 
 def assert_cli_help() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "kp2bw", "-h"],
-        check=False,
-        capture_output=True,
-        text=True,
+    script = Path(sysconfig.get_path("scripts")) / (
+        "kp2bw.exe" if sys.platform == "win32" else "kp2bw"
     )
-
-    if result.returncode != 0:
-        raise AssertionError(
-            "`python -m kp2bw -h` failed: "
-            f"exit={result.returncode}, stderr={result.stderr.strip()}"
+    for command in ([str(script)], [sys.executable, "-m", "kp2bw"]):
+        result = subprocess.run(
+            [*command, "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
         )
-
-    help_text = result.stdout.lower()
-    if "usage:" not in help_text:
-        raise AssertionError("CLI help output did not contain a usage section")
+        if result.returncode != 0 or "usage:" not in result.stdout.lower():
+            raise AssertionError(
+                f"{command} --help failed: "
+                f"exit={result.returncode}, stderr={result.stderr.strip()}"
+            )
 
 
 def main() -> None:

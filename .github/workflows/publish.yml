@@ -98,7 +98,10 @@ jobs:
 
   smoke:
     needs: build
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     permissions: { contents: read }
     steps:
@@ -112,6 +115,7 @@ jobs:
           - name: Smoke test wheel
             run: uv run --isolated --no-project --with ./dist/kp2bw-*.whl ./tests/smoke_test.py
           - name: Smoke test source distribution
+            if: runner.os == 'Linux'
             run: uv run --isolated --no-project --with ./dist/kp2bw-*.tar.gz ./tests/smoke_test.py
 
   vaultwarden:
