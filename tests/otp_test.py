@@ -731,9 +731,45 @@ def assert_tray_totp_preserves_settings() -> None:
     assert resolve_otp(None, {"TOTP Seed": B32}, entry_label="Example").totp == B32
 
 
+def assert_legacy_totp_matches_bitwarden_parser() -> None:
+    uri = (
+        f"otpauth://totp/Acme%20Co:alice?secret={B32}&issuer=Acme%20Co"
+        "&algorithm=%53HA256&digits=9&period=60"
+    )
+    result = resolve_otp(None, {"otpauth": uri}, entry_label="Example")
+    assert result.totp is not None
+    assert urlsplit(result.totp).path == "/Acme%20Co:alice"
+    assert otpauth_params(result.totp) == {
+        "secret": B32,
+        "issuer": "Acme Co",
+        "algorithm": "sha256",
+        "digits": "9",
+        "period": "60",
+    }
+
+
+def assert_legacy_steam_format() -> None:
+    tray = resolve_otp(
+        None, {"TOTP Seed": B32, "TOTP Settings": "30;S"}, entry_label="Example"
+    )
+    assert tray.totp == f"steam://{B32}"
+    assert tray.consumed_keys == {"TOTP Seed", "TOTP Settings"}
+    assert not tray.hidden_keys
+    uri = f"otpauth://totp/Steam?secret={B32}&digits=5&period=30&encoder=steam"
+    result = resolve_otp(None, {"otpauth": uri}, entry_label="Example")
+    assert result.totp == tray.totp and result.consumed_keys == {"otpauth"}
+    for unsupported in (
+        uri.replace("period=30", "period=60"),
+        uri.replace("encoder=steam", "encoder=custom"),
+        uri + "&algorithm=sha256",
+    ):
+        result = resolve_otp(None, {"otpauth": unsupported}, entry_label="Example")
+        assert result.totp is None and result.hidden_keys == {"otpauth"}
+
+
 def assert_legacy_totp_preserves_unconsumed_secrets() -> None:
     for settings in (
-        "30;S",
+        "60;S",
         "30;6;https://clock.example",
         "0;6",
         "30;5",
@@ -813,6 +849,8 @@ def main() -> None:
     assert_totp_equivalence_rejects_non_ascii_decimal_syntax()
     assert_legacy_totp_aliases()
     assert_tray_totp_preserves_settings()
+    assert_legacy_totp_matches_bitwarden_parser()
+    assert_legacy_steam_format()
     assert_legacy_totp_preserves_unconsumed_secrets()
     print("otp resolution test passed")
 

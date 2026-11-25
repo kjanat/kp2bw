@@ -40,7 +40,7 @@ import base64
 import binascii
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from urllib.parse import parse_qs, quote, urlencode, urlsplit
+from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlsplit
 
 # ---------------------------------------------------------------------------
 # KeePass OTP custom-field keys — https://keepass.info/help/base/placeholders.html#otp
@@ -80,6 +80,8 @@ DEFAULT_ALGORITHM: str = "SHA1"
 # KeePass spec: default 6, maximum 8 digits.
 MIN_SPEC_DIGITS: int = 6
 MAX_SPEC_DIGITS: int = 8
+# Bitwarden's SDK takes the modulus using a u32 power of ten.
+MAX_BITWARDEN_DIGITS: int = 9
 
 # KeePass "HMAC-SHA-*" → the otpauth token Bitwarden matches (case-insensitively
 # against bare "sha1"/"sha256"/"sha512"; a dashed/prefixed value would silently
@@ -224,6 +226,9 @@ class TotpConfig:
             and self.period == DEFAULT_PERIOD
             and self.algorithm == DEFAULT_ALGORITHM
         )
+
+
+STEAM_SOURCE_CONFIG = TotpConfig(5, DEFAULT_PERIOD, DEFAULT_ALGORITHM)
 
 
 def otpauth_int_parameter(
@@ -471,16 +476,38 @@ def tray_totp_config(settings: str | None) -> TotpConfig | None:
     period_text, separator, tail = settings.partition(";")
     digits_text, _, correction_url = tail.partition(";")
     period = positive_decimal(period_text.strip())
+    if not separator or correction_url.strip() or period is None:
+        return None
+    if digits_text.strip() == "S":
+        return TotpConfig(5, period, "STEAM") if period == DEFAULT_PERIOD else None
     digits = positive_decimal(digits_text.strip())
-    if (
-        not separator
-        or correction_url.strip()
-        or period is None
-        or digits is None
-        or not MIN_SPEC_DIGITS <= digits <= MAX_SPEC_DIGITS
-    ):
+    if digits is None or not MIN_SPEC_DIGITS <= digits <= MAX_SPEC_DIGITS:
         return None
     return TotpConfig(digits, period, DEFAULT_ALGORITHM)
+
+
+def legacy_totp_uri(value: str, secret: str, config: TotpConfig) -> str | None:
+    uri = urlsplit(value)
+    parameters = parse_qsl(uri.query, keep_blank_values=True)
+    encoders = [(key, val) for key, val in parameters if key.lower() == "encoder"]
+    if encoders:
+        # KeePassXC's encoder parameter has no equivalent in an otpauth URI
+        # on Bitwarden. Its Steam URI uses SHA-1, five characters and 30 seconds.
+        if encoders == [("encoder", "steam")] and config == STEAM_SOURCE_CONFIG:
+            return f"steam://{secret}"
+        return None
+    # Normalize code parameters while keeping the source label and issuer.
+    # Bitwarden lowercases the URI before percent-decoding the algorithm.
+    code_parameters = {
+        "secret": secret,
+        "algorithm": config.algorithm.lower(),
+        "digits": str(config.digits),
+        "period": str(config.period),
+    }
+    query = urlencode([
+        (name, code_parameters.get(name, original)) for name, original in parameters
+    ])
+    return uri._replace(query=query).geturl()
 
 
 def legacy_totp_value(
@@ -499,12 +526,15 @@ def legacy_totp_value(
             return None
         config = tray_config
     # Bound numeric values before handing them to Bitwarden's OTP parser.
-    if config.digits > MAX_SPEC_DIGITS or config.period > 2**32 - 1:
+    if config.digits > MAX_BITWARDEN_DIGITS or config.period > 2**32 - 1:
         return None
+    secret = base64.b32encode(raw_secret).rstrip(b"=").decode("ascii")
     if is_uri:
-        return value
+        return legacy_totp_uri(value, secret, config)
+    if config.algorithm == "STEAM":
+        return f"steam://{secret}"
     if config.is_default:
-        return base64.b32encode(raw_secret).rstrip(b"=").decode("ascii")
+        return secret
     return build_otpauth_uri(raw_secret, config, label=entry_label)
 
 
