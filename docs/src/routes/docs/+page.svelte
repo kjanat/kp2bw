@@ -326,17 +326,17 @@
 
 	<div class="docs-layout">
 		<nav aria-label="Documentation sections">
-			<a href={resolve('docs#usage')}>Usage and modes</a>
-			<a href={resolve('docs#preview')}>Read-only preview</a>
-			<a href={resolve('docs#precedence')}>Environment</a>
-			<a href={resolve('docs#source')}>KeePass input</a>
-			<a href={resolve('docs#destination')}>Bitwarden output</a>
-			<a href={resolve('docs#reruns')}>Reruns and updates</a>
-			<a href={resolve('docs#uris')}>URI options</a>
-			<a href={resolve('docs#utilities')}>Utility options</a>
-			<a href={resolve('docs#mapping')}>Folders vs collections</a>
-			<a href={resolve('docs#safety')}>Safety and logs</a>
-			<a href={resolve('docs#examples')}>Examples</a>
+			<a href="#usage">Usage and modes</a>
+			<a href="#preview">Read-only preview</a>
+			<a href="#precedence">Environment</a>
+			<a href="#source">KeePass input</a>
+			<a href="#destination">Bitwarden output</a>
+			<a href="#reruns">Reruns and updates</a>
+			<a href="#uris">URI options</a>
+			<a href="#utilities">Utility options</a>
+			<a href="#mapping">Folders vs collections</a>
+			<a href="#safety">Safety and logs</a>
+			<a href="#examples">Examples</a>
 		</nav>
 
 		<div class="content">

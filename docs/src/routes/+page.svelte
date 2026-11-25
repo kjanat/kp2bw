@@ -3,7 +3,9 @@
 	import PathTable from '#lib/components/PathTable.svelte';
 	import PlannerOptions from '#lib/components/PlannerOptions.svelte';
 	import TreeLegend from '#lib/components/TreeLegend.svelte';
-	import type { PlannerState } from '#lib/planner.ts';
+	import { resolve } from '$app/paths';
+	import { onMount } from 'svelte';
+	import type { PlannerState } from '../lib/planner.ts';
 	import {
 		commandDisplayForState,
 		commandInputError,
@@ -14,9 +16,7 @@
 		previewForState,
 		sanitizePlannerState,
 		statsForState,
-	} from '#lib/planner.ts';
-	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
+	} from '../lib/planner.ts';
 
 	let planner: PlannerState = $state({ ...defaultPlannerState });
 

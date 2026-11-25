@@ -56,7 +56,7 @@
 		<p>{inputError}</p>
 	{:else}
 		<p>
-			Start with the <a href={resolve('docs#preview')}>read-only preview</a>.
+			Start with the <a href={resolve('/docs#preview')}>read-only preview</a>.
 			Migration writes to Bitwarden. Options omitted from either command can
 			come from your environment or <code>.env</code>.
 		</p>
