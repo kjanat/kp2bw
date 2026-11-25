@@ -20,6 +20,9 @@ This module resolves the KeePass fields into the lossless Bitwarden form:
   under the field names of the scheme that is not active) is kept as a *hidden*
   custom field rather than silently dropped.
 
+Legacy KeePass TOTP aliases and KeeTrayTOTP fields are fallback inputs in
+KeePass mode. Unconsumed legacy seeds are kept as hidden fields.
+
 Pleasant Password Server exports the same configuration under its own names
 (``TOTPSecret`` / ``TOTPDigits`` / ``TOTPPeriod``, secret always Base32 and
 algorithm always SHA-1).  ``resolve_otp(..., totp_pps=True)`` reads those field
@@ -59,6 +62,10 @@ KP_TOTP_ALGORITHM_KEY: str = "TimeOtp-Algorithm"
 PPS_TOTP_SECRET_KEY: str = "TOTPSecret"
 PPS_TOTP_DIGITS_KEY: str = "TOTPDigits"
 PPS_TOTP_PERIOD_KEY: str = "TOTPPeriod"
+
+TRAY_TOTP_SEED_KEY = "TOTP Seed"
+TRAY_TOTP_SETTINGS_KEY = "TOTP Settings"
+LEGACY_TOTP_KEYS = ("otpauth", "otpauth-secret", "TOTP Secret", TRAY_TOTP_SEED_KEY)
 
 KP_HOTP_SECRET_UTF8_KEY: str = "HmacOtp-Secret"
 KP_HOTP_SECRET_HEX_KEY: str = "HmacOtp-Secret-Hex"
@@ -185,11 +192,14 @@ HOTP_SECRET_KEYS: frozenset[str] = frozenset({
     KP_HOTP_SECRET_BASE64_KEY,
 })
 
-# Every OTP *secret* field this module recognises: both TOTP schemes plus HOTP.
+# Every OTP secret field this module recognises, including legacy aliases.
 # Any of these that is not consumed into ``login.totp`` is sensitive and must be
 # stored as a hidden custom field, whichever scheme is active.
 ALL_SECRET_KEYS: frozenset[str] = (
-    KEEPASS_TOTP_SCHEME.secret_keys | PPS_TOTP_SCHEME.secret_keys | HOTP_SECRET_KEYS
+    KEEPASS_TOTP_SCHEME.secret_keys
+    | PPS_TOTP_SCHEME.secret_keys
+    | HOTP_SECRET_KEYS
+    | frozenset(LEGACY_TOTP_KEYS)
 )
 
 
@@ -223,6 +233,10 @@ def otpauth_int_parameter(
     value = parameters.get(key)
     if value is None:
         return default
+    return positive_decimal(value)
+
+
+def positive_decimal(value: str) -> int | None:
     if not value.isascii() or not value.isdecimal():
         return None
     try:
@@ -451,6 +465,67 @@ def build_otpauth_uri(raw_secret: bytes, config: TotpConfig, *, label: str) -> s
     return f"otpauth://totp/{safe_label}?{params}"
 
 
+def tray_totp_config(settings: str | None) -> TotpConfig | None:
+    if settings is None:
+        return TotpConfig(DEFAULT_DIGITS, DEFAULT_PERIOD, DEFAULT_ALGORITHM)
+    period_text, separator, tail = settings.partition(";")
+    digits_text, _, correction_url = tail.partition(";")
+    period = positive_decimal(period_text.strip())
+    digits = positive_decimal(digits_text.strip())
+    if not separator or correction_url.strip() or period is None or digits is None:
+        return None
+    return TotpConfig(digits, period, DEFAULT_ALGORITHM)
+
+
+def legacy_totp_value(
+    key: str, value: str, settings: str | None, *, entry_label: str
+) -> str | None:
+    identity = totp_identity(value)
+    if identity is None:
+        return None
+    raw_secret, config = identity
+    is_uri = value.lower().startswith("otpauth://")
+    if key == TRAY_TOTP_SEED_KEY:
+        if is_uri:
+            return None
+        tray_config = tray_totp_config(settings)
+        if tray_config is None:
+            return None
+        config = tray_config
+    # Bound numeric values before handing them to Bitwarden's OTP parser.
+    if config.digits > MAX_SPEC_DIGITS or config.period > 2**32 - 1:
+        return None
+    if is_uri:
+        return value
+    if config.is_default:
+        return base64.b32encode(raw_secret).rstrip(b"=").decode("ascii")
+    return build_otpauth_uri(raw_secret, config, label=entry_label)
+
+
+def resolve_legacy_totp(
+    properties: Mapping[str, str | None], *, entry_label: str, warnings: list[str]
+) -> OtpMigration:
+    hidden = present_secret_keys(properties, ALL_SECRET_KEYS)
+    settings = nonempty(properties, TRAY_TOTP_SETTINGS_KEY)
+    for key in LEGACY_TOTP_KEYS:
+        value = nonempty(properties, key)
+        if value is None:
+            continue
+        totp = legacy_totp_value(key, value, settings, entry_label=entry_label)
+        if totp is None:
+            warnings.append(
+                f"Could not migrate legacy TOTP field {key!r}; kept as a hidden custom field."
+            )
+            continue
+        consumed = (
+            frozenset({key, TRAY_TOTP_SETTINGS_KEY})
+            if key == TRAY_TOTP_SEED_KEY and settings is not None
+            else frozenset({key})
+        )
+        return OtpMigration(totp, consumed, hidden - consumed, tuple(warnings))
+    return OtpMigration(None, frozenset(), hidden, tuple(warnings))
+
+
 def resolve_otp(
     otp_uri: str | None,
     custom_properties: Mapping[str, str | None],
@@ -462,7 +537,7 @@ def resolve_otp(
 
     *otp_uri* is ``entry.otp`` (the KeePassXC ``otp`` field, already an
     ``otpauth://`` URI when set). *custom_properties* contains the entry's raw
-    ``TimeOtp-*`` / ``HmacOtp-*`` strings. *entry_label* labels any
+    OTP strings, including legacy aliases. *entry_label* labels any
     generated ``otpauth://`` URI.
 
     *totp_pps* reads TOTP from Pleasant Password Server's ``TOTPSecret`` /
@@ -500,6 +575,10 @@ def resolve_otp(
 
     found = find_totp_secret(custom_properties, scheme)
     if found is None:
+        if not totp_pps:
+            return resolve_legacy_totp(
+                custom_properties, entry_label=entry_label, warnings=warnings
+            )
         return OtpMigration(
             totp=None,
             consumed_keys=frozenset(),

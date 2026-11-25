@@ -703,6 +703,71 @@ def assert_totp_equivalence_rejects_non_ascii_decimal_syntax() -> None:
             )
 
 
+def assert_legacy_totp_aliases() -> None:
+    uri = f"otpauth://totp/Acme?secret={B32}&issuer=Acme&digits=8&period=60"
+    for key in ("otpauth", "otpauth-secret", "TOTP Secret"):
+        for value, expected in ((uri, uri), (B32.lower(), B32)):
+            result = resolve_otp(
+                None,
+                {key: value, "TOTP Settings": "unrelated"},
+                entry_label="Example",
+            )
+            assert result.totp == expected
+            assert result.consumed_keys == {key}
+            assert not result.hidden_keys and not result.warnings
+
+
+def assert_tray_totp_preserves_settings() -> None:
+    properties = {"TOTP Seed": B32, "TOTP Settings": "60;8;"}
+    result = resolve_otp(None, properties, entry_label="Example")
+    assert result.totp is not None
+    assert otpauth_params(result.totp) == {
+        "secret": B32,
+        "digits": "8",
+        "period": "60",
+        "algorithm": "SHA1",
+    }
+    assert result.consumed_keys == set(properties) and not result.hidden_keys
+    assert resolve_otp(None, {"TOTP Seed": B32}, entry_label="Example").totp == B32
+
+
+def assert_legacy_totp_preserves_unconsumed_secrets() -> None:
+    for settings in (
+        "30;S",
+        "30;6;https://clock.example",
+        "0;6",
+        "30;12",
+        "4294967296;6",
+    ):
+        result = resolve_otp(
+            None, {"TOTP Seed": B32, "TOTP Settings": settings}, entry_label="Example"
+        )
+        assert result.totp is None and not result.consumed_keys
+        assert result.hidden_keys == {"TOTP Seed"} and result.warnings
+
+    alias = "otpauth-secret"
+    other_seed = "GEZDGNBVGY3TQOJQ"
+    properties = {"otpauth": "invalid secret!", alias: other_seed, "TOTP Secret": B32}
+    result = resolve_otp(None, properties, entry_label="Example")
+    assert result.totp == other_seed and result.consumed_keys == {alias}
+    assert result.hidden_keys == {"otpauth", "TOTP Secret"}
+    assert result.warnings and all(
+        "invalid secret!" not in msg for msg in result.warnings
+    )
+
+    for entry_otp, native in (
+        (B32, {}),
+        (None, {KP_TOTP_SECRET_BASE32_KEY: B32}),
+    ):
+        result = resolve_otp(
+            entry_otp, {**native, alias: other_seed}, entry_label="Example"
+        )
+        assert result.totp == B32 and result.hidden_keys == {alias}
+
+    pps = resolve_otp(None, {alias: other_seed}, entry_label="Example", totp_pps=True)
+    assert pps.totp is None and pps.hidden_keys == {alias}
+
+
 def main() -> None:
     assert_b32_anchor()
     assert_fallback_base32_default()
@@ -745,6 +810,9 @@ def main() -> None:
     assert_totp_equivalence_rejects_noncanonical_algorithm()
     assert_totp_equivalence_rejects_duplicate_parameters()
     assert_totp_equivalence_rejects_non_ascii_decimal_syntax()
+    assert_legacy_totp_aliases()
+    assert_tray_totp_preserves_settings()
+    assert_legacy_totp_preserves_unconsumed_secrets()
     print("otp resolution test passed")
 
 
