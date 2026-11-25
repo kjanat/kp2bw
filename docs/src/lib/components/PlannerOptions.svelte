@@ -30,7 +30,7 @@
 		{ value: 'safe', label: 'Mostly Bitwarden, sync forgotten KeePass edits' },
 		{
 			value: 'no-update',
-			label: 'Testing migrations; keep the existing Vaultwarden DB',
+			label: 'Import missing items without updating existing content',
 		},
 	];
 
@@ -75,10 +75,7 @@
 			<span>Tags</span>
 			<input bind:value={state.tagInput} spellcheck="false">
 		</label>
-		<div
-			class="tag-chips"
-			aria-label="Available tags in the mock KeePass vault"
-		>
+		<div class="tag-chips" role="group" aria-label="Tags from the sample vault">
 			{#each tagChoices as tag (tag)}
 				<button
 					type="button"
@@ -121,7 +118,7 @@
 				Pleasant Password Server TOTP fields
 			</label>
 			<HelpMark
-				text="Reads TOTPSecret/TOTPDigits/TOTPPeriod instead of the KeePass TimeOtp-* fields (kp2bw --totp-pps). Leave off for a database written by KeePass or KeePassXC."
+				text="Enable for Pleasant Password Server exports. KeePass, KeePassXC and legacy KeePass fields are handled by default."
 				href="docs#totp-pps"
 			/>
 		</div>

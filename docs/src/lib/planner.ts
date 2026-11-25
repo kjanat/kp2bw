@@ -107,8 +107,8 @@ export type MigrationPreview = {
 
 export const previewFixture: PreviewFixture = previewFixtureData;
 export const samples = previewFixture.keepass;
-export const sampleOrganizationId = '00000000-0000-0000-0000-000000000000';
-export const sampleCollectionId = '11111111-1111-1111-1111-111111111111';
+const sampleOrganizationId = '00000000-0000-0000-0000-000000000000';
+const sampleCollectionId = '11111111-1111-1111-1111-111111111111';
 
 export const defaultPlannerState: PlannerState = {
 	// Personal vault is the CLI's no-flag default (org needs an explicit -o), so
@@ -117,8 +117,8 @@ export const defaultPlannerState: PlannerState = {
 	mapping: 'personal-folders',
 	keepassFile: 'vault.kdbx',
 	keyFile: '',
-	organizationId: sampleOrganizationId,
-	collectionId: sampleCollectionId,
+	organizationId: '',
+	collectionId: '',
 	tagInput: '',
 	// CLI defaults: expired entries ARE imported; Recycle Bin is NOT.
 	includeExpired: true,
@@ -167,14 +167,16 @@ export function sanitizePlannerState(raw: unknown): PlannerState {
 	const mappingPool = destination === 'org' ? ORG_MAPPINGS : PERSONAL_MAPPINGS;
 	const mapping = mappingPool.find((candidate) => candidate === record['mapping'])
 		?? (destination === 'org' ? 'org-nested' : 'personal-folders');
+	const organizationId = str('organizationId', base.organizationId);
+	const collectionId = str('collectionId', base.collectionId);
 
 	return {
 		destination,
 		mapping,
 		keepassFile: str('keepassFile', base.keepassFile),
 		keyFile: str('keyFile', base.keyFile),
-		organizationId: str('organizationId', base.organizationId),
-		collectionId: str('collectionId', base.collectionId),
+		organizationId: organizationId === sampleOrganizationId ? '' : organizationId,
+		collectionId: collectionId === sampleCollectionId ? '' : collectionId,
 		tagInput: str('tagInput', base.tagInput),
 		includeExpired: bool('includeExpired', base.includeExpired),
 		includeRecycleBin: bool('includeRecycleBin', base.includeRecycleBin),
@@ -355,7 +357,7 @@ export function bitwardenTree(
 		if (state.mapping === 'org-fixed') {
 			return treeWithItems(
 				plan,
-				() => state.collectionId || sampleCollectionId,
+				() => state.collectionId.trim() || 'Selected collection',
 				'collection',
 				targetLeafState,
 			);
@@ -405,15 +407,31 @@ export function bitwardenTree(
 
 /** Logical command pieces — each a flag with its own values — so the command
  *  can be joined on one line or wrapped onto backslash-continued lines. */
-export function commandSegmentsForState(state: PlannerState): string[] {
-	const segments: string[] = ['kp2bw'];
+export function commandInputError(state: PlannerState): string | undefined {
+	if (!state.keepassFile.trim()) return 'Enter a KeePass database path to generate commands.';
+	if (state.destination === 'org' && !state.organizationId.trim()) {
+		return 'Enter your Bitwarden organization ID to generate commands.';
+	}
+	if (state.mapping === 'org-fixed' && !state.collectionId.trim()) {
+		return 'Enter your Bitwarden collection ID to generate commands.';
+	}
+}
+
+export function commandSegmentsForState(state: PlannerState, preview = false): string[] {
+	const tags = selectedTags(state.tagInput);
+	// argparse treats hyphen-prefixed tags as options. kp2bw accepts the same
+	// list through this environment variable, ahead of any .env value.
+	const tagsInEnv = tags.some((tag) => tag.startsWith('-'));
+	const segments = [tagsInEnv ? `KP2BW_IMPORT_TAGS=${quoteArg(tags.join(','))} kp2bw` : 'kp2bw'];
+
+	if (preview) segments.push('--preview=text');
 
 	if (state.destination === 'org') {
-		segments.push(`-o ${quoteArg(state.organizationId || sampleOrganizationId)}`);
+		segments.push(flagWithValue('bitwarden-org', 'o', state.organizationId.trim()));
 		if (state.mapping === 'org-nested') segments.push('-c nested');
 		if (state.mapping === 'org-top') segments.push('-c auto');
 		if (state.mapping === 'org-fixed') {
-			segments.push(`-c ${quoteArg(state.collectionId || sampleCollectionId)}`);
+			segments.push(flagWithValue('bitwarden-collection', 'c', state.collectionId.trim()));
 		}
 		// kp2bw >=3.7.0 defaults personal folders off whenever -o is set, so
 		// --no-folder is redundant for every org mapping. --folder opts back in
@@ -425,9 +443,8 @@ export function commandSegmentsForState(state: PlannerState): string[] {
 		segments.push('--no-folder');
 	}
 
-	if (state.keyFile.trim()) segments.push(`-K ${quoteArg(state.keyFile.trim())}`);
-	const tags = selectedTags(state.tagInput);
-	if (tags.length > 0) segments.push(`-t ${tags.map(quoteArg).join(' ')}`);
+	if (state.keyFile) segments.push(flagWithValue('keepass-keyfile', 'K', state.keyFile));
+	if (tags.length > 0 && !tagsInEnv) segments.push(`-t ${tags.map(quoteArg).join(' ')}`);
 	if (!state.includeExpired) segments.push('--skip-expired');
 	if (state.includeRecycleBin) segments.push('--include-recycle-bin');
 	if (state.totpPps) segments.push('--totp-pps');
@@ -437,8 +454,8 @@ export function commandSegmentsForState(state: PlannerState): string[] {
 	// -t is nargs="+" and the KeePass FILE is an optional positional, so with no
 	// flag between them argparse swallows the filename as a tag. End option
 	// parsing with -- so the file is always read as the database path.
-	const file = quoteArg(state.keepassFile || 'passwords.kdbx');
-	segments.push(tags.length > 0 ? `-- ${file}` : file);
+	const file = quoteArg(state.keepassFile);
+	segments.push((tags.length > 0 && !tagsInEnv) || state.keepassFile.startsWith('-') ? `-- ${file}` : file);
 
 	return segments;
 }
@@ -453,8 +470,8 @@ const COMMAND_WRAP_COLUMNS = 76;
 
 /** The command as shown in the Run box: one line when short, otherwise each
  *  segment on its own bash line-continuation (`\`). Still copy-paste runnable. */
-export function commandDisplayForState(state: PlannerState): string {
-	const segments = commandSegmentsForState(state);
+export function commandDisplayForState(state: PlannerState, preview = false): string {
+	const segments = commandSegmentsForState(state, preview);
 	const oneLine = segments.join(' ');
 	if (oneLine.length <= COMMAND_WRAP_COLUMNS) return oneLine;
 	return segments.join(' \\\n  ');
@@ -633,5 +650,10 @@ function branchKindForPart(
 
 function quoteArg(value: string): string {
 	if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) return value;
-	return '"' + value.replaceAll('\\', '\\\\').replaceAll('"', '\\"') + '"';
+	return "'" + value.replaceAll("'", "'\\''") + "'";
+}
+
+function flagWithValue(long: string, short: string, value: string): string {
+	const arg = quoteArg(value);
+	return value.startsWith('-') ? `--${long}=${arg}` : `-${short} ${arg}`;
 }

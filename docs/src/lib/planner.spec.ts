@@ -6,13 +6,13 @@ import {
 	buildMigrationPlan,
 	commandDisplayForState,
 	commandForState,
+	commandInputError,
 	defaultPlannerState,
 	deltaForItem,
 	envFileForState,
 	filteredItems,
 	previewFixture,
 	previewForState,
-	sampleOrganizationId,
 	sanitizePlannerState,
 	sourceTree,
 } from './planner';
@@ -23,6 +23,7 @@ const orgState = {
 	...defaultPlannerState,
 	destination: 'org' as const,
 	mapping: 'org-nested' as const,
+	organizationId: '22222222-2222-2222-2222-222222222222',
 };
 
 describe('planner', () => {
@@ -73,17 +74,54 @@ describe('planner', () => {
 		};
 
 		expect(commandForState(state)).toBe(
-			'kp2bw -o 22222222-2222-2222-2222-222222222222 -c nested "source vault.kdbx"',
+			"kp2bw -o 22222222-2222-2222-2222-222222222222 -c nested 'source vault.kdbx'",
 		);
 	});
 
-	it('escapes backslashes before quotes in command arguments', () => {
+	it('quotes shell characters and preserves literal paths', () => {
 		expect(
 			commandForState({
 				...defaultPlannerState,
-				keepassFile: String.raw`C:\Vaults\test\".kdbx`,
+				keepassFile: String.raw`Team's $Vault\main".kdbx`,
+				keyFile: ' local key ',
 			}),
-		).toBe(String.raw`kp2bw "C:\\Vaults\\test\\\".kdbx"`);
+		).toBe(String.raw`kp2bw -K ' local key ' 'Team'\''s $Vault\main".kdbx'`);
+	});
+
+	it('keeps dash-prefixed paths from being parsed as options', () => {
+		expect(commandForState({
+			...defaultPlannerState,
+			keepassFile: '-vault.kdbx',
+			keyFile: '-key file',
+		})).toBe("kp2bw --keepass-keyfile='-key file' -- -vault.kdbx");
+	});
+
+	it('passes tags with leading dashes through the CLI tag environment variable', () => {
+		expect(commandForState({
+			...defaultPlannerState,
+			tagInput: 'finance, -archived team',
+		})).toBe("KP2BW_IMPORT_TAGS='finance,-archived team' kp2bw vault.kdbx");
+	});
+
+	it('generates a source-only preview with the same migration options', () => {
+		const state = { ...defaultPlannerState, tagInput: 'ops', includeExpired: false };
+		expect(commandDisplayForState(state, true)).toBe(
+			'kp2bw --preview=text -t ops --skip-expired -- vault.kdbx',
+		);
+	});
+
+	it('requires source and applicable destination IDs before showing commands', () => {
+		expect(commandInputError({ ...defaultPlannerState, keepassFile: '' })).toContain('database path');
+		const previousSample = sanitizePlannerState({
+			...orgState,
+			mapping: 'org-fixed',
+			organizationId: '00000000-0000-0000-0000-000000000000',
+			collectionId: '11111111-1111-1111-1111-111111111111',
+		});
+		expect(commandInputError(previousSample)).toContain('organization ID');
+		expect(commandInputError({ ...previousSample, organizationId: orgState.organizationId }))
+			.toContain('collection ID');
+		expect(commandInputError(orgState)).toBeUndefined();
 	});
 
 	it('maps top-level organization collections', () => {
@@ -94,7 +132,7 @@ describe('planner', () => {
 		};
 
 		expect(commandForState(state)).toBe(
-			`kp2bw -o ${sampleOrganizationId} -c auto source.kdbx`,
+			`kp2bw -o ${orgState.organizationId} -c auto source.kdbx`,
 		);
 		const collections = bitwardenTree(state)[1]?.children[0]?.children;
 		expect(collections?.find((node) => node.name === 'Work')?.count).toBe(4);

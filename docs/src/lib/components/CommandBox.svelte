@@ -1,20 +1,29 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { onDestroy } from 'svelte';
 
-	let { command, envFile }: { command: string; envFile: string } = $props();
+	let { command, previewCommand, envFile, inputError }: {
+		command: string;
+		previewCommand: string;
+		envFile: string;
+		inputError?: string;
+	} = $props();
 
-	// Which box was last copied, so each Copy button flips to "Copied" on its own.
-	let copied = $state<'env' | 'run' | null>(null);
+	let copied = $state<string | null>(null);
+	let copyFailed = $state(false);
 	let resetTimer: ReturnType<typeof setTimeout> | undefined;
 
-	async function copy(which: 'env' | 'run', text: string): Promise<void> {
+	async function copy(label: string, text: string): Promise<void> {
+		copyFailed = false;
+		copied = null;
+		clearTimeout(resetTimer);
 		try {
 			await navigator.clipboard.writeText(text);
 		} catch {
+			copyFailed = true;
 			return;
 		}
-		copied = which;
-		if (resetTimer !== undefined) clearTimeout(resetTimer);
+		copied = label;
 		resetTimer = setTimeout(() => {
 			copied = null;
 		}, 1200);
@@ -25,34 +34,51 @@
 	});
 </script>
 
-<section class="command">
-	<h2>Command</h2>
-	<div class="blocks">
-		<div class="block">
-			<div class="block-head">
-				<h3>.env</h3>
-				<button type="button" onclick={() => copy('env', envFile)}>
-					{copied === 'env' ? 'Copied' : 'Copy'}
-				</button>
-			</div>
-			<pre><code>{envFile}</code></pre>
+{#snippet codeBlock(label: string, text: string)}
+	<div class="block">
+		<div class="block-head">
+			<h3>{label}</h3>
+			<button
+				type="button"
+				aria-label={`Copy ${label}`}
+				onclick={() => copy(label, text)}
+			>
+				{copied === label ? 'Copied' : 'Copy'}
+			</button>
 		</div>
-		<div class="block">
-			<div class="block-head">
-				<h3>Run</h3>
-				<button type="button" onclick={() => copy('run', command)}>
-					{copied === 'run' ? 'Copied' : 'Copy'}
-				</button>
-			</div>
-			<pre><code>{command}</code></pre>
-		</div>
+		<pre><code>{text}</code></pre>
 	</div>
-	<span class="sr-only" aria-live="polite" aria-atomic="true">
+{/snippet}
+
+<section class="command">
+	<h2>Commands for Bash or Zsh</h2>
+	{#if inputError}
+		<p>{inputError}</p>
+	{:else}
+		<p>
+			Start with the <a href={resolve('docs#preview')}>read-only preview</a>.
+			Migration writes to Bitwarden. Options omitted from either command can
+			come from your environment or <code>.env</code>.
+		</p>
+		<div class="blocks">
+			{@render codeBlock('Preview locally', previewCommand)}
+			{@render codeBlock('Run migration', command)}
+		</div>
+	{/if}
+	<details>
+		<summary>Optional password configuration</summary>
+		<p>
+			kp2bw prompts for passwords by default. To use a local <code>.env</code>
+			file, replace these placeholders.
+		</p>
+		{@render codeBlock('.env', envFile)}
+	</details>
+	<span class:sr-only={!copyFailed} role="status">
 		{
-			copied === 'env'
-			? '.env copied to clipboard'
-			: copied === 'run'
-			? 'Command copied to clipboard'
+			copyFailed
+			? 'Clipboard unavailable. Select the text to copy it.'
+			: copied
+			? `${copied} copied to clipboard`
 			: ''
 		}
 	</span>
@@ -84,8 +110,26 @@
 
 	.blocks {
 		display: grid;
-		grid-template-columns: minmax(220px, 0.7fr) minmax(260px, 1.3fr);
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 10px;
+	}
+
+	p {
+		margin: 0 0 8px;
+		color: var(--text-dim);
+	}
+
+	a {
+		color: var(--accent);
+	}
+
+	details {
+		margin-top: 12px;
+	}
+
+	summary {
+		margin-bottom: 8px;
+		cursor: pointer;
 	}
 
 	.block-head {
