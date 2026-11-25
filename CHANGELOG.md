@@ -8,6 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-11-25
+
 ### Changed
 
 - kp2bw requires Python 3.15 or newer.
@@ -751,7 +753,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 [`jampe/kp2bw@c9ef571eabd345db94751f7dec845e49756e9d47`](https://github.com/jampe/kp2bw/commit/c9ef571eabd345db94751f7dec845e49756e9d47)
 
-[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.10.1...HEAD
+[Unreleased]: https://github.com/kjanat/kp2bw/compare/v3.11.0...HEAD
+[3.11.0]: https://github.com/kjanat/kp2bw/compare/v3.10.1...v3.11.0
 [3.10.1]: https://github.com/kjanat/kp2bw/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/kjanat/kp2bw/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/kjanat/kp2bw/compare/v3.8.4...v3.9.0
