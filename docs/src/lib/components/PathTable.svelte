@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { PreviewNode } from '#lib/planner.ts';
 	import { SvelteSet } from 'svelte/reactivity';
+	import type { PreviewNode } from '../planner.ts';
 
 	type Tree = {
 		title: string;

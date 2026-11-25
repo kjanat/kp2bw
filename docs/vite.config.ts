@@ -4,11 +4,17 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 
+const basePath = process.argv.includes('dev') ? '' : (process.env.BASE_PATH ?? '');
+if (basePath && !basePath.startsWith('/')) {
+	throw new Error('BASE_PATH must start with /');
+}
+const base = basePath ? `/${basePath.slice(1)}` as const : '';
+
 export default defineConfig({
 	plugins: [sveltekit({
 		compilerOptions: { runes: true },
 		adapter: adapter({ fallback: '404.html' }),
-		paths: { base: process.argv.includes('dev') ? '' : (process.env.BASE_PATH ?? '') },
+		paths: { base },
 		preprocess: vitePreprocess(),
 	})],
 	test: {

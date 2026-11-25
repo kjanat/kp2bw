@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { Mapping, PlannerState, RerunMode } from '#lib/planner.ts';
-	import { availableTags, selectedTags } from '#lib/planner.ts';
+	import type { Mapping, PlannerState, RerunMode } from '../planner.ts';
+	import { availableTags, selectedTags } from '../planner.ts';
 	import HelpMark from './HelpMark.svelte';
 
 	type Choice<T extends string> = {
@@ -30,7 +30,7 @@
 		{ value: 'safe', label: 'Mostly Bitwarden, sync forgotten KeePass edits' },
 		{
 			value: 'no-update',
-			label: 'Testing migrations; keep the existing Vaultwarden DB',
+			label: 'Import missing items without updating existing content',
 		},
 	];
 
@@ -75,10 +75,7 @@
 			<span>Tags</span>
 			<input bind:value={state.tagInput} spellcheck="false">
 		</label>
-		<div
-			class="tag-chips"
-			aria-label="Available tags in the mock KeePass vault"
-		>
+		<div class="tag-chips" role="group" aria-label="Tags from the sample vault">
 			{#each tagChoices as tag (tag)}
 				<button
 					type="button"
@@ -112,7 +109,7 @@
 		<legend>
 			OTP source <HelpMark
 				text="Pleasant Password Server exports TOTP under its own field names."
-				href="docs#totp-pps"
+				href="/docs#totp-pps"
 			/>
 		</legend>
 		<div class="choice">
@@ -121,8 +118,8 @@
 				Pleasant Password Server TOTP fields
 			</label>
 			<HelpMark
-				text="Reads TOTPSecret/TOTPDigits/TOTPPeriod instead of the KeePass TimeOtp-* fields (kp2bw --totp-pps). Leave off for a database written by KeePass or KeePassXC."
-				href="docs#totp-pps"
+				text="Enable for Pleasant Password Server exports. KeePass, KeePassXC and legacy KeePass fields are handled by default."
+				href="/docs#totp-pps"
 			/>
 		</div>
 	</fieldset>
@@ -131,7 +128,7 @@
 		<legend>
 			Running again <HelpMark
 				text="Pick the situation you are in when this command hits an existing Bitwarden vault."
-				href="docs#reruns"
+				href="/docs#reruns"
 			/>
 		</legend>
 		{#each reruns as rerun (rerun.value)}
@@ -153,7 +150,7 @@
 		<legend>
 			Target <HelpMark
 				text="Choose whether items land in an organization or your personal vault."
-				href="docs#target-vault"
+				href="/docs#target-vault"
 			/>
 		</legend>
 		<label>
@@ -187,7 +184,7 @@
 		<legend>
 			Tree mapping <HelpMark
 				text="Controls how KeePass groups become Bitwarden placement."
-				href="docs#mapping"
+				href="/docs#mapping"
 			/>
 		</legend>
 		{#each mappings as mapping (mapping.value)}
@@ -213,7 +210,7 @@
 			</label>
 			<HelpMark
 				text="Org imports skip personal folders by default. Tick this to also build the KeePass folder tree in your personal vault (kp2bw --folder)."
-				href="docs#personal-folders-under-org"
+				href="/docs#personal-folders-under-org"
 			/>
 		</div>
 	{/if}

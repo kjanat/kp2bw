@@ -1,17 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 
-	type DocsHref = 'docs' | `docs#${string}`;
+	type DocsHref = '/docs' | `/docs#${string}`;
 
-	let { text, href = 'docs' }: { text: string; href?: DocsHref } = $props();
+	let { text, href = '/docs' }: { text: string; href?: DocsHref } = $props();
 </script>
 
 <span class="wrap">
-	<button class="help" type="button" aria-label={text}>?</button>
-	<span class="popover" role="tooltip">
-		{text}
-		<a href={resolve(href)}>continue reading</a>
-	</span>
+	<a class="help" href={resolve(href)} aria-label={text}>?</a>
+	<span class="popover" aria-hidden="true">{text}</span>
 </span>
 
 <style>
@@ -31,7 +28,7 @@
 		font: inherit;
 		font-size: var(--fs-small);
 		line-height: 1;
-		cursor: help;
+		text-decoration: none;
 	}
 
 	.help:hover,
@@ -55,22 +52,11 @@
 		line-height: 1.4;
 		text-transform: none;
 		box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+		pointer-events: none;
 	}
 
 	.wrap:hover .popover,
 	.wrap:focus-within .popover {
-		display: grid;
-		gap: 8px;
-	}
-
-	a {
-		width: fit-content;
-		color: var(--accent);
-		text-decoration: none;
-	}
-
-	a:hover,
-	a:focus-visible {
-		text-decoration: underline;
+		display: block;
 	}
 </style>

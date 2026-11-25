@@ -3,9 +3,12 @@
 	import PathTable from '#lib/components/PathTable.svelte';
 	import PlannerOptions from '#lib/components/PlannerOptions.svelte';
 	import TreeLegend from '#lib/components/TreeLegend.svelte';
-	import type { PlannerState } from '#lib/planner.ts';
+	import { resolve } from '$app/paths';
+	import { onMount } from 'svelte';
+	import type { PlannerState } from '../lib/planner.ts';
 	import {
 		commandDisplayForState,
+		commandInputError,
 		defaultPlannerState,
 		envFileForState,
 		PLANNER_STORAGE_KEY,
@@ -13,16 +16,14 @@
 		previewForState,
 		sanitizePlannerState,
 		statsForState,
-	} from '#lib/planner.ts';
-	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
+	} from '../lib/planner.ts';
 
 	let planner: PlannerState = $state({ ...defaultPlannerState });
 
 	// Persist selections so a refresh keeps them. Load on mount (client only, so
 	// SSR still renders defaults and hydration matches); the guard stops the save
 	// effect from clobbering stored state with defaults before that load runs.
-	let hydrated = false;
+	let hydrated = $state(false);
 
 	onMount(() => {
 		try {
@@ -36,8 +37,9 @@
 		hydrated = true;
 	});
 
+	const snapshot = $derived(JSON.stringify(planner));
+
 	$effect(() => {
-		const snapshot = JSON.stringify(planner);
 		if (!hydrated) return;
 		try {
 			localStorage.setItem(PLANNER_STORAGE_KEY, snapshot);
@@ -47,8 +49,12 @@
 	});
 
 	let preview = $derived(previewForState(planner));
-	let command = $derived(commandDisplayForState(planner));
-	let envFile = $derived(envFileForState());
+	let inputError = $derived(commandInputError(planner));
+	let command = $derived(inputError ? '' : commandDisplayForState(planner));
+	let previewCommand = $derived(
+		inputError ? '' : commandDisplayForState(planner, true),
+	);
+	const envFile = envFileForState();
 	let stats = $derived(preview.stats);
 	// KeePass-side totals (the whole source vault, pre-filter) so the Bitwarden
 	// result count has something to be measured against.
@@ -78,20 +84,24 @@
 		</div>
 		<div class="header-actions">
 			<button type="button" class="reset" onclick={resetPlanner}>Reset</button>
-			<a href={resolve('/docs')}>details</a>
+			<a href={resolve('/docs')}>CLI reference</a>
 		</div>
 	</header>
 
+	<p class="sample-note">
+		The trees and counts use a sample vault. Generate a read-only preview
+		command below to inspect your own database locally.
+	</p>
 	<div class="summary">
 		<span class="tally">
-			<span class="tally-label">KeePass</span>
+			<span class="tally-label">KeePass sample</span>
 			{sourceStats.items} items · {sourceStats.attachments} attachments · {
 				sourceStats.passkeys
 			} passkey{sourceStats.passkeys === 1 ? '' : 's'}
 		</span>
 		<TreeLegend />
 		<span class="tally tally-right">
-			<span class="tally-label">Bitwarden</span>
+			<span class="tally-label">Included in example</span>
 			{stats.items} items · {stats.attachments} attachments · {stats.passkeys}
 			passkey{stats.passkeys === 1 ? '' : 's'}
 		</span>
@@ -99,12 +109,12 @@
 
 	<div class="grid">
 		<PathTable
-			keepass={{ title: 'Tree in KeePass', nodes: preview.keepass }}
-			bitwarden={{ title: 'Tree in Bitwarden', nodes: preview.bitwarden }}
+			keepass={{ title: 'Example KeePass tree', nodes: preview.keepass }}
+			bitwarden={{ title: 'Example Bitwarden tree', nodes: preview.bitwarden }}
 		/>
 		<PlannerOptions state={planner} />
 
-		<CommandBox {command} {envFile} />
+		<CommandBox {command} {previewCommand} {envFile} {inputError} />
 	</div>
 </main>
 
@@ -124,11 +134,17 @@
 		padding-bottom: 12px;
 	}
 
-	p {
+	header p {
 		margin: 0 0 4px;
 		color: var(--text-muted);
 		font-size: var(--fs-label);
 		text-transform: uppercase;
+	}
+
+	.sample-note {
+		max-width: 1320px;
+		margin: 0 auto 12px;
+		color: var(--text-dim);
 	}
 
 	h1 {

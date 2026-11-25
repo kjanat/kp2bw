@@ -1,20 +1,37 @@
 name: Pages
-on: { push: { branches: [master], paths: [docs/**, .github/workflows/pages.yml, bun.lock, package.json] }, workflow_dispatch: {} }
-permissions: { contents: read, pages: write, id-token: write }
-concurrency: { group: pages, cancel-in-progress: false }
+on:
+  push:
+    branches: [master]
+    paths: &paths [docs/**, .github/workflows/pages.yml, .tool-versions, bun.lock, package.json]
+  pull_request:
+    paths: *paths
+  workflow_dispatch: {}
+permissions: { contents: read }
+concurrency: { group: "pages-${{ github.ref }}", cancel-in-progress: false }
 jobs:
-  pages:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env: { BASE_PATH: "/${{ github.event.repository.name }}" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with: { install_args: bun nodejs }
+      - run: bun install --frozen-lockfile
+      - run: bun --filter docs check
+      - run: bun --filter docs test:unit run
+      - run: bun --filter docs build
+      - if: github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with: { path: docs/build }
+
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    needs: build
+    permissions: { pages: write, id-token: write }
     environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: kjanat/runner@ca62fac18b7e708f50cff0356cec65c39d6a0e9f # master
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
-        with: { install_args: bun }
-      - run: runner i --pm bun docs:build
-        env: { BASE_PATH: "/${{ github.event.repository.name }}" }
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
-        with: { path: docs/build }
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

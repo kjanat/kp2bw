@@ -3,16 +3,20 @@
 
 	type Option = {
 		flag: string;
+		id?: string;
 		env?: string;
 		default: string;
 		detail: string;
+		guide?: { file: string; title: string };
 	};
+
+	const guideRoot = 'https://github.com/kjanat/kp2bw/blob/HEAD/docs/';
 
 	const sourceOptions: Option[] = [
 		{
 			flag: 'FILE',
 			env: 'KP2BW_KEEPASS_FILE',
-			default: 'Required for migration and KeePass URI reports',
+			default: 'Required for migration, preview, and KeePass URI reports',
 			detail:
 				'Path to a KeePass 2.x database. May be omitted only in modes that do not read KeePass.',
 		},
@@ -50,11 +54,12 @@
 			detail: 'Include or exclude entries under the KeePass Recycle Bin.',
 		},
 		{
+			id: 'totp-pps',
 			flag: '--totp-pps, --no-totp-pps',
 			env: 'KP2BW_TOTP_PPS',
 			default: 'Off',
 			detail:
-				'Read Pleasant Password Server TOTPSecret/TOTPDigits/TOTPPeriod fields instead of KeePass TimeOtp-* fields. PPS secrets use Base32 and SHA-1.',
+				'Use the Pleasant Password Server TOTPSecret/TOTPDigits/TOTPPeriod fields in place of the KeePass fallback. PPS secrets use Base32 and SHA-1.',
 		},
 	];
 
@@ -64,9 +69,10 @@
 			env: 'KP2BW_BITWARDEN_PASSWORD',
 			default: 'Prompt securely',
 			detail:
-				'Password used to unlock Bitwarden. Not needed for a KeePass-only URI report.',
+				'Password used to unlock Bitwarden. A source-only migration preview or KeePass URI report only needs the KeePass credentials.',
 		},
 		{
+			id: 'target-vault',
 			flag: '-o, --bitwarden-org ID',
 			env: 'KP2BW_BITWARDEN_ORG',
 			default: 'Personal vault',
@@ -125,7 +131,52 @@
 			env: 'KP2BW_PASSWORD_HISTORY',
 			default: 'On',
 			detail:
-				'Import up to five distinct previous passwords. Preserve unrelated destination history and verify writes. Native history updates require the Vaultwarden CLI through a bw adapter.',
+				'Import up to five distinct previous passwords. Use the Vaultwarden CLI (KP2BW_CLI=vw) for native history updates and for creating items with history when using Bitwarden CLI 2026.11 or later. With Bitwarden CLI, use --no-password-history --archive-history to preserve the full history as an attachment.',
+		},
+		{
+			flag: '--map-templates, --no-map-templates',
+			env: 'KP2BW_MAP_TEMPLATES',
+			default: 'Off',
+			detail:
+				'Map recognized KeePass entry templates to native cards, identities, or secure notes. Other templates keep their normal login conversion.',
+			guide: {
+				file: 'template-mapping.md',
+				title: 'KeePass template mapping guide',
+			},
+		},
+		{
+			flag: '--template-map JSON',
+			env: 'KP2BW_TEMPLATE_MAP',
+			default: 'None',
+			detail:
+				'Path to a JSON file containing template UUID and field mappings. Requires --map-templates.',
+			guide: {
+				file: 'template-mapping.md#custom-or-translated-templates',
+				title: 'Custom template mappings',
+			},
+		},
+		{
+			flag: '--ssh-map JSON',
+			env: 'KP2BW_SSH_MAP',
+			default: 'None',
+			detail:
+				'Path to a JSON file with explicit group, template, or field mappings for native SSH key items.',
+			guide: { file: 'ssh-mapping.md', title: 'SSH key mapping guide' },
+		},
+	];
+
+	const previewOptions: Option[] = [
+		{
+			flag: '--preview [text|json]',
+			default: 'Off. With no format, output is text.',
+			detail:
+				'Read the KeePass database and report what would migrate. Field values and attachment contents are excluded. A blocking problem returns a nonzero exit status.',
+		},
+		{
+			flag: '--preview-target',
+			default: 'Off',
+			detail:
+				'With --preview, also unlock and inspect the destination vault to report changes and conflicts. KeePass and Bitwarden data remain read-only.',
 		},
 	];
 
@@ -135,14 +186,14 @@
 			env: 'CLI only',
 			default: 'All eligible entries',
 			detail:
-				'Sync one KeePass entry UUID or one existing Bitwarden item UUID. Both selectors must agree when combined. Unknown, ambiguous or excluded IDs fail before writes. Selection intersects import and destination filters, and never adopts by title. REF dependencies are read without being written; the selected alias becomes a separate item. Combine with --force-update to overwrite only this item; --no-update still preserves its content and attachments. Migration only.',
+				'Select one KeePass entry or an existing Bitwarden item by UUID for migration or preview. Both selectors must agree when combined. Selection honors the import and destination filters. REF dependencies can be read, but only the selected entry is migrated or reported. In preview mode, --item-id requires --preview-target.',
 		},
 		{
 			flag: '--update, --no-update',
 			env: 'KP2BW_UPDATE',
 			default: 'On',
 			detail:
-				'Sync changed KeePass content and missing or changed attachments onto matched items. --no-update leaves existing content untouched; collection membership may still sync.',
+				'Sync changed KeePass content and missing or changed attachments onto matched items. --no-update preserves matched item content and attachments. Missing items can still be created and collection membership can still sync.',
 		},
 		{
 			flag: '--force-update',
@@ -150,6 +201,17 @@
 			default: 'Off',
 			detail:
 				'Overwrite matched items even when their KP2BW_SYNC stamp shows a later Bitwarden edit. Use only when KeePass must win.',
+		},
+		{
+			flag: '--checkpoint PATH',
+			env: 'KP2BW_CHECKPOINT',
+			default: 'None',
+			detail:
+				'Save verified attachment mappings for resumable uploads. Reuse the same checkpoint with the same source and destination. A target preview reads the checkpoint and simulates recovery in memory.',
+			guide: {
+				file: 'attachment-checkpoints.md',
+				title: 'Attachment checkpoint guide',
+			},
 		},
 	];
 
@@ -197,7 +259,7 @@
 			env: 'KP2BW_STRIP_IDS',
 			default: 'Off',
 			detail:
-				'Bitwarden-only finalization: remove KP2BW_ID and KP2BW_SYNC from in-scope migrated items, then exit. Irreversible and makes future reruns unreliable; confirms first.',
+				'Remove migration tracking fields from in-scope Bitwarden items, including item identity, attachment associations, and password-history tracking. This makes future reruns unreliable. Prompts for confirmation.',
 		},
 		{
 			flag: '-y, --yes',
@@ -257,24 +319,24 @@
 		<p>command reference</p>
 		<h1>kp2bw CLI reference</h1>
 		<span>
-			Every invocation mode, option, environment mapping, and default. Use
-			<code>kp2bw --help</code> for a quick reminder; use this page for
-			semantics.
+			Migration modes, CLI options, and their defaults. Run <code>kp2bw
+				--help</code> to check the options for your installed version.
 		</span>
 	</header>
 
 	<div class="docs-layout">
 		<nav aria-label="Documentation sections">
-			<a href={resolve('docs#usage')}>Usage and modes</a>
-			<a href={resolve('docs#precedence')}>Environment</a>
-			<a href={resolve('docs#source')}>KeePass input</a>
-			<a href={resolve('docs#destination')}>Bitwarden output</a>
-			<a href={resolve('docs#reruns')}>Reruns and updates</a>
-			<a href={resolve('docs#uris')}>URI options</a>
-			<a href={resolve('docs#utilities')}>Utility options</a>
-			<a href={resolve('docs#mapping')}>Folders vs collections</a>
-			<a href={resolve('docs#safety')}>Safety and logs</a>
-			<a href={resolve('docs#examples')}>Examples</a>
+			<a href="#usage">Usage and modes</a>
+			<a href="#preview">Read-only preview</a>
+			<a href="#precedence">Environment</a>
+			<a href="#source">KeePass input</a>
+			<a href="#destination">Bitwarden output</a>
+			<a href="#reruns">Reruns and updates</a>
+			<a href="#uris">URI options</a>
+			<a href="#utilities">Utility options</a>
+			<a href="#mapping">Folders vs collections</a>
+			<a href="#safety">Safety and logs</a>
+			<a href="#examples">Examples</a>
 		</nav>
 
 		<div class="content">
@@ -285,9 +347,9 @@
 python -m kp2bw [OPTIONS] FILE</code></pre>
 				<p>
 					The default mode reads <code>FILE</code>, unlocks Bitwarden through
-					<code>bw serve</code>, then migrates entries, attachments, OTP and
-					passkey fields, tags, expiry, and login URIs. The two invocation forms
-					are equivalent.
+					the selected CLI's <code>serve</code> endpoint, then migrates entries,
+					attachments, OTP and passkey fields, tags, expiry, and login URIs. The
+					two invocation forms are equivalent.
 				</p>
 				<div class="fact-grid">
 					<article>
@@ -295,6 +357,13 @@ python -m kp2bw [OPTIONS] FILE</code></pre>
 						<p>
 							<code>kp2bw [options] FILE</code>. Reads KeePass and writes
 							Bitwarden.
+						</p>
+					</article>
+					<article>
+						<h3>Migration preview</h3>
+						<p>
+							<code>kp2bw --preview=text FILE</code>. Reads KeePass and reports
+							the conversion without writing to Bitwarden.
 						</p>
 					</article>
 					<article>
@@ -355,7 +424,7 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 			{#snippet optionList(options: Option[])}
 				<div class="option-list">
 					{#each options as option (option.flag)}
-						<article>
+						<article id={option.id}>
 							<h3><code>{option.flag}</code></h3>
 							<dl>
 								{#if option.env}
@@ -370,15 +439,48 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 								</div>
 							</dl>
 							<p>{option.detail}</p>
+							{#if option.guide}
+								<p>
+									<a href={guideRoot + option.guide.file}>{
+										option.guide.title
+									}</a>
+								</p>
+							{/if}
 						</article>
 					{/each}
 				</div>
 			{/snippet}
 
+			<section id="preview">
+				<h2>Preview a migration</h2>
+				<p>
+					A source-only preview works without the Bitwarden CLI or a Bitwarden
+					password. Reuse the same migration options to inspect entry types,
+					omissions, attachments, and blockers.
+				</p>
+				<pre><code>kp2bw --preview=text vault.kdbx
+kp2bw --preview=json --preview-target vault.kdbx</code></pre>
+				{@render optionList(previewOptions)}
+				<p>
+					<a href={guideRoot + 'migration-preview.md'}
+					>Migration preview guide</a>
+				</p>
+			</section>
+
 			<section id="source">
 				<p class="eyebrow">KeePass input and filters</p>
 				<h2>Choose the source and included entries</h2>
 				{@render optionList(sourceOptions)}
+				<h3>Legacy KeePass TOTP</h3>
+				<p>
+					Starting in kp2bw 3.11.1, the default KeePass mode can also convert
+					legacy
+					<code>otpauth</code>, <code>otpauth-secret</code>, <code>TOTP
+						Secret</code>, and paired <code>TOTP Seed</code> and <code>TOTP
+						Settings</code> fields. Native OTP data takes priority. Supported
+					Steam settings become Bitwarden Steam codes. Unsupported settings such
+					as time correction leave the seed in a hidden custom field.
+				</p>
 			</section>
 
 			<section id="destination">
@@ -513,12 +615,15 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 				<h2>Know what writes, what prompts, and where logs go</h2>
 				<ul>
 					<li>
-						Install and configure <code>bw</code>; for self-hosting run <code>bw
-							config server URL</code>, then log in once with <code>bw
-							login</code>. kp2bw uses unlock.
+						Install and log in to <code>vw</code> or <code>bw</code> before
+						migration. For self-hosting, set the server on that CLI before
+						logging in.
+						<code>KP2BW_CLI</code> accepts <code>auto</code> (default), <code
+						>vw</code>, or <code>bw</code>.
 					</li>
 					<li>
-						<code>--report-uris</code> is read-only. <code>--migrate-uris</code>
+						<code>--preview</code> and <code>--report-uris</code> are read-only.
+						<code>--migrate-uris</code>
 						mutates matching fields. <code>--strip-ids</code> is irreversible.
 					</li>
 					<li>
@@ -552,8 +657,12 @@ KP2BW_BITWARDEN_PASSWORD=&lt;bitwarden password&gt;</code></pre>
 			<section id="examples">
 				<p class="eyebrow">examples</p>
 				<h2>Common complete commands</h2>
+				<p>Replace the example organization IDs with your own.</p>
 				<pre><code># Personal vault; preserve KeePass groups as personal folders
 kp2bw vault.kdbx
+
+# Preview the conversion before migrating
+kp2bw --preview=text vault.kdbx
 
 # Organization; preserve full group paths as nested collections
 kp2bw -o 00000000-0000-0000-0000-000000000000 -c nested vault.kdbx
