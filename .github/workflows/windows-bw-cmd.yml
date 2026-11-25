@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with: { persist-credentials: false }
-      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           ${{ insert }}: ${{ fromJSON(format('{{install_args:''{0}'' /* npm ships inside nodejs */,}} that is all, folks', join(fromJSON(format('[''nodejs'',''uv'',''python'',{0},] // bun, if you insist', toJSON(matrix.tools))), ' '))) }}
       - run: mise ls --installed

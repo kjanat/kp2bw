@@ -1,0 +1,21 @@
+#:schema https://cdn.jsdelivr.net/gh/kjanat/kjanat@master/schemas/dprint.schema.json
+
+extends  = "https://cdn.jsdelivr.net/gh/kjanat/kjanat@master/configs/dprint.remote.json"
+excludes = ["**/*fixtures*/**", "**/*snapshots*/**", ".github/release-notes/**"]
+
+[dockerfile]
+associations = ["!*.ts"]
+
+[markdown]
+lineWidth = 120
+textWrap  = "always"
+
+[ruff]
+preview = true
+
+[[ruff.overrides]]
+files   = ["packages/**"]
+preview = false
+
+[exec]
+playWithFire = true
