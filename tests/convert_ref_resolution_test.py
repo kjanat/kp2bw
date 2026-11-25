@@ -1089,6 +1089,42 @@ def assert_conflicting_ref_totp_creates_separate_item() -> None:
         raise AssertionError("REF TOTP conflict warning exposed a secret")
 
 
+def assert_legacy_ref_totp_merges_or_stays_separate() -> None:
+    target_seed = "JBSWY3DPEHPK3PXP"
+    other_seed = "GEZDGNBVGY3TQOJQ"
+
+    def build(kp: PyKeePass, root: Group) -> None:
+        target = kp.add_entry(root, "Legacy target", "user", "password")
+        target.otp = f"otpauth://totp/Target?secret={target_seed}&period=60&digits=8"
+        password_ref = f"{{REF:P@I:{target.uuid.hex.upper()}}}"
+
+        compatible = kp.add_entry(
+            root, "Tray alias", "user", password_ref, url="https://compatible.example"
+        )
+        compatible.set_custom_property("TOTP Seed", target_seed)
+        compatible.set_custom_property("TOTP Settings", "60;8")
+
+        conflict = kp.add_entry(root, "Conflicting legacy alias", "user", password_ref)
+        conflict.set_custom_property("otpauth-secret", other_seed)
+        invalid = kp.add_entry(root, "Invalid legacy alias", "user", password_ref)
+        invalid.set_custom_property("TOTP Secret", "invalid secret!")
+
+    items, _, warnings = run_chain_resolution(build)
+    assert set(items) == {
+        "Legacy target",
+        "Conflicting legacy alias",
+        "Invalid legacy alias",
+    }
+    assert (
+        items["Legacy target"]["login"]["uris"][0]["uri"]
+        == "https://compatible.example"
+    )
+    assert items["Conflicting legacy alias"]["login"]["totp"] == other_seed
+    field = find_field(items["Invalid legacy alias"], "TOTP Secret")
+    assert field["type"] == 1 and field["value"] == "invalid secret!"
+    assert any("conflicts with its referent" in warning for warning in warnings)
+
+
 def assert_conflicting_ref_totp_is_order_independent() -> None:
     """Stable UUID order decides conflicting sibling aliases, not XML order."""
     target_uuid = UUID("30000000-0000-0000-0000-000000000000")
@@ -1329,6 +1365,7 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
             url="https://target.example",
         )
         target.set_custom_property("large", "f" * 4000)
+        target.set_custom_property("TOTP Secret", "JBSWY3DPEHPK3PXP")
         target.notes = "n" * 8000
         alias = database.add_entry(
             database.root_group,
@@ -1353,11 +1390,18 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
     desired = items["Old large fields"]
     assert not any(field["name"] == "large" for field in desired["fields"])
     assert not desired["notes"]
+    assert desired["login"]["totp"] == "JBSWY3DPEHPK3PXP"
     # Construct the old output independently: inline plaintext fields, then
     # stamp, then merge the alias URI without restamping (the old bug).
     historical = copy.deepcopy(desired)
     historical["notes"] = "n" * 8000
     historical["fields"].append({"name": "large", "value": "f" * 4000, "type": 0})
+    historical["fields"].append({
+        "name": "TOTP Secret",
+        "value": "JBSWY3DPEHPK3PXP",
+        "type": 0,
+    })
+    historical["login"]["totp"] = None
     historical["login"]["uris"] = [{"uri": "https://target.example", "match": None}]
     converter.restamp(historical)
     historical["login"]["uris"].append({"uri": alias.url or "", "match": None})
@@ -1371,6 +1415,10 @@ def assert_legacy_ref_keeps_historical_field_routing() -> None:
     )
     assert len(client.updated) == 1
     assert not any(field["name"] == "large" for field in client.updated[0]["fields"])
+    assert not any(
+        field["name"] == "TOTP Secret" for field in client.updated[0]["fields"]
+    )
+    assert (client.updated[0].get("login") or {}).get("totp") == "JBSWY3DPEHPK3PXP"
     edited = copy.deepcopy(existing)
     next(field for field in edited["fields"] if field["name"] == "large")["value"] = (
         "manual destination edit"
@@ -1471,6 +1519,7 @@ def main() -> None:
     assert_pre_fix_ref_output_upgrades_without_force()
     assert_pre_fix_ref_output_upgrades_without_force(with_metadata=True)
     assert_conflicting_ref_totp_creates_separate_item()
+    assert_legacy_ref_totp_merges_or_stays_separate()
     assert_conflicting_ref_totp_is_order_independent()
     assert_legacy_ref_shadow_preserves_historical_order()
     assert_legacy_ref_chain_preserves_historical_destination()

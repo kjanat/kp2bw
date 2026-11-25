@@ -342,6 +342,19 @@ def create_ref_snapshot(path: Path, password: str) -> None:
         password_ref,
     )
     distinct.set_custom_property("private-code", "protected-value", protect=True)
+
+    legacy = kp.add_entry(kp.root_group, "Legacy OTP URI", "ref-user", "ref-password")
+    legacy.set_custom_property(
+        "otpauth",
+        "otpauth://totp/Legacy?secret=GEZDGNBVGY3TQOJQ&algorithm=%53HA256&digits=7",
+    )
+    tray = kp.add_entry(kp.root_group, "Legacy Tray OTP", "ref-user", "ref-password")
+    tray.set_custom_property("TOTP Seed", "JBSWY3DPEHPK3PXP")
+    tray.set_custom_property("TOTP Settings", "60;8")
+    tray.set_custom_property("TOTP Secret", "invalid secret!")
+    steam = kp.add_entry(kp.root_group, "Legacy Steam OTP", "ref-user", "ref-password")
+    steam.set_custom_property("TOTP Seed", "JBSWY3DPEHPK3PXP")
+    steam.set_custom_property("TOTP Settings", "30;S")
     kp.save()
 
 
@@ -471,7 +484,13 @@ def assert_live_ref_items(
     items = vault.items()
     if any(item.get("name") == "REF TOTP Alias" for item in items):
         raise AssertionError("credential-matching REF alias was imported separately")
-    listed = vault.named("REF Target", "REF Distinct")
+    listed = vault.named(
+        "REF Target",
+        "REF Distinct",
+        "Legacy OTP URI",
+        "Legacy Tray OTP",
+        "Legacy Steam OTP",
+    )
 
     def full_item(name: str) -> BwItemResponse:
         return vault.client.get_item(listed[name]["id"])
@@ -500,8 +519,28 @@ def assert_live_ref_items(
     if private_types != [1]:
         raise AssertionError("REF Distinct protected field is not hidden")
 
+    legacy = full_item("Legacy OTP URI")
+    assert (legacy.get("login") or {}).get("totp") == (
+        "otpauth://totp/Legacy?secret=GEZDGNBVGY3TQOJQ&algorithm=sha256&digits=7"
+    )
+    assert not any(field["name"] == "otpauth" for field in legacy.get("fields") or [])
+    tray = full_item("Legacy Tray OTP")
+    assert (tray.get("login") or {}).get("totp") == (
+        "otpauth://totp/Legacy%20Tray%20OTP?secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=8&period=60"
+    )
+    tray_fields = {field["name"]: field for field in tray.get("fields") or []}
+    assert {"TOTP Seed", "TOTP Settings"}.isdisjoint(tray_fields)
+    assert tray_fields["TOTP Secret"]["type"] == 1
+    assert tray_fields["TOTP Secret"]["value"] == "invalid secret!"
+    steam = full_item("Legacy Steam OTP")
+    assert (steam.get("login") or {}).get("totp") == "steam://JBSWY3DPEHPK3PXP"
+    assert {"TOTP Seed", "TOTP Settings"}.isdisjoint(
+        field["name"] for field in steam.get("fields") or []
+    )
+
     versions: dict[str, tuple[str, str]] = {}
-    for name, item in (("REF Target", target), ("REF Distinct", distinct)):
+    for item in (target, distinct, legacy, tray, steam):
+        name = item["name"]
         revision = item.get("revisionDate")
         if not revision:
             raise TypeError(f"live item {name!r} has no revision")

@@ -108,7 +108,13 @@ from .item_sync import (
     sync_stamp_generation,
     sync_stamp_matches,
 )
-from .otp import OtpMigration, is_otp_secret_field, resolve_otp, totp_values_equivalent
+from .otp import (
+    LEGACY_TOTP_KEYS,
+    OtpMigration,
+    is_otp_secret_field,
+    resolve_otp,
+    totp_values_equivalent,
+)
 from .preview import (
     MigrationPreview,
     PreviewEntry,
@@ -737,13 +743,12 @@ class Converter:
         custom_protected = custom_property_data.protected_keys
         fido2_credentials = self.build_fido2_credentials(entry, custom_props)
 
-        # Resolve TOTP/HOTP from entry.otp or the KeePass TimeOtp-*/HmacOtp-*
-        # custom fields.  This decides which fields are folded into login.totp
-        # (and must be dropped here) and which secrets must remain hidden.
+        # Resolve which OTP fields to fold into login.totp or retain as hidden.
+        label = entry.title or "_untitled"
         otp_result = resolve_otp(
             entry.otp,
             custom_props,
-            entry_label=entry.title or "_untitled",
+            entry_label=label,
             totp_pps=self.totp_pps,
         )
         for warning in otp_result.warnings:
@@ -837,19 +842,35 @@ class Converter:
         # that representation independently of today's encrypted field budgets
         # so an old REF merge's stale stamp remains recognizable without force.
         historical = copy.deepcopy(bw_item_object)
+        historical_otp = otp_result
+        if any(key in custom_props for key in LEGACY_TOTP_KEYS):
+            # Old imports treated these aliases as ordinary custom fields.
+            historical_otp = resolve_otp(
+                entry.otp,
+                {
+                    key: value
+                    for key, value in custom_props.items()
+                    if key not in LEGACY_TOTP_KEYS
+                },
+                entry_label=label,
+                totp_pps=self.totp_pps,
+            )
+        historical["login"]["totp"] = historical_otp.totp
         historical["notes"] = expired_prefix + (
             entry.notes if entry.notes and len(entry.notes) <= 10000 else ""
         )
         historical_fields: dict[str, FieldSpec] = {
             key: (
                 value,
-                1 if key in otp_result.hidden_keys or key in custom_protected else 0,
+                1
+                if key in historical_otp.hidden_keys or key in custom_protected
+                else 0,
             )
             for key, value in custom_props.items()
             if value is not None
             and len(value) <= 10000
             and not key.startswith(KPEX_PASSKEY_PREFIX)
-            and key not in otp_result.consumed_keys
+            and key not in historical_otp.consumed_keys
             and not is_url_attribute_key(key)
         }
         if (
@@ -895,7 +916,6 @@ class Converter:
         #     a readable .txt file); we warn instead of dropping it silently.
         #     Opting in via ``--include-oversize-secrets`` offloads it too.
         # The value itself is never logged in either branch.
-        label = entry.title or "_untitled"
         attachments: list[AttachmentItem] = generated_attachments
         if self.archive_history:
             archive = history_archive(entry, entry._kp.binaries if entry._kp else [])
