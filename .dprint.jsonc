@@ -8,6 +8,6 @@
 	},
 	"ruff": { "preview": true, "overrides": [{ "files": ["packages/**"], "preview": false }] },
 	"plugins": [
-		"https://plugins.dprint.dev/kjanat/tombi-0.1.1.wasm"
+		"https://plugins.dprint.dev/kjanat/tombi-0.2.1.wasm"
 	],
 }

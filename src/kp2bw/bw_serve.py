@@ -1688,6 +1688,7 @@ class BitwardenServeClient:
 
     def create_item(self, item: BwItemCreate) -> str:
         """Create a single vault item via HTTP and return its ID."""
+        self.validate_item_create(item)
         body = dict(item)
         if item["type"] != 1:
             body.pop("login", None)
@@ -1697,6 +1698,27 @@ class BitwardenServeClient:
             self.verify_history(item_id, item)
         logger.log(VERBOSE, f"Created item {item.get('name', '?')!r} → {item_id}")
         return item_id
+
+    def supports_history_creates(self) -> bool:
+        """The official CLI's SDK create request omits supplied password history."""
+        version = re.match(r"(\d+)\.(\d+)\.", self.cli_version)
+        return (
+            version is None
+            or tuple(map(int, version.groups())) < (2026, 11)
+            or self.supports_history_updates()
+        )
+
+    def validate_item_create(self, item: BwItemCreate) -> None:
+        if (
+            item.get("passwordHistory")
+            and has_managed_history(item)
+            and not self.supports_history_creates()
+        ):
+            raise BitwardenClientError(
+                "The active Bitwarden CLI cannot create items with native password history. "
+                "Use KP2BW_CLI=vw or --no-password-history --archive-history. "
+                "No item creation was sent."
+            )
 
     def get_item(self, item_id: str) -> BwItemResponse:
         """Fetch a single full item (including ``attachments``) via ``GET``.
